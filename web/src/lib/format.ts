@@ -1,4 +1,8 @@
 // Formatting helpers — client-side only, never invents server data.
+// One locale everywhere, explicit on every Intl call — a bare .toLocaleDateString()
+// silently follows the visitor's OS/browser locale, which reads as broken when it
+// lands next to this file's hand-formatted "3d ago" strings (round-5 design QA).
+const LOCALE = "en-US";
 
 export function daysSince(iso: string): number {
   const ms = Date.now() - new Date(iso).getTime();
@@ -37,10 +41,26 @@ export function formatActiveTime(seconds: number): string {
 }
 
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso).toLocaleDateString(LOCALE, {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+/** "Sep 3" — no year. The one shared shape for card/list dates sitewide. */
+export function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
+}
+
+/** "Sep 3, 2026, 6:45 PM" — for "last seen" / device-token style timestamps. */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(LOCALE, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 

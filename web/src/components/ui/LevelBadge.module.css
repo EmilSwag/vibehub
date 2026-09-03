@@ -1,77 +1,57 @@
-.wrap {
+.wrap-md {
   position: relative;
+  display: flex;
   flex: none;
 }
 
-.plate {
+.wrap-sm {
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+}
+
+.trigger {
+  all: unset;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  width: 84px;
-  padding: 14px 10px 12px;
-  border: 1px solid var(--vh-border);
-  border-radius: var(--vh-radius-lg);
-  background: var(--vh-surface);
-  box-shadow: var(--vh-shadow-card);
+  gap: 3px;
   cursor: pointer;
-  transition: border-color var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out);
+  border-radius: var(--vh-radius-md);
+  transition: opacity var(--dur-press) var(--ease-out);
 }
-.plate:hover {
-  border-color: var(--vh-border-strong);
+.trigger:hover,
+.triggerOpen {
+  opacity: 0.75;
 }
-.plate:active {
-  transform: scale(0.98);
-}
-.plateOpen {
-  border-color: var(--vh-text);
+.trigger:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
 }
 
-.num {
-  font-family: var(--vh-font-serif);
-  font-weight: 500;
-  font-size: 30px;
-  line-height: 1;
+.ring-md {
+  width: 76px;
+  height: 76px;
   color: var(--vh-text);
 }
 
-.label {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+.ring-sm {
+  width: 26px;
+  height: 26px;
+  color: var(--vh-text-dim);
+}
+
+.arc {
+  color: var(--vh-text);
+  transition: stroke-dashoffset var(--dur-reveal) var(--ease-out);
+}
+
+.caption {
   font-family: var(--vh-font-sans);
   font-size: 10.5px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   color: var(--vh-text-faint);
-}
-
-.chev {
-  transition: transform var(--dur-press) var(--ease-out);
-}
-.chevOpen {
-  transform: rotate(180deg);
-}
-
-.barTrack {
-  display: block;
-  width: 100%;
-  height: 3px;
-  margin-top: 6px;
-  border-radius: var(--vh-radius-pill);
-  background: var(--vh-surface-2);
-  overflow: hidden;
-}
-.barFill {
-  display: block;
-  height: 100%;
-  width: 100%;
-  background: var(--vh-text);
-  border-radius: inherit;
-  transform-origin: left;
-  transform: scaleX(var(--pct, 0));
-  transition: transform var(--dur-reveal) var(--ease-out);
 }
 
 .panel {

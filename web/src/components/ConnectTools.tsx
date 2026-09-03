@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE, usersApi } from "../lib/api";
 import { buildConnectPrompt } from "../lib/connectPrompt";
+import { formatDateTime, formatShortDate } from "../lib/format";
 import type { ConnectPromptTarget } from "../lib/connectPrompt";
 import type { TrackerStatus, TrackerToken } from "../types";
 import { Button } from "./ui/Button";
@@ -96,7 +97,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     setCreating(true);
     setError(null);
     try {
-      const label = `${os === "windows" ? "Windows" : "Mac"} · ${new Date().toLocaleDateString()}`;
+      const label = `${os === "windows" ? "Windows" : "Mac"} · ${formatShortDate(new Date().toISOString())}`;
       const res = await usersApi.createTrackerToken(label);
       setToken(res.token);
       if (variant === "full") {
@@ -321,7 +322,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
               <div key={t.id} className={styles.tokenRow}>
                 <span>{t.label}</span>
                 <span className={styles.hint}>
-                  {t.lastUsedAt ? `seen ${new Date(t.lastUsedAt).toLocaleString()}` : "never used"}
+                  {t.lastUsedAt ? `seen ${formatDateTime(t.lastUsedAt)}` : "never used"}
                 </span>
                 <button type="button" className={styles.revoke} onClick={() => revoke(t.id)}>
                   Revoke

@@ -374,13 +374,6 @@
 
 .level {
   flex-shrink: 0;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 3px 8px;
-  border-radius: var(--vh-radius-pill);
-  background: var(--vh-accent-soft);
-  color: var(--vh-text-dim);
 }
 
 .inviteButton {

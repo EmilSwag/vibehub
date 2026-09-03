@@ -172,7 +172,7 @@ export function HomePage() {
                 </>
               ) : friends.length === 0 ? (
                 <span className={styles.empty} style={{ padding: 0 }}>
-                  —
+                  No friends yet.
                 </span>
               ) : (
                 friends.slice(0, 5).map((f) => (

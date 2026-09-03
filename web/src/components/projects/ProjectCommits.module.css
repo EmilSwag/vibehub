@@ -51,6 +51,12 @@
   object-fit: cover;
 }
 
+/* GitHub avatars carry their own colors — strip them so the strip stays
+ * strict monochrome (design QA round 5). */
+.avatar {
+  filter: grayscale(1);
+}
+
 .message {
   min-width: 0;
   overflow: hidden;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { formatShortDate } from "../lib/format";
 import type { Project, User } from "../types";
 import { Avatar } from "./ui/Avatar";
 import { Icon } from "./ui/Icon";
@@ -127,9 +128,7 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
             <Icon name="heart" size={15} className={styles.heart} />
             {project.likeCount}
           </button>
-          <span className={styles.date}>
-            {new Date(project.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-          </span>
+          <span className={styles.date}>{formatShortDate(project.createdAt)}</span>
           {actions && <div className={styles.actions}>{actions}</div>}
         </div>
       </div>

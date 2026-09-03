@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useRealtime } from "../context/RealtimeContext";
 import { ApiError, friendsApi, usersApi } from "../lib/api";
@@ -8,6 +8,7 @@ import { Card } from "../components/ui/Card";
 import { Avatar } from "../components/ui/Avatar";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
+import { LevelBadge } from "../components/ui/LevelBadge";
 import { SkeletonRow } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { rolesLabel } from "../components/ui/RoleGlyph";
@@ -32,6 +33,7 @@ export function FriendsPage() {
   const [searching, setSearching] = useState(false);
   const [invited, setInvited] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -167,7 +169,13 @@ export function FriendsPage() {
             {loading ? (
               <SkeletonRow count={5} />
             ) : friends.length === 0 ? (
-              <div className={styles.empty}>No friends yet. Invite someone from the finder →</div>
+              <button
+                type="button"
+                className={cx(styles.empty, styles.emptyLink)}
+                onClick={() => searchRef.current?.focus()}
+              >
+                No friends yet. Invite someone from the finder →
+              </button>
             ) : (
               <div className="stagger">
                 {friends.map((f, i) => (
@@ -216,6 +224,7 @@ export function FriendsPage() {
                   <path d="M20 20l-3.5-3.5" />
                 </svg>
                 <Input
+                  ref={searchRef}
                   className={styles.searchInput}
                   placeholder="Name or @username"
                   value={query}
@@ -246,9 +255,7 @@ export function FriendsPage() {
                             </span>
                           </span>
                         </Link>
-                        <span className={styles.level} title="Account level">
-                          Lvl {u.level}
-                        </span>
+                        <LevelBadge level={u.level} size="sm" />
                         <Button
                           size="sm"
                           variant={sent ? "secondary" : "primary"}

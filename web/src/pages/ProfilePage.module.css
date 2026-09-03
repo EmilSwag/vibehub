@@ -78,22 +78,29 @@
   gap: var(--vh-space-3);
 }
 
+/* Desktop-only Edit-profile button, paired with the level badge in .heroActions. */
+.editProfileMobile {
+  display: none;
+}
+
 @media (max-width: 560px) {
   .hero {
     flex-wrap: wrap;
   }
   .heroActions {
-    flex-direction: row;
-    align-items: center;
     margin-left: calc(96px + var(--vh-space-4));
   }
-}
-
-@media (max-width: 420px) {
-  .heroActions {
-    margin-left: 0;
+  /* Below content width the level badge and Edit-profile stop pairing up —
+   * Edit-profile becomes its own full-width row under the whole identity
+   * block instead (design QA round 5). */
+  .editProfileDesktop {
+    display: none;
+  }
+  .editProfileMobile {
+    display: flex;
     width: 100%;
-    justify-content: space-between;
+    height: 40px;
+    margin: var(--vh-space-3) 0 var(--vh-space-4);
   }
 }
 
@@ -115,6 +122,25 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--vh-space-3);
+}
+
+.emptyAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  color: var(--vh-text-dim);
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color var(--dur-press) var(--ease-out), color var(--dur-press) var(--ease-out);
+}
+.emptyAction:hover {
+  border-color: var(--vh-border-strong);
+  color: var(--vh-text);
 }
 
 .wallList {

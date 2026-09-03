@@ -173,7 +173,7 @@
 }
 .prompt {
   margin: 0;
-  padding: 12px 14px 44px;
+  padding: 12px 88px 12px 14px;
   max-height: 220px;
   overflow: auto;
   border-radius: var(--vh-radius-md);

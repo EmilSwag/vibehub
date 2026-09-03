@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { projectsApi } from "../../lib/api";
+import { formatShortDate } from "../../lib/format";
 import type { RepoActivity } from "../../types";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
@@ -33,7 +34,7 @@ function relative(iso: string): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.round(h / 24);
   if (d < 30) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatShortDate(iso);
 }
 
 /**

@@ -4,6 +4,7 @@ import { friendsApi, usersApi } from "../../lib/api";
 import type { SuggestedUser } from "../../types";
 import { Avatar } from "../../components/ui/Avatar";
 import { Button } from "../../components/ui/Button";
+import { LevelBadge } from "../../components/ui/LevelBadge";
 import { SkeletonRow } from "../../components/ui/Skeleton";
 import { rolesLabel } from "../../components/ui/RoleGlyph";
 import styles from "./Onboarding.module.css";
@@ -98,9 +99,7 @@ export function StepFriends({ onInvited, onBack, onNext }: Props) {
                       {rolesLabel(u.roles) && <> · {rolesLabel(u.roles)}</>}
                     </span>
                   </span>
-                  <span className={styles.level} title="Account level">
-                    Lvl {u.level}
-                  </span>
+                  <LevelBadge level={u.level} size="sm" className={styles.level} />
                   <Button
                     type="button"
                     variant={done ? "secondary" : "primary"}

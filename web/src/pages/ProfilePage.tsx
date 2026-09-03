@@ -10,6 +10,7 @@ import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { ArchetypeGlyph, archetypeLabel } from "../components/ui/ArchetypeGlyph";
 import { StatusDot } from "../components/ui/StatusDot";
+import { Icon } from "../components/ui/Icon";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Textarea } from "../components/ui/Input";
@@ -182,14 +183,26 @@ export function ProfilePage() {
         </div>
 
         <div className={styles.heroActions}>
-          <LevelBadge breakdown={levelBreakdown} />
+          <LevelBadge level={levelBreakdown.level} breakdown={levelBreakdown} />
           {isSelf && (
-            <Link to="/settings" className={[buttonStyles.btn, buttonStyles.secondary].join(" ")}>
+            <Link
+              to="/settings"
+              className={[buttonStyles.btn, buttonStyles.secondary, styles.editProfileDesktop].join(" ")}
+            >
               Edit profile
             </Link>
           )}
         </div>
       </div>
+
+      {isSelf && (
+        <Link
+          to="/settings"
+          className={[buttonStyles.btn, buttonStyles.secondary, styles.editProfileMobile].join(" ")}
+        >
+          Edit profile
+        </Link>
+      )}
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Stats</h2>
@@ -201,7 +214,14 @@ export function ProfilePage() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>Projects</h2>
         {projects.length === 0 ? (
-          <p className={styles.empty}>No public projects yet.</p>
+          isSelf ? (
+            <Link to="/projects" className={styles.emptyAction}>
+              <Icon name="plus" size={14} />
+              New project
+            </Link>
+          ) : (
+            <p className={styles.empty}>No public projects yet.</p>
+          )
         ) : (
           <div className={styles.projectGrid}>
             {projects.map((project) => (
