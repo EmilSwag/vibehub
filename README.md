@@ -108,6 +108,8 @@ railway add --service server
 railway add --service web
 railway domain --service server          # → https://<server>.up.railway.app
 railway domain --service web             # → https://<web>.up.railway.app
+railway service server                   # link, then attach persistent storage for avatars:
+railway volume add --mount-path /app/uploads
 
 railway variables --service server --skip-deploys \
   --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' --set DATABASE_PROVIDER=postgresql \
@@ -125,8 +127,9 @@ railway up ./web    --path-as-root --service web    --detach
 ```
 
 The server image runs `prisma migrate deploy` on boot, so schema changes ship with
-`railway up`. Avatars are written to the container's local disk — attach a Railway
-volume at `/app/uploads` (or move to object storage) before the friend group gets big.
+`railway up`. Persistence: application data lives in Postgres (its own Railway volume),
+avatars on the server volume mounted at `/app/uploads` (override the path with
+`UPLOAD_DIR`). Both survive redeploys; `scripts/check-avatar-persistence.js` proves it.
 Design notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8.
 
 ## Contributing

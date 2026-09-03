@@ -15,6 +15,10 @@ export const env = {
   devLoginEnabled: process.env.DEV_LOGIN_ENABLED === "true",
   sessionIdleTimeoutMs: Number(process.env.SESSION_IDLE_TIMEOUT_MS ?? 600_000),
   isProduction: process.env.NODE_ENV === "production",
+  // Where avatar files live. On Railway this is a persistent volume mounted at
+  // /app/uploads (== <cwd>/uploads), so the default works without configuration;
+  // override with UPLOAD_DIR to mount the volume elsewhere.
+  uploadDir: process.env.UPLOAD_DIR || `${process.cwd()}/uploads`,
   // Web and API are served from different hosts on Railway (*.up.railway.app is on the
   // Public Suffix List, so sibling subdomains count as different sites). Cross-site
   // fetch/WS with credentials therefore needs SameSite=None (+ Secure). Local dev on

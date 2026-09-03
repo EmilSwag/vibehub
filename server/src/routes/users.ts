@@ -4,6 +4,7 @@ import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../db";
+import { env } from "../env";
 import { generateRawToken, hashToken } from "../lib/crypto";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { detectIcon, detectLabel } from "../lib/links";
@@ -13,9 +14,29 @@ import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
-const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
-const AVATAR_DIR = path.join(UPLOAD_ROOT, "avatars");
+// Persistent volume on Railway (see env.uploadDir); served by index.ts under /uploads.
+const AVATAR_DIR = path.join(env.uploadDir, "avatars");
 fs.mkdirSync(AVATAR_DIR, { recursive: true });
+
+/**
+ * Best-effort removal of a previous avatar file we wrote ourselves, so a persistent
+ * volume doesn't accumulate one orphaned file per re-upload. Only touches files
+ * directly inside AVATAR_DIR; foreign URLs (e.g. GitHub avatars) are ignored.
+ */
+function removeOwnAvatarFile(avatarUrl: string | null): void {
+  if (!avatarUrl) return;
+  let pathname: string;
+  try {
+    pathname = new URL(avatarUrl).pathname;
+  } catch {
+    return;
+  }
+  const prefix = "/uploads/avatars/";
+  if (!pathname.startsWith(prefix)) return;
+  const filename = path.basename(pathname);
+  if (!filename || filename !== pathname.slice(prefix.length)) return;
+  fs.rm(path.join(AVATAR_DIR, filename), { force: true }, () => undefined);
+}
 
 const avatarUpload = multer({
   storage: multer.diskStorage({
@@ -74,7 +95,9 @@ router.post(
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, "Missing file");
     const avatarUrl = `${req.protocol}://${req.get("host")}/uploads/avatars/${req.file.filename}`;
+    const previous = req.user!.avatarUrl;
     await prisma.user.update({ where: { id: req.user!.id }, data: { avatarUrl } });
+    removeOwnAvatarFile(previous);
     res.json({ avatarUrl });
   })
 );

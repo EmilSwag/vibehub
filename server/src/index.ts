@@ -66,11 +66,12 @@ app.get("/api/v1/health", (_req, res) => {
   });
 });
 
-// Avatar files written by routes/users.ts (local disk — fine for a small friend group;
-// swap for object storage before this grows).
+// Avatar files written by routes/users.ts. On Railway env.uploadDir is a persistent
+// volume mounted at /app/uploads, so files survive redeploys. Filenames are random
+// per upload, hence the long immutable cache.
 app.use(
   "/uploads",
-  express.static(path.join(process.cwd(), "uploads"), { maxAge: "7d", immutable: true, fallthrough: false })
+  express.static(path.resolve(env.uploadDir), { maxAge: "7d", immutable: true, fallthrough: false })
 );
 
 app.use("/api/v1/auth", authRoutes); // routes/auth.ts defines /github, /dev-login, /logout, /me
