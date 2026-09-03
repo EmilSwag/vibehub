@@ -7,6 +7,7 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   devLogin: (username: string) => Promise<void>;
+  completeOAuth: (ticket: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -29,11 +30,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const ticket = new URLSearchParams(window.location.search).get("oauth");
+    if (ticket) {
+      // LoginPage claims the ticket; a parallel /me would race and wipe the user.
+      setLoading(false);
+      return;
+    }
     refresh();
   }, [refresh]);
 
   const devLogin = useCallback(async (username: string) => {
     const { user } = await authApi.devLogin(username);
+    setUser(user);
+  }, []);
+
+  const completeOAuth = useCallback(async (ticket: string) => {
+    const { user } = await authApi.claim(ticket);
     setUser(user);
   }, []);
 
@@ -43,8 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, devLogin, logout, refresh }),
-    [user, loading, devLogin, logout, refresh]
+    () => ({ user, loading, devLogin, completeOAuth, logout, refresh }),
+    [user, loading, devLogin, completeOAuth, logout, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

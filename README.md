@@ -24,11 +24,8 @@ a project name, a tool/model name, token counts, and timestamps. See
 Sign in, add your friends by username, paste a tracker token into `vibehub-tracker` and
 your live status shows up on their home screen.
 
-> **Auth note.** The hosted instance currently runs with `DEV_LOGIN_ENABLED=true`, i.e.
-> you sign in by picking a username (no password). That's fine for a trusted friend
-> group, but anyone with the URL can claim any name. To lock it down, create a GitHub
-> OAuth App and set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` on the server, then
-> flip `DEV_LOGIN_ENABLED=false` — the login page adapts automatically.
+> **Auth.** Sign in with GitHub (OAuth App `Vibemunity`). Username login
+> (`DEV_LOGIN_ENABLED`) is off on the hosted instance.
 
 ## Status
 
@@ -115,7 +112,7 @@ railway variables --service server --skip-deploys \
   --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' --set DATABASE_PROVIDER=postgresql \
   --set NODE_ENV=production --set JWT_SECRET=<48 random bytes hex> \
   --set CORS_ORIGIN=https://<web>.up.railway.app --set COOKIE_SAME_SITE=none \
-  --set DEV_LOGIN_ENABLED=true \
+  --set DEV_LOGIN_ENABLED=false \
   --set GITHUB_CALLBACK_URL=https://<server>.up.railway.app/api/v1/auth/github/callback
 railway variables --service web --skip-deploys \
   --set VITE_API_URL=https://<server>.up.railway.app \

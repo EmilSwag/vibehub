@@ -71,6 +71,8 @@ export const authApi = {
     return { github: health.auth?.github ?? true, devLogin: health.auth?.devLogin ?? false };
   },
   me: () => request<{ user: User | null }>("/api/v1/auth/me"),
+  /** Exchange the one-time GitHub ticket for the session cookie (same origin hop as dev-login). */
+  claim: (ticket: string) => request<{ user: User }>("/api/v1/auth/claim", json({ ticket })),
   devLogin: (username: string) =>
     request<{ user: User }>("/api/v1/auth/dev-login", json({ username })),
   logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),

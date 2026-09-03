@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import type { Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { Router } from "express";
-import { AUTH_SESSION_TTL_MS, SESSION_COOKIE, signSessionToken, verifySessionToken } from "../auth/jwt";
+import { AUTH_SESSION_TTL_MS, SESSION_COOKIE, signHandoffToken, signSessionToken, verifyHandoffToken, verifySessionToken } from "../auth/jwt";
 import { prisma } from "../db";
 import { env, primaryWebOrigin } from "../env";
 import { encryptSecret } from "../lib/crypto";
@@ -16,6 +16,9 @@ const OAUTH_STATE_COOKIE = "vh_oauth_state";
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USER_API = "https://api.github.com/user";
+// Node's fetch has no default timeout: a stalled connection to GitHub would pin the
+// browser on a spinner forever. Fail fast instead and show the user an error.
+const GITHUB_TIMEOUT_MS = 10_000;
 
 interface GithubTokenResponse {
   access_token?: string;
@@ -45,6 +48,15 @@ function setSessionCookie(res: Response, token: string) {
     maxAge: AUTH_SESSION_TTL_MS,
     path: "/",
   });
+}
+
+/**
+ * OAuth failures happen mid-navigation, so a JSON error body would leave the user
+ * staring at raw text on the API domain. Bounce back to the web login page with a
+ * readable reason instead (LoginPage renders `?error=`).
+ */
+function redirectToLoginWithError(res: Response, message: string) {
+  res.redirect(`${primaryWebOrigin}/login?error=${encodeURIComponent(message)}`);
 }
 
 async function generateAvailableUsername(githubLogin: string): Promise<string> {
@@ -92,8 +104,18 @@ router.get(
     const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
     res.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
 
-    if (!code || typeof code !== "string" || !state || state !== cookieState) {
-      throw new HttpError(400, "Invalid or missing OAuth state");
+    if (!code || typeof code !== "string") {
+      const reason = typeof req.query.error === "string" ? String(req.query.error_description ?? req.query.error) : "no authorization code";
+      console.warn(`[auth] github callback without code: ${reason}`);
+      redirectToLoginWithError(res, `GitHub sign-in was not completed (${reason})`);
+      return;
+    }
+    if (!state || state !== cookieState) {
+      // Almost always a browser that dropped the SameSite=Lax state cookie (private
+      // window, strict cookie blocking) or a stale callback URL opened twice.
+      console.warn(`[auth] oauth state mismatch — cookie ${cookieState ? "present but different" : "missing"}`);
+      redirectToLoginWithError(res, "Sign-in link expired or your browser blocked the security cookie. Try again.");
+      return;
     }
 
     const tokenRes = await fetch(GITHUB_TOKEN_URL, {
@@ -105,6 +127,7 @@ router.get(
         code,
         redirect_uri: env.githubCallbackUrl,
       }),
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
     });
     const tokenJson = (await tokenRes.json()) as GithubTokenResponse;
     if (!tokenJson.access_token) {
@@ -113,6 +136,7 @@ router.get(
 
     const ghUserRes = await fetch(GITHUB_USER_API, {
       headers: { Authorization: `Bearer ${tokenJson.access_token}`, "User-Agent": "vibehub-server" },
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
     });
     if (!ghUserRes.ok) throw new HttpError(400, "Failed to fetch GitHub profile");
     const ghUser = (await ghUserRes.json()) as GithubUserResponse;
@@ -145,8 +169,46 @@ router.get(
     }
 
     const token = await createAuthSession(user.id, req.header("user-agent"));
+    // Cookie on this 302 is often dropped: the hop is GitHub → API → web, i.e. a
+    // cross-site redirect chain. The short-lived ticket is claimed by the SPA via
+    // fetch (same path as dev-login), which Chrome does persist.
     setSessionCookie(res, token);
-    res.redirect(primaryWebOrigin);
+    const ticket = signHandoffToken(token);
+    console.log(`[auth] github login ok — @${user.username} (gh:${ghUser.login})`);
+    res.redirect(`${primaryWebOrigin}/login?oauth=${encodeURIComponent(ticket)}`);
+  })
+);
+
+// Scoped to the callback above: GitHub error payloads, request timeouts and DB
+// failures become a readable message on the login page instead of raw JSON served
+// from the API domain, which is all a mid-navigation browser would otherwise show.
+router.use("/github/callback", (err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  console.error("[auth] github callback failed:", err);
+  const message =
+    err instanceof HttpError
+      ? err.message
+      : err instanceof Error && err.name === "TimeoutError"
+        ? "GitHub took too long to respond. Try again."
+        : "GitHub sign-in failed. Try again.";
+  redirectToLoginWithError(res, message);
+});
+
+router.post(
+  "/claim",
+  asyncHandler(async (req, res) => {
+    const ticket = typeof req.body?.ticket === "string" ? req.body.ticket : "";
+    const sessionToken = verifyHandoffToken(ticket);
+    if (!sessionToken) throw new HttpError(400, "Sign-in link expired. Try GitHub again.");
+    const payload = verifySessionToken(sessionToken);
+    if (!payload) throw new HttpError(400, "Sign-in link expired. Try GitHub again.");
+
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user) throw new HttpError(400, "Sign-in link expired. Try GitHub again.");
+
+    setSessionCookie(res, sessionToken);
+    console.log(`[auth] oauth claim ok — @${user.username}`);
+    res.json({ user: toMeUser(user) });
   })
 );
 
@@ -188,6 +250,7 @@ router.post(
 );
 
 router.get("/me", optionalAuth, (req, res) => {
+  res.setHeader("Cache-Control", "private, no-store");
   res.json({ user: req.user ? toMeUser(req.user) : null });
 });
 

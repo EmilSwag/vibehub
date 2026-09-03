@@ -74,6 +74,25 @@ app.use(
   express.static(path.resolve(env.uploadDir), { maxAge: "7d", immutable: true, fallthrough: false })
 );
 
+// Minimal access log for the auth surface only. An OAuth round-trip spans three
+// hosts (web → api → github → api), so when a sign-in "does nothing" in a browser
+// this is the only way to tell which hop was actually reached. No bodies, no
+// tokens — just step, status and latency.
+app.use("/api/v1/auth", (req, res, next) => {
+  const startedAt = Date.now();
+  // Captured up front: nested routers rewrite req.url while handling the request,
+  // so reading it inside the finish callback reports "/" for every matched route.
+  const path = req.originalUrl.split("?")[0];
+  const hasStateCookie = Boolean(req.cookies?.vh_oauth_state);
+  res.on("finish", () => {
+    console.log(
+      `[auth] ${req.method} ${path} -> ${res.statusCode} ${Date.now() - startedAt}ms ` +
+        `state-cookie=${hasStateCookie ? "yes" : "no"}`
+    );
+  });
+  next();
+});
+
 app.use("/api/v1/auth", authRoutes); // routes/auth.ts defines /github, /dev-login, /logout, /me
 app.use("/api/v1", usersRoutes);
 app.use("/api/v1", friendsRoutes);

@@ -11,10 +11,18 @@ import buttonStyles from "../components/ui/Button.module.css";
 import styles from "./LoginPage.module.css";
 
 export function LoginPage() {
-  const { user, loading, devLogin } = useAuth();
+  const { user, loading, devLogin, completeOAuth } = useAuth();
   const [username, setUsername] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // The GitHub round-trip ends on the server, so it reports failures by bouncing back
+  // to /login?error=… — pick that up as the initial error instead of silently
+  // dropping the user on a fresh-looking login screen.
+  const [error, setError] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("error")
+  );
   const [submitting, setSubmitting] = useState(false);
+  const [claiming, setClaiming] = useState(
+    () => Boolean(new URLSearchParams(window.location.search).get("oauth"))
+  );
   // Which sign-in methods the server has configured. Until the probe answers we show the
   // GitHub button (the default path); the username form only appears when the server
   // says DEV_LOGIN_ENABLED — never based on the web build mode alone.
@@ -34,6 +42,25 @@ export function LoginPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const ticket = new URLSearchParams(window.location.search).get("oauth");
+    if (!ticket) return;
+    let cancelled = false;
+    completeOAuth(ticket)
+      .then(() => {
+        window.history.replaceState({}, "", "/login");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "GitHub sign-in failed. Try again.");
+        setClaiming(false);
+        window.history.replaceState({}, "", "/login");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [completeOAuth]);
 
   if (!loading && user) {
     return <Navigate to="/" replace />;
@@ -63,7 +90,11 @@ export function LoginPage() {
         <h1 className={styles.title}>Welcome to VibeHub</h1>
         <p className={styles.subtitle}>Steam, for people who ship with an AI pair.</p>
 
-        {showGithub && (
+        {error && <p className={styles.error}>{error}</p>}
+
+        {claiming && <p className={styles.subtitle}>Signing in…</p>}
+
+        {!claiming && showGithub && (
           <a
             href={githubLoginUrl()}
             className={[buttonStyles.btn, buttonStyles.primary, styles.githubBtn].join(" ")}
@@ -72,7 +103,7 @@ export function LoginPage() {
           </a>
         )}
 
-        {showUsername && (
+        {!claiming && showUsername && (
           <>
             {showGithub && <div className={styles.divider}>{usernameLabel}</div>}
             <form className={styles.devForm} onSubmit={handleDevLogin}>
@@ -87,7 +118,6 @@ export function LoginPage() {
                 autoFocus={!showGithub}
                 required
               />
-              {error && <span className={styles.error}>{error}</span>}
               <Button
                 type="submit"
                 variant={showGithub ? "secondary" : "primary"}
@@ -99,7 +129,7 @@ export function LoginPage() {
           </>
         )}
 
-        {!showGithub && !showUsername && (
+        {!claiming && !showGithub && !showUsername && (
           <p className={styles.error}>
             This server has no sign-in method configured. Set GITHUB_CLIENT_ID/SECRET or
             DEV_LOGIN_ENABLED=true on the server.
