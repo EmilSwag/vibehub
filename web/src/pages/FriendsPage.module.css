@@ -139,10 +139,15 @@
   align-items: center;
   gap: 12px;
   padding: 10px 6px;
+  border-radius: var(--vh-radius-sm);
   border-bottom: 1px solid var(--vh-border);
+  transition: background-color var(--dur-press) var(--ease-out);
 }
 .row:last-child {
   border-bottom: 0;
+}
+.row:hover {
+  background: var(--vh-surface-2);
 }
 .rowIdentity {
   display: flex;
@@ -181,7 +186,10 @@
 }
 .level {
   flex: none;
-  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  font-size: 11.5px;
   color: var(--vh-text-faint);
   font-variant-numeric: tabular-nums;
 }

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usersApi } from "../lib/api";
+import { API_BASE, usersApi } from "../lib/api";
+import { buildConnectPrompt } from "../lib/connectPrompt";
+import type { ConnectPromptTarget } from "../lib/connectPrompt";
 import type { TrackerStatus, TrackerToken } from "../types";
 import { Button } from "./ui/Button";
+import { Icon } from "./ui/Icon";
 import { Skeleton } from "./ui/Skeleton";
 import styles from "./ConnectTools.module.css";
 
@@ -21,6 +24,13 @@ const SUPPORTED = [
 const TOOL_NAMES: Record<string, string> = Object.fromEntries(SUPPORTED.map((t) => [t.id, t.name]));
 // Tracker adapters report kebab-case ("claude-code"); older builds used snake_case.
 const toolLabel = (id: string): string => TOOL_NAMES[id.replace(/-/g, "_")] ?? TOOL_NAMES[id] ?? id;
+
+/** The three targets `buildConnectPrompt` knows how to write for (round 5: Home flow). */
+const TARGETS: { id: ConnectPromptTarget; label: string }[] = [
+  { id: "claude-code", label: "Claude Code" },
+  { id: "cursor", label: "Cursor" },
+  { id: "chatgpt", label: "ChatGPT" },
+];
 
 function detectOs(): Os {
   return /Win/i.test(navigator.platform) || /Windows/i.test(navigator.userAgent) ? "windows" : "mac";
@@ -51,6 +61,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
   const [token, setToken] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TrackerToken[]>([]);
   const [os, setOs] = useState<Os>(detectOs);
+  const [target, setTarget] = useState<ConnectPromptTarget>("claude-code");
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +92,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     return () => window.clearInterval(id);
   }, [status?.connected, refresh]);
 
-  const createToken = async () => {
+  const createToken = useCallback(async () => {
     setCreating(true);
     setError(null);
     try {
@@ -97,18 +108,28 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     } finally {
       setCreating(false);
     }
-  };
+  }, [os, variant]);
+
+  // Compact (Home): skip the button — mint the token the moment we know the
+  // tracker isn't connected, so step 2's prompt is ready to copy immediately.
+  useEffect(() => {
+    if (variant !== "compact" || !status || status.connected || token || creating) return;
+    void createToken();
+  }, [variant, status, token, creating, createToken]);
 
   const command = useMemo(() => (token ? installCommand(os, token) : null), [os, token]);
+  const prompt = useMemo(
+    () => (token ? buildConnectPrompt(target, token, API_BASE, WEB_URL) : null),
+    [token, target]
+  );
 
-  const copy = async () => {
-    if (!command) return;
+  const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(command);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      setError("Copy failed — select the command and copy it manually.");
+      setError("Copy failed — select the text and copy it manually.");
     }
   };
 
@@ -147,7 +168,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
   const commandBlock = (
     <div className={styles.cmdRow}>
       <code className={styles.cmd}>{command ?? installCommand(os, "<your-token>")}</code>
-      <Button size="sm" variant="secondary" onClick={copy} disabled={!command}>
+      <Button size="sm" variant="secondary" onClick={() => command && copy(command)} disabled={!command}>
         {copied ? "Copied" : "Copy"}
       </Button>
     </div>
@@ -165,13 +186,75 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
             {status.connected
               ? status.tools.length
                 ? `Seeing ${status.tools.map(toolLabel).join(", ")}`
-                : "Waiting for your first AI session…"
-              : "A tiny local tracker turns your AI sessions into status, time and token stats."}
+                : "Waiting for your first session…"
+              : variant === "compact"
+                ? "Paste a prompt into your AI tool — no terminal needed."
+                : "A tiny local tracker turns your AI sessions into status, time and token stats."}
           </span>
         </div>
       </div>
 
-      {!status.connected && (
+      {!status.connected && variant === "compact" && (
+        <>
+          <ol className={styles.steps}>
+            <li>
+              <span className={styles.stepNo}>1</span>
+              <div className={styles.stepBody}>
+                <span>Where are you working?</span>
+                <div className={styles.seg} role="tablist" aria-label="AI tool">
+                  {TARGETS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={target === t.id}
+                      className={cx(styles.segBtn, target === t.id && styles.segBtnOn)}
+                      onClick={() => setTarget(t.id)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </li>
+            <li className={cx(!prompt && styles.stepMuted)}>
+              <span className={styles.stepNo}>2</span>
+              <div className={styles.stepBody}>
+                <span>Paste this into {TARGETS.find((t) => t.id === target)?.label}</span>
+                {prompt ? (
+                  <div className={styles.promptWrap}>
+                    <pre className={styles.prompt}>{prompt}</pre>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className={styles.copyPrompt}
+                      onClick={() => copy(prompt)}
+                    >
+                      <Icon name={copied ? "check" : "copy"} size={13} />
+                      {copied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Skeleton height={54} width="100%" />
+                )}
+              </div>
+            </li>
+            <li className={cx(!prompt && styles.stepMuted)}>
+              <span className={styles.stepNo}>3</span>
+              <div className={styles.stepBody}>
+                <span>Keep working — this flips to Connected on the first heartbeat.</span>
+                {prompt && (
+                  <span className={styles.waiting}>
+                    <span className={styles.pulse} aria-hidden="true" /> Listening…
+                  </span>
+                )}
+              </div>
+            </li>
+          </ol>
+        </>
+      )}
+
+      {!status.connected && variant === "full" && (
         <>
           <ol className={styles.steps}>
             <li>

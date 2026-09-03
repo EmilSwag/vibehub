@@ -2,7 +2,8 @@ import type { InputHTMLAttributes, LabelHTMLAttributes, TextareaHTMLAttributes }
 import styles from "./Input.module.css";
 
 export function FieldLabel(props: LabelHTMLAttributes<HTMLLabelElement>) {
-  return <label className={styles.label} {...props} />;
+  const { className, ...rest } = props;
+  return <label className={[styles.label, className].filter(Boolean).join(" ")} {...rest} />;
 }
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {

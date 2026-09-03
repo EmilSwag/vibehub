@@ -13,6 +13,8 @@
   --dur-state: 200ms;
   --dur-enter: 320ms;
   --dur-reveal: 560ms;
+  /* Alias some component CSS reaches for on hover/state transitions. */
+  --dur-fade: var(--dur-state);
 
   --stagger: 36ms;
 }
@@ -50,6 +52,11 @@
   to   { opacity: 1; transform: translateX(0); }
 }
 
+@keyframes vh-fade-down {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(8px); }
+}
+
 /* ---- Utilities ---- */
 
 /* Block/page enter: fade + rise. */
@@ -74,6 +81,12 @@
 
 .fade-in {
   animation: vh-fade-in var(--dur-enter) var(--ease-out) both;
+}
+
+/* Exit companion to .reveal — pair with useExitTransition (lib/motion.ts) so a
+ * block fades out instead of vanishing when it's unmounted. */
+.leave {
+  animation: vh-fade-down var(--dur-state) var(--ease-out) both;
 }
 
 /* Wizard step transition (the one place horizontal motion is allowed). */

@@ -28,7 +28,9 @@ export type IconName =
   | "check"
   | "plus"
   | "x"
-  | "external";
+  | "external"
+  | "arrowLeft"
+  | "chevronDown";
 
 const PATHS: Record<IconName, JSX.Element> = {
   user: (
@@ -139,6 +141,8 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
     </>
   ),
+  arrowLeft: <path d="M19 12H5M11 6l-6 6 6 6" />,
+  chevronDown: <path d="M6 9l6 6 6-6" />,
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

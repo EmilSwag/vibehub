@@ -1,0 +1,108 @@
+.wrap {
+  position: relative;
+  display: inline-block;
+  margin-left: 8px;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface);
+  color: var(--vh-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color var(--dur-press) var(--ease-out), color var(--dur-press) var(--ease-out);
+}
+.trigger:hover {
+  border-color: var(--vh-border-strong);
+  color: var(--vh-text);
+}
+
+.chev {
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.chevOpen {
+  transform: rotate(180deg);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  width: min(340px, 80vw);
+  padding: 8px;
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  background: var(--vh-surface);
+  box-shadow: var(--vh-shadow-pop);
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 6px;
+}
+
+.note {
+  margin: 0;
+  padding: 8px 6px;
+  font-size: 12.5px;
+  color: var(--vh-text-faint);
+  line-height: 1.45;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 8px;
+  border: none;
+  border-radius: var(--vh-radius-sm);
+  background: none;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-press) var(--ease-out);
+}
+.item:hover {
+  background: var(--vh-surface-2);
+}
+
+.itemName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.privateIcon {
+  flex: none;
+  color: var(--vh-text-faint);
+}
+
+.itemMeta {
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--vh-text-faint);
+}

@@ -55,22 +55,3 @@
   color: var(--vh-text-faint);
   text-align: right;
 }
-
-.compareForm {
-  display: flex;
-  gap: var(--vh-space-2);
-  margin: var(--vh-space-4) 0;
-}
-
-.compareGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--vh-space-4);
-}
-
-.compareCol h4 {
-  font-family: var(--vh-font-sans);
-  font-size: 13px;
-  color: var(--vh-text-dim);
-  margin: 0 0 var(--vh-space-2);
-}

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { projectsApi } from "../lib/api";
-import { stagger } from "../lib/motion";
+import { stagger, useExitTransition } from "../lib/motion";
 import type { Project } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -23,6 +23,10 @@ export function ProjectsPage() {
     open: false,
     editing: null,
   });
+  // Keeps `editing` around through the close animation so the card doesn't blank
+  // out mid-fade — only `open` flips immediately.
+  const closeComposer = () => setComposer((c) => ({ ...c, open: false }));
+  const { render: renderComposer, closing: composerClosing } = useExitTransition(composer.open, 260);
 
   useEffect(() => {
     if (!user) return;
@@ -40,7 +44,7 @@ export function ProjectsPage() {
       const exists = prev.some((p) => p.id === project.id);
       return exists ? prev.map((p) => (p.id === project.id ? project : p)) : [project, ...prev];
     });
-    setComposer({ open: false, editing: null });
+    closeComposer();
     pushToast({
       title: composer.editing ? "Project updated" : "Published",
       body: composer.editing ? project.name : `${project.name} is now on your profile.`,
@@ -73,7 +77,7 @@ export function ProjectsPage() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Your projects</h1>
-          <p className={styles.lead}>Posts your friends see on your profile and in their feed.</p>
+          <p className={styles.lead}>What friends see on your profile.</p>
         </div>
         {!composer.open && (
           <Button onClick={() => setComposer({ open: true, editing: null })}>
@@ -83,8 +87,8 @@ export function ProjectsPage() {
         )}
       </div>
 
-      {composer.open && (
-        <Card className={styles.composerCard}>
+      {renderComposer && (
+        <Card className={[styles.composerCard, composerClosing ? "leave" : "reveal"].join(" ")}>
           <div className={styles.composerHead}>
             <Icon name={composer.editing ? "text" : "sparkles"} size={15} />
             {composer.editing ? "Edit post" : "New post"}
@@ -94,7 +98,7 @@ export function ProjectsPage() {
             owner={user}
             editing={composer.editing}
             onSaved={saved}
-            onCancel={() => setComposer({ open: false, editing: null })}
+            onCancel={closeComposer}
           />
         </Card>
       )}
@@ -112,7 +116,7 @@ export function ProjectsPage() {
       ) : projects.length === 0 ? (
         <Card className={styles.empty}>
           <Icon name="image" size={22} />
-          <p>No posts yet. Ship something, then hit “New post” — or let your AI publish it for you.</p>
+          <p>No posts yet — hit “New post”, or let your AI publish one.</p>
         </Card>
       ) : (
         <div className={[styles.grid, "stagger"].join(" ")}>

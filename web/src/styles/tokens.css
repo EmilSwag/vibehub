@@ -18,11 +18,14 @@
   --vh-surface: #FFFFFF;      /* cards */
   --vh-surface-2: #ECECEC;    /* sidebar / panels / hovers */
   --vh-border: #DCDCDC;
+  --vh-border-strong: #C4C4C4; /* dividers/segments that need more contrast than -border */
 
   /* Text */
   --vh-text: #111111;
   --vh-text-dim: #555555;
   --vh-text-faint: #8A8A8A;
+  /* Alias used across component CSS for secondary copy — same tier as -dim. */
+  --vh-text-muted: var(--vh-text-dim);
 
   /* Accent — ink black, zero hue */
   --vh-accent: #111111;
@@ -40,6 +43,9 @@
   --vh-status-active: #111111;
   --vh-status-idle: #8A8A8A;
   --vh-status-offline: #C8C8C8;
+
+  /* Errors read as ink, not red — monochrome rule applies to danger states too. */
+  --vh-danger: var(--vh-text);
 
   /* Shape — generous rounding, unchanged */
   --vh-radius-sm: 8px;
@@ -70,6 +76,7 @@
     --vh-surface: #171717;
     --vh-surface-2: #232323;
     --vh-border: #333333;
+    --vh-border-strong: #454545;
 
     --vh-text: #F2F2F2;
     --vh-text-dim: #B0B0B0;
@@ -96,6 +103,7 @@
   --vh-surface: #171717;
   --vh-surface-2: #232323;
   --vh-border: #333333;
+  --vh-border-strong: #454545;
 
   --vh-text: #F2F2F2;
   --vh-text-dim: #B0B0B0;

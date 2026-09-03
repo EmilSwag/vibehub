@@ -58,7 +58,13 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
 
       {cover && (
         <div className={styles.media}>
-          <img key={cover} className={styles.cover} src={cover} alt="" loading="lazy" />
+          <Link
+            to={`/p/${project.id}`}
+            onClick={(e) => previewMode && e.preventDefault()}
+            aria-label={project.name}
+          >
+            <img key={cover} className={styles.cover} src={cover} alt="" loading="lazy" />
+          </Link>
           {images.length > 1 && (
             <div className={styles.strip} role="tablist" aria-label="Screenshots">
               {images.map((url, i) => (
@@ -79,7 +85,15 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
       )}
 
       <div className={styles.body}>
-        <h3 className={styles.name}>{project.name}</h3>
+        <h3 className={styles.name}>
+          <Link
+            to={`/p/${project.id}`}
+            className={styles.nameLink}
+            onClick={(e) => previewMode && e.preventDefault()}
+          >
+            {project.name}
+          </Link>
+        </h3>
         {project.description && <p className={styles.description}>{project.description}</p>}
 
         {(project.repoUrl || project.liveUrl) && (

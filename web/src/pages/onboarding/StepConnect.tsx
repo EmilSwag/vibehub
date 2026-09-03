@@ -20,8 +20,7 @@ export function StepConnect({ onBack, onNext }: Props) {
     <div className={styles.step}>
       <h1 className={styles.title}>Connect your AI tools</h1>
       <p className={styles.lead}>
-        This is where your status, hours and token counts come from. One command, runs in the
-        background, only metadata leaves your machine.
+        Pick your tool, paste one prompt — status, hours and tokens, nothing else leaves your machine.
       </p>
 
       <ConnectTools onConnected={() => setConnected(true)} />

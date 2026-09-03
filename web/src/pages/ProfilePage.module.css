@@ -72,6 +72,29 @@
 
 .heroActions {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--vh-space-3);
+}
+
+@media (max-width: 560px) {
+  .hero {
+    flex-wrap: wrap;
+  }
+  .heroActions {
+    flex-direction: row;
+    align-items: center;
+    margin-left: calc(96px + var(--vh-space-4));
+  }
+}
+
+@media (max-width: 420px) {
+  .heroActions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .section {

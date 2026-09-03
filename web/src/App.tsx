@@ -3,9 +3,12 @@
 
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AppLayout } from "./components/layout/AppLayout";
+import { PageTransition } from "./components/ui/PageTransition";
 import { LoginPage } from "./pages/LoginPage";
 import { HomePage } from "./pages/HomePage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { ProjectPage } from "./pages/ProjectPage";
 import { FriendsPage } from "./pages/FriendsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -64,6 +67,19 @@ export default function App() {
           <ProtectedRoute>
             <ProfilePage />
           </ProtectedRoute>
+        }
+      />
+
+      {/* Public: a signed-out visitor can open a public project's page (round 5).
+          Not behind ProtectedRoute — the server itself gates private projects. */}
+      <Route
+        path="/p/:id"
+        element={
+          <AppLayout>
+            <PageTransition>
+              <ProjectPage />
+            </PageTransition>
+          </AppLayout>
         }
       />
 

@@ -18,6 +18,16 @@
   gap: 12px;
 }
 
+.labelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.labelRow > label {
+  margin-bottom: 0;
+}
+
 .labelIcon {
   flex: none;
   color: var(--vh-text-muted);

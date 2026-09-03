@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { projectsApi } from "../../lib/api";
-import type { Project, User } from "../../types";
+import type { GithubRepoSummary, Project, User } from "../../types";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { FieldLabel, Input, Textarea } from "../ui/Input";
 import { ProjectCard } from "../ProjectCard";
+import { RepoPicker } from "./RepoPicker";
 import styles from "./ProjectComposer.module.css";
 
 export const MAX_IMAGES = 8;
@@ -54,6 +55,16 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Fills the URL and, only where the user hasn't typed anything yet, name/description too.
+  function pickRepo(repo: GithubRepoSummary) {
+    setForm((prev) => ({
+      ...prev,
+      repoUrl: repo.htmlUrl,
+      name: prev.name.trim() ? prev.name : repo.name,
+      description: prev.description.trim() ? prev.description : repo.description ?? prev.description,
+    }));
+  }
 
   function pickFiles(e: ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith("image/"));
@@ -161,10 +172,13 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
 
         <div className={styles.twoUp}>
           <div>
-            <FieldLabel htmlFor="p-repo">
-              <Icon name="github" className={styles.labelIcon} />
-              Repo URL
-            </FieldLabel>
+            <div className={styles.labelRow}>
+              <FieldLabel htmlFor="p-repo">
+                <Icon name="github" className={styles.labelIcon} />
+                Repo URL
+              </FieldLabel>
+              <RepoPicker onPick={pickRepo} />
+            </div>
             <Input
               id="p-repo"
               type="url"

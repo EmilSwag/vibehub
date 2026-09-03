@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { projectsApi, usersApi, wallApi } from "../lib/api";
 import { presenceLine, safeHostname } from "../lib/format";
-import type { ExternalLink, Project, User, WallComment as WallCommentType } from "../types";
+import type { ExternalLink, LevelBreakdown, Project, User, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { ArchetypeGlyph, archetypeLabel } from "../components/ui/ArchetypeGlyph";
@@ -19,6 +19,7 @@ import { ProjectCard } from "../components/ProjectCard";
 import { WallComment } from "../components/WallComment";
 import { StatsPanel } from "../components/StatsPanel";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
+import { LevelBadge } from "../components/ui/LevelBadge";
 import { roleTitle } from "../components/ui/RoleGlyph";
 import styles from "./ProfilePage.module.css";
 
@@ -27,6 +28,7 @@ interface ProfileData {
   links: ExternalLink[];
   friendCount: number;
   level: number;
+  levelBreakdown: LevelBreakdown;
 }
 
 export function ProfilePage() {
@@ -135,7 +137,7 @@ export function ProfilePage() {
     );
   }
 
-  const { user, links, friendCount, level } = profile;
+  const { user, links, friendCount, levelBreakdown } = profile;
   const presence = presences.get(username);
 
   return (
@@ -146,7 +148,6 @@ export function ProfilePage() {
           <div className={styles.nameRow}>
             <h1 className={styles.displayName}>{user.displayName}</h1>
             <span className={styles.username}>@{user.username}</span>
-            <Badge>Lvl {level}</Badge>
             {user.roles.map((r) => (
               <Badge key={r}>{roleTitle(r)}</Badge>
             ))}
@@ -181,6 +182,7 @@ export function ProfilePage() {
         </div>
 
         <div className={styles.heroActions}>
+          <LevelBadge breakdown={levelBreakdown} />
           {isSelf && (
             <Link to="/settings" className={[buttonStyles.btn, buttonStyles.secondary].join(" ")}>
               Edit profile

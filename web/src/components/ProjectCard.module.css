@@ -32,6 +32,15 @@
   margin: 0;
 }
 
+.nameLink {
+  color: inherit;
+  text-decoration: none;
+}
+.nameLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .description {
   font-family: var(--vh-font-sans);
   font-size: 13px;
@@ -124,6 +133,9 @@
 .media {
   position: relative;
   margin-top: 10px;
+}
+.media > a {
+  display: block;
 }
 .owner + .media {
   margin-top: 10px;

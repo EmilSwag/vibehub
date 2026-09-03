@@ -1,0 +1,114 @@
+.wrap {
+  position: relative;
+  flex: none;
+}
+
+.plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 84px;
+  padding: 14px 10px 12px;
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg);
+  background: var(--vh-surface);
+  box-shadow: var(--vh-shadow-card);
+  cursor: pointer;
+  transition: border-color var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out);
+}
+.plate:hover {
+  border-color: var(--vh-border-strong);
+}
+.plate:active {
+  transform: scale(0.98);
+}
+.plateOpen {
+  border-color: var(--vh-text);
+}
+
+.num {
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--vh-text);
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--vh-font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vh-text-faint);
+}
+
+.chev {
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.chevOpen {
+  transform: rotate(180deg);
+}
+
+.barTrack {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  overflow: hidden;
+}
+.barFill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--vh-text);
+  border-radius: inherit;
+  transform-origin: left;
+  transform: scaleX(var(--pct, 0));
+  transition: transform var(--dur-reveal) var(--ease-out);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: 176px;
+  padding: 10px 12px;
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  background: var(--vh-surface);
+  box-shadow: var(--vh-shadow-pop);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+  font-size: 12.5px;
+}
+.row + .row {
+  border-top: 1px solid var(--vh-border);
+}
+.rowLabel {
+  color: var(--vh-text-faint);
+}
+.rowValue {
+  font-family: var(--vh-font-mono);
+  color: var(--vh-text);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .panel {
+    right: auto;
+    left: 0;
+  }
+}

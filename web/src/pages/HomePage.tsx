@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { friendsApi, usersApi } from "../lib/api";
-import { stagger } from "../lib/motion";
+import { stagger, useExitTransition } from "../lib/motion";
 import type { Friend, TrackerStatus } from "../types";
 import { Card } from "../components/ui/Card";
 import { Avatar } from "../components/ui/Avatar";
@@ -45,14 +45,18 @@ export function HomePage() {
   const activeFriends = friends.filter((f) => presences.get(f.user.username)?.status === "active");
   const me = user ? presences.get(user.username) : undefined;
 
+  // Until the tracker reports, the profile is empty — keep offering the fix.
+  // Kept mounted a beat past "connected" so the banner fades out instead of vanishing.
+  const showBanner = !!tracker && !tracker.connected;
+  const { render: renderBanner, closing: bannerClosing } = useExitTransition(showBanner, 260);
+
   return (
     <div>
       <h1 className={styles.greeting}>Back at it, {user?.displayName}.</h1>
-      <p className={styles.subtitle}>Here's what your friends are shipping right now.</p>
+      <p className={styles.subtitle}>What your friends are shipping right now.</p>
 
-      {/* Until the tracker reports, the profile is empty — keep offering the fix. */}
-      {tracker && !tracker.connected && (
-        <div className={[styles.banner, "reveal"].join(" ")}>
+      {renderBanner && (
+        <div className={[styles.banner, bannerClosing ? "leave" : "reveal"].join(" ")}>
           <ConnectTools onConnected={() => setTracker((t) => (t ? { ...t, connected: true } : t))} />
         </div>
       )}

@@ -10,6 +10,7 @@ import { Avatar } from "../components/ui/Avatar";
 import { FieldLabel, Input, Textarea } from "../components/ui/Input";
 import { ROLES, RoleGlyph } from "../components/ui/RoleGlyph";
 import { ConnectTools } from "../components/ConnectTools";
+import { Skeleton } from "../components/ui/Skeleton";
 import styles from "./SettingsPage.module.css";
 
 function ProfileSection() {
@@ -131,6 +132,19 @@ function LinksSection() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <Card aria-busy="true">
+        {[0, 1].map((i) => (
+          <div className={styles.linkRow} key={i} style={{ marginBottom: 8 }}>
+            <Skeleton height={36} width="60%" />
+            <Skeleton height={36} width="30%" />
+          </div>
+        ))}
+      </Card>
+    );
   }
 
   return (
