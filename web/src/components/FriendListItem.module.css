@@ -1,0 +1,31 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-3);
+  padding: var(--vh-space-3);
+  border-bottom: 1px solid var(--vh-border);
+  text-decoration: none;
+  color: inherit;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.info {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-family: var(--vh-font-sans);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--vh-text);
+}
+
+.meta {
+  font-family: var(--vh-font-sans);
+  font-size: 12px;
+  color: var(--vh-text-faint);
+}

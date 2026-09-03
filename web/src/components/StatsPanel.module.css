@@ -1,0 +1,76 @@
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--vh-space-3);
+  margin-bottom: var(--vh-space-4);
+}
+
+@media (max-width: 640px) {
+  .tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.barList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-2);
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: 120px 1fr 70px;
+  align-items: center;
+  gap: var(--vh-space-2);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+}
+
+.barLabel {
+  color: var(--vh-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barTrack {
+  background: var(--vh-surface-2);
+  border-radius: var(--vh-radius-sm);
+  height: 10px;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: var(--vh-accent);
+  border-radius: var(--vh-radius-sm);
+}
+
+.barFillAlt {
+  background: var(--vh-status-idle);
+}
+
+.barValue {
+  font-family: var(--vh-font-mono);
+  color: var(--vh-text-faint);
+  text-align: right;
+}
+
+.compareForm {
+  display: flex;
+  gap: var(--vh-space-2);
+  margin: var(--vh-space-4) 0;
+}
+
+.compareGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--vh-space-4);
+}
+
+.compareCol h4 {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+  margin: 0 0 var(--vh-space-2);
+}

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Vibemunity__*",
+      "Edit(./**)"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "vibehub",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open-source Steam-like social platform for AI-assisted developers.",
+  "license": "MIT",
+  "workspaces": [
+    "server",
+    "web",
+    "tracker"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web",
+    "dev:tracker": "npm run dev --workspace tracker",
+    "build": "npm run build --workspace server && npm run build --workspace web && npm run build --workspace tracker",
+    "db:up": "docker compose up -d postgres"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

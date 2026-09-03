@@ -1,0 +1,119 @@
+.hero {
+  display: flex;
+  gap: var(--vh-space-4);
+  align-items: flex-start;
+  margin-bottom: var(--vh-space-5);
+}
+
+.heroInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-3);
+  flex-wrap: wrap;
+}
+
+.displayName {
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  font-size: 32px;
+  color: var(--vh-text);
+  margin: 0;
+}
+
+.username {
+  font-family: var(--vh-font-mono);
+  font-size: 13px;
+  color: var(--vh-text-faint);
+}
+
+.bio {
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  color: var(--vh-text-dim);
+  max-width: 60ch;
+  margin: var(--vh-space-2) 0;
+}
+
+.links {
+  display: flex;
+  gap: var(--vh-space-3);
+  flex-wrap: wrap;
+  margin-top: var(--vh-space-2);
+}
+
+.linkChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vh-text-dim);
+  text-decoration: none;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  background: var(--vh-surface-2);
+  padding: 6px 12px;
+  border-radius: var(--vh-radius-pill);
+}
+
+.linkChip:hover {
+  color: var(--vh-accent-hover);
+}
+
+.friendCount {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-faint);
+  margin-top: var(--vh-space-2);
+}
+
+.heroActions {
+  flex-shrink: 0;
+}
+
+.section {
+  margin-bottom: var(--vh-space-5);
+}
+
+.sectionTitle {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vh-text-faint);
+  margin: 0 0 var(--vh-space-3);
+}
+
+.projectGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--vh-space-3);
+}
+
+.wallList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+  margin-bottom: var(--vh-space-3);
+}
+
+.postForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-2);
+}
+
+.postActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.empty {
+  color: var(--vh-text-faint);
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+}

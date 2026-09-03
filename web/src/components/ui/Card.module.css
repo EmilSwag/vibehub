@@ -1,0 +1,7 @@
+.card {
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-card);
+  padding: var(--vh-space-4);
+}

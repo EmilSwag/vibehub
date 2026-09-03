@@ -1,0 +1,72 @@
+.page {
+  min-height: 100vh;
+  background: var(--vh-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--vh-space-4);
+}
+
+.card {
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+
+.mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--vh-accent);
+  margin: 0 auto var(--vh-space-4);
+}
+
+.title {
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  font-size: 24px;
+  color: var(--vh-text);
+  margin: 0 0 var(--vh-space-1);
+}
+
+.subtitle {
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  color: var(--vh-text-dim);
+  margin: 0 0 var(--vh-space-4);
+}
+
+.githubBtn {
+  width: 100%;
+  text-decoration: none;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-2);
+  color: var(--vh-text-faint);
+  font-size: 12px;
+  margin: var(--vh-space-4) 0;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--vh-border);
+}
+
+.devForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-2);
+  text-align: left;
+}
+
+.error {
+  color: var(--vh-accent-hover);
+  font-size: 13px;
+  font-family: var(--vh-font-sans);
+}

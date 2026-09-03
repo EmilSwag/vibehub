@@ -1,0 +1,38 @@
+{
+  "name": "@vibehub/server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "VibeHub API — Express + Prisma + WebSocket.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate --schema prisma/schema.prisma && prisma generate --schema prisma/schema.sqlite.prisma",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:dev": "prisma db push --schema prisma/schema.sqlite.prisma --skip-generate",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.7",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "prisma": "^5.20.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,35 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+
+# server
+server/prisma/dev.db
+server/prisma/dev.db-journal
+server/prisma/*.db
+server/prisma/*.db-journal
+server/generated/
+server/uploads/
+*.db
+*.db-journal
+
+# build caches / scratch
+*.tsbuildinfo
+vite.config.ts.timestamp-*
+.temp/
+.smoke-*.txt
+.rw-*.json
+
+# agent/IDE local state
+.claude/settings.local.json
+.quadcodeai/
+
+# macOS SwiftPM
+macos/.build/
+macos/.swiftpm/
+
+# tracker local state (never commit a real device token)
+.vibehub/

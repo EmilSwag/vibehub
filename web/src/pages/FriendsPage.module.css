@@ -1,0 +1,94 @@
+.title {
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  font-size: 28px;
+  color: var(--vh-text);
+  margin: 0 0 var(--vh-space-5);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--vh-space-4);
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sectionTitle {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vh-text-faint);
+  margin: 0 0 var(--vh-space-2);
+}
+
+.card {
+  padding: 0;
+}
+
+.empty {
+  padding: var(--vh-space-4);
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  color: var(--vh-text-faint);
+}
+
+.requestRow {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-3);
+  padding: var(--vh-space-3);
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.requestRow:last-child {
+  border-bottom: none;
+}
+
+.requestName {
+  flex: 1;
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  color: var(--vh-text);
+}
+
+.requestActions {
+  display: flex;
+  gap: var(--vh-space-2);
+}
+
+.addForm {
+  display: flex;
+  gap: var(--vh-space-2);
+  margin-bottom: var(--vh-space-4);
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-4);
+}
+
+.formMessage {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+}
+
+.unfriendBtn {
+  background: none;
+  border: none;
+  color: var(--vh-text-faint);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.unfriendBtn:hover {
+  color: var(--vh-accent-hover);
+}

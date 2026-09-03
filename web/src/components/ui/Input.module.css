@@ -1,0 +1,29 @@
+.field {
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  color: var(--vh-text);
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  padding: 10px 14px;
+  width: 100%;
+}
+
+.field::placeholder {
+  color: var(--vh-text-faint);
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--vh-accent);
+  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+}
+
+.label {
+  display: block;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vh-text-dim);
+  margin-bottom: var(--vh-space-1);
+}

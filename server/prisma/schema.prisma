@@ -1,0 +1,260 @@
+// VibeHub — Postgres schema (production + `npm run db:migrate`).
+// Full field-level rationale: vibehub/docs/ARCHITECTURE.md §2.
+//
+// SQLite dev fallback lives in schema.sqlite.prisma — a hand-maintained mirror with
+// enums flattened to String (SQLite has no native enum type). Keep both in lockstep
+// when editing models. See docs/BUILD_PLAN.md §4 for why this isn't generated
+// automatically.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Archetype {
+  CODER
+  ARTIST
+  DIRECTOR
+  GENERALIST
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELED
+}
+
+enum SessionStatus {
+  ACTIVE
+  IDLE
+  ENDED
+}
+
+enum ActivityEventType {
+  HEARTBEAT
+  SESSION_START
+  SESSION_END
+  GIT_COMMIT
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  username           String    @unique
+  displayName        String
+  email              String?   @unique
+  avatarUrl          String?
+  bio                String?
+  githubId           String?   @unique
+  githubUsername     String?
+  githubAccessToken  String?
+  passwordHash       String?
+  archetype          Archetype?
+  archetypeComputedAt DateTime?
+  isDevAccount       Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  externalLinks          ExternalLink[]
+  sentFriendRequests     FriendRequest[]   @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[]   @relation("ReceivedFriendRequests")
+  friendshipsA           Friendship[]      @relation("FriendshipA")
+  friendshipsB           Friendship[]      @relation("FriendshipB")
+  wallCommentsAuthored   WallComment[]     @relation("WallCommentAuthor")
+  wallCommentsReceived   WallComment[]     @relation("WallCommentOwner")
+  projects               Project[]
+  likes                  Like[]
+  sessions               Session[]
+  activityEvents         ActivityEvent[]
+  dailyStats             DailyStat[]
+  streak                 UserStreak?
+  githubCommitDays       GithubCommitDay[]
+  trackerTokens          TrackerToken[]
+  authSessions           AuthSession[]
+
+  @@map("users")
+}
+
+model ExternalLink {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url    String
+  label  String?
+  icon   String
+  order  Int    @default(0)
+
+  @@map("external_links")
+}
+
+model FriendRequest {
+  id         String              @id @default(cuid())
+  senderId   String
+  sender     User                @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   User                @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+  status     FriendRequestStatus @default(PENDING)
+  createdAt  DateTime            @default(now())
+  respondedAt DateTime?
+
+  // NOTE: a partial unique index enforcing one PENDING request per (senderId,
+  // receiverId) pair is added by hand in the migration SQL — Prisma schema syntax
+  // cannot express a WHERE-qualified unique constraint. See docs/ARCHITECTURE.md §2.3.
+  @@map("friend_requests")
+}
+
+model Friendship {
+  id      String   @id @default(cuid())
+  userAId String
+  userA   User     @relation("FriendshipA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId String
+  userB   User     @relation("FriendshipB", fields: [userBId], references: [id], onDelete: Cascade)
+  since   DateTime @default(now())
+
+  @@unique([userAId, userBId])
+  @@map("friendships")
+}
+
+model WallComment {
+  id          String    @id @default(cuid())
+  wallOwnerId String
+  wallOwner   User      @relation("WallCommentOwner", fields: [wallOwnerId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User      @relation("WallCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  body        String
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  @@map("wall_comments")
+}
+
+model Project {
+  id            String   @id @default(cuid())
+  ownerId       String
+  owner         User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  slug          String
+  name          String
+  description   String?
+  repoUrl       String?
+  liveUrl       String?
+  coverImageUrl String?
+  isPublic      Boolean  @default(true)
+  likeCount     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  likes Like[]
+
+  @@unique([ownerId, slug])
+  @@map("projects")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, userId])
+  @@map("likes")
+}
+
+model Session {
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectAlias     String
+  tool             String
+  model            String
+  status           SessionStatus @default(ACTIVE)
+  startedAt        DateTime      @default(now())
+  lastHeartbeatAt  DateTime      @default(now())
+  endedAt          DateTime?
+  tokensInput      Int           @default(0)
+  tokensOutput     Int           @default(0)
+
+  activityEvents ActivityEvent[]
+
+  @@map("sessions")
+}
+
+model ActivityEvent {
+  id         String            @id @default(cuid())
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId  String?
+  session    Session?          @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  type       ActivityEventType
+  occurredAt DateTime
+  receivedAt DateTime          @default(now())
+  payload    Json
+
+  @@map("activity_events")
+}
+
+model DailyStat {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date          DateTime
+  model         String
+  tool          String
+  tokensInput   Int      @default(0)
+  tokensOutput  Int      @default(0)
+  activeSeconds Int      @default(0)
+
+  @@unique([userId, date, model, tool])
+  @@map("daily_stats")
+}
+
+model UserStreak {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  lastActiveDate  DateTime?
+
+  @@map("user_streaks")
+}
+
+model GithubCommitDay {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        DateTime
+  commitCount Int      @default(0)
+
+  @@unique([userId, date])
+  @@map("github_commit_days")
+}
+
+model TrackerToken {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  label       String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("tracker_tokens")
+}
+
+model AuthSession {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+
+  @@map("auth_sessions")
+}

@@ -1,0 +1,15 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vh-space-2);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

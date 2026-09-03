@@ -1,0 +1,10 @@
+.page {
+  min-height: 100vh;
+  background: var(--vh-bg);
+}
+
+.content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--vh-space-5) var(--vh-space-4);
+}

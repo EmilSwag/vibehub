@@ -1,0 +1,15 @@
+.avatar {
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vh-surface-2);
+  color: var(--vh-text-dim);
+  font-family: var(--vh-font-serif);
+}

@@ -1,0 +1,10 @@
+node_modules
+dist
+generated
+uploads
+.env
+.env.*
+!.env.example
+*.log
+prisma/*.db
+prisma/*.db-journal

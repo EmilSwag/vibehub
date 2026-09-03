@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vibehub
+      POSTGRES_PASSWORD: vibehub
+      POSTGRES_DB: vibehub
+    ports:
+      - "5432:5432"
+    volumes:
+      - vibehub_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  vibehub_postgres_data:

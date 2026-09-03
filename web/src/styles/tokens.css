@@ -1,0 +1,159 @@
+/*
+ * VibeHub design tokens — strict monochrome (zero hue). Grayscale surfaces,
+ * ink-black accent, serif display headings + grotesque UI sans, unchanged.
+ * No gradients. No color-coded UI — status/archetype are conveyed by shape,
+ * label, and lightness only. Contract for the web workstream:
+ * docs/BUILD_PLAN.md §5 + docs/DESIGN.md ("no hue is ever introduced by any
+ * component — enforce this in review, not just at token-definition time").
+ *
+ * Light is the DEFAULT. Dark applies two ways, both kept in lockstep:
+ * automatically via `prefers-color-scheme: dark` (unless explicitly opted
+ * out with `[data-theme="light"]`), or explicitly via `[data-theme="dark"]`
+ * regardless of system preference.
+ */
+
+:root {
+  /* Surfaces */
+  --vh-bg: #F5F5F5;           /* app background */
+  --vh-surface: #FFFFFF;      /* cards */
+  --vh-surface-2: #ECECEC;    /* sidebar / panels / hovers */
+  --vh-border: #DCDCDC;
+
+  /* Text */
+  --vh-text: #111111;
+  --vh-text-dim: #555555;
+  --vh-text-faint: #8A8A8A;
+
+  /* Accent — ink black, zero hue */
+  --vh-accent: #111111;
+  --vh-accent-hover: #333333;
+  --vh-accent-soft: #E6E6E6;  /* tinted backgrounds, selected states */
+  --vh-on-accent: #FFFFFF;
+
+  /* Back-compat with scaffold: "inversion" maps to accent */
+  --vh-invert-bg: var(--vh-accent);
+  --vh-invert-text: var(--vh-on-accent);
+
+  --vh-focus-ring: rgba(0, 0, 0, 0.35);
+
+  /* Presence — conveyed by lightness, never hue */
+  --vh-status-active: #111111;
+  --vh-status-idle: #8A8A8A;
+  --vh-status-offline: #C8C8C8;
+
+  /* Shape — generous rounding, unchanged */
+  --vh-radius-sm: 8px;
+  --vh-radius-md: 12px;
+  --vh-radius-lg: 16px;
+  --vh-radius-pill: 999px;
+
+  --vh-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --vh-shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  --vh-space-1: 4px;
+  --vh-space-2: 8px;
+  --vh-space-3: 16px;
+  --vh-space-4: 24px;
+  --vh-space-5: 40px;
+
+  /* Typography — unchanged: serif display + grotesque UI sans */
+  --vh-font-sans: "Styrene B", "Styrene A", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Inter, sans-serif;
+  --vh-font-serif: "Tiempos Text", "Tiempos Headline", "Source Serif 4",
+    Georgia, serif;
+  --vh-font-mono: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --vh-bg: #0F0F0F;
+    --vh-surface: #171717;
+    --vh-surface-2: #232323;
+    --vh-border: #333333;
+
+    --vh-text: #F2F2F2;
+    --vh-text-dim: #B0B0B0;
+    --vh-text-faint: #7A7A7A;
+
+    --vh-accent: #F2F2F2;
+    --vh-accent-hover: #D9D9D9;
+    --vh-accent-soft: #2B2B2B;
+    --vh-on-accent: #111111;
+
+    --vh-focus-ring: rgba(255, 255, 255, 0.35);
+
+    --vh-status-active: #F2F2F2;
+    --vh-status-idle: #8A8A8A;
+    --vh-status-offline: #4A4A4A;
+
+    --vh-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --vh-shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  --vh-bg: #0F0F0F;
+  --vh-surface: #171717;
+  --vh-surface-2: #232323;
+  --vh-border: #333333;
+
+  --vh-text: #F2F2F2;
+  --vh-text-dim: #B0B0B0;
+  --vh-text-faint: #7A7A7A;
+
+  --vh-accent: #F2F2F2;
+  --vh-accent-hover: #D9D9D9;
+  --vh-accent-soft: #2B2B2B;
+  --vh-on-accent: #111111;
+
+  --vh-focus-ring: rgba(255, 255, 255, 0.35);
+
+  --vh-status-active: #F2F2F2;
+  --vh-status-idle: #8A8A8A;
+  --vh-status-offline: #4A4A4A;
+
+  --vh-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --vh-shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--vh-bg);
+  color: var(--vh-text);
+  font-family: var(--vh-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Links inherit ink — the browser default blue/purple is the one hue that would
+ * otherwise leak into an otherwise strictly grayscale UI. */
+a {
+  color: inherit;
+  text-decoration-color: var(--vh-text-faint);
+  text-underline-offset: 0.15em;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Form controls + focus rings: no UA accent colors. */
+input, textarea, select, button {
+  accent-color: var(--vh-accent);
+}
+:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+::selection {
+  background: var(--vh-accent-soft);
+  color: var(--vh-text);
+}
