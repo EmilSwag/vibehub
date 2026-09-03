@@ -33,9 +33,10 @@
 .panel {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  right: 0;
   z-index: 10;
   width: min(340px, 80vw);
+  max-width: calc(100vw - 32px);
   padding: 8px;
   border: 1px solid var(--vh-border);
   border-radius: var(--vh-radius-md);
