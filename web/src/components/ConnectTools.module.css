@@ -8,7 +8,7 @@
   gap: 16px;
   padding: 18px;
   border: 1px solid var(--vh-border);
-  border-radius: var(--vh-radius-lg);
+  border-radius: var(--vh-radius-md);
   background: var(--vh-surface);
   text-align: left;
   transition: border-color var(--dur-fade) var(--ease-out);
@@ -177,8 +177,7 @@
   max-height: 220px;
   overflow: auto;
   border-radius: var(--vh-radius-md);
-  border: 1px solid var(--vh-border);
-  background: var(--vh-bg);
+  background: var(--vh-surface-2);
   font-family: var(--vh-font-mono);
   font-size: 12px;
   line-height: 1.55;

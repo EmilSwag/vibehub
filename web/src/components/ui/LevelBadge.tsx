@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { LevelBreakdown } from "../../types";
 import { formatTokens } from "../../lib/format";
 import styles from "./LevelBadge.module.css";
@@ -89,6 +90,10 @@ function Ring({ tier }: { tier: RingTier }) {
 const ARC_R = 30.5;
 const ARC_CIRCUMFERENCE = 2 * Math.PI * ARC_R;
 
+// Matches the `.panelMobile` breakpoint below — the breakdown panel switches from
+// "float under the badge" to "full-width sheet under the badge" past this width.
+const MOBILE_BREAKPOINT = 640;
+
 interface Props {
   level: number;
   /** Full data enables the XP progress arc + (size="md") the click-to-expand panel.
@@ -107,6 +112,9 @@ interface Props {
  */
 export function LevelBadge({ level, breakdown, size = "md", className }: Props) {
   const [open, setOpen] = useState(false);
+  // Mobile: the panel goes full-width and needs its exact vertical position measured
+  // (its offset parent, .wrap, is only as wide as the badge itself — see .panelMobile).
+  const [mobileTop, setMobileTop] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const tier = ringTierFor(level);
   const pct = breakdown ? progressToNextLevel(level, breakdown.xp) : null;
@@ -114,6 +122,9 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
 
   useEffect(() => {
     if (!open) return;
+    const isMobile = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
+    setMobileTop(isMobile && ref.current ? ref.current.getBoundingClientRect().bottom + 8 : null);
+
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -192,7 +203,12 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
       </button>
 
       {open && (
-        <div className={cx(styles.panel, "scale-in")} role="dialog" aria-label="Level breakdown">
+        <div
+          className={cx(styles.panel, mobileTop !== null && styles.panelMobile, "scale-in")}
+          style={mobileTop !== null ? ({ top: mobileTop } as CSSProperties) : undefined}
+          role="dialog"
+          aria-label="Level breakdown"
+        >
           {rows.map(([label, value]) => (
             <div className={styles.row} key={label}>
               <span className={styles.rowLabel}>{label}</span>

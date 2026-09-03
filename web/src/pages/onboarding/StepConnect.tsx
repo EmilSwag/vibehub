@@ -29,9 +29,15 @@ export function StepConnect({ onBack, onNext }: Props) {
         <button type="button" className={styles.linkButton} onClick={onBack}>
           Back
         </button>
-        <Button type="button" onClick={onNext}>
-          {connected ? "Continue" : "I'll do this later"}
-        </Button>
+        {connected ? (
+          <Button type="button" onClick={onNext}>
+            Continue
+          </Button>
+        ) : (
+          <button type="button" className={styles.linkButton} onClick={onNext}>
+            I'll do this later
+          </button>
+        )}
       </div>
     </div>
   );
