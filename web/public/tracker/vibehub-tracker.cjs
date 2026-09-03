@@ -2685,10 +2685,17 @@ function enqueue(event) {
   writeQueue(queue);
 }
 async function flushQueue(send) {
-  let queue = readQueue(), delivered = 0;
-  for (; queue.length > 0 && await send(queue[0]); )
+  let queue = readQueue(), delivered = 0, authRejected = !1;
+  for (; queue.length > 0; ) {
+    let result = await send(queue[0]);
+    if (result.authRejected) {
+      authRejected = !0, queue.length = 0;
+      break;
+    }
+    if (!result.ok) break;
     queue.shift(), delivered++;
-  return writeQueue(queue), { delivered, remaining: queue.length };
+  }
+  return writeQueue(queue), { delivered, remaining: queue.length, authRejected };
 }
 
 // src/statusFile.ts
@@ -2709,6 +2716,10 @@ function writeStatus(status) {
 function writeOfflineStatus() {
   writeStatus({ ...OFFLINE_STATUS, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
 }
+function markAuthRejected(rejected) {
+  let current = readStatus();
+  current.authRejected !== rejected && writeStatus({ ...current, authRejected: rejected });
+}
 
 // src/heartbeat.ts
 var UNKNOWN_MODEL = "unknown";
@@ -2723,7 +2734,7 @@ function createLoopState(config) {
 }
 async function postHeartbeat(apiUrl, deviceToken, payload) {
   try {
-    return (await fetch(
+    let res = await fetch(
       `${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/heartbeat`,
       {
         method: "POST",
@@ -2733,18 +2744,29 @@ async function postHeartbeat(apiUrl, deviceToken, payload) {
         },
         body: JSON.stringify(payload)
       }
-    )).ok;
+    );
+    return { ok: res.ok, authRejected: res.status === 401 };
   } catch {
-    return !1;
+    return { ok: !1, authRejected: !1 };
   }
 }
 async function sendOrQueue(config, payload) {
-  await postHeartbeat(config.apiUrl, config.deviceToken, payload) || enqueue({ payload, apiUrl: config.apiUrl, deviceToken: config.deviceToken });
+  let result = await postHeartbeat(config.apiUrl, config.deviceToken, payload);
+  if (result.authRejected) {
+    markAuthRejected(!0);
+    return;
+  }
+  if (!result.ok) {
+    enqueue({ payload, apiUrl: config.apiUrl, deviceToken: config.deviceToken });
+    return;
+  }
+  markAuthRejected(!1);
 }
 async function flushOfflineQueue() {
-  return flushQueue(
+  let result = await flushQueue(
     (event) => postHeartbeat(event.apiUrl, event.deviceToken, event.payload)
   );
+  return result.authRejected && markAuthRejected(!0), result;
 }
 function endActiveSession(config, session, occurredAt) {
   return sendOrQueue(config, {
@@ -2785,7 +2807,8 @@ async function tick(config, state) {
       tool,
       model,
       sessionStartedAt: session.startedAt,
-      updatedAt: nowIso
+      updatedAt: nowIso,
+      authRejected: readStatus().authRejected
     });
     return;
   }
@@ -2799,7 +2822,8 @@ async function tick(config, state) {
       tool: ended.tool,
       model: ended.model,
       sessionStartedAt: ended.startedAt,
-      updatedAt: nowIso
+      updatedAt: nowIso,
+      authRejected: readStatus().authRejected
     });
   }
 }
@@ -2871,7 +2895,23 @@ function runForeground(config) {
 // src/index.ts
 var CONFIG_PATH_LABEL = "~/.vibehub/config.json", STATUS_PATH_LABEL = "~/.vibehub/status.json", program2 = new Command();
 program2.name("vibehub-tracker").description("VibeHub local activity tracker");
-program2.command("login <deviceToken>").description(`write ${CONFIG_PATH_LABEL} with the given device token`).option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL).action((deviceToken, options) => {
+async function verifyToken(apiUrl, deviceToken) {
+  try {
+    let res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/verify`, {
+      headers: { Authorization: `Bearer ${deviceToken}` }
+    });
+    if (res.ok) {
+      let body = await res.json().catch(() => ({}));
+      return { ok: !0, rejected: !1, detail: body.username ? `@${body.username}` : "" };
+    }
+    return res.status === 401 ? { ok: !1, rejected: !0, detail: (await res.json().catch(() => ({}))).error ?? "Invalid or revoked tracker token" } : { ok: !1, rejected: !1, detail: `server returned ${res.status}` };
+  } catch (err) {
+    return { ok: !1, rejected: !1, detail: err instanceof Error ? err.message : "network error" };
+  }
+}
+program2.command("login <deviceToken>").description(`validate the token with the server, then write ${CONFIG_PATH_LABEL}`).option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL).action(async (deviceToken, options) => {
+  let verified = await verifyToken(options.apiUrl, deviceToken);
+  verified.rejected && (console.error(`Login failed: token rejected by the server (${verified.detail}).`), console.error("Create a new token in VibeHub \u2192 Settings \u2192 Tracker and try again."), process.exit(1));
   let existing = readConfig(), config = {
     apiUrl: options.apiUrl,
     deviceToken,
@@ -2880,7 +2920,7 @@ program2.command("login <deviceToken>").description(`write ${CONFIG_PATH_LABEL} 
     idleThresholdMs: existing?.idleThresholdMs,
     toolProcessNames: existing?.toolProcessNames
   };
-  writeConfig(config), console.log(`Logged in. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`);
+  writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) \u2014 saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
 });
 program2.command("set <projectFolder> <alias>").description(`remap a project folder's display alias, or hide it with the literal "${HIDDEN}"`).action((projectFolder, alias) => {
   let config = requireConfig();
@@ -2897,7 +2937,7 @@ program2.command("status").description(`pretty-print the current ${STATUS_PATH_L
     return;
   }
   let status = readStatus(), { running, pid } = daemonStatus();
-  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status !== "offline" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
+  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status !== "offline" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`), status.authRejected ? (console.log("Connected: no \u2014 token rejected by the server."), console.log("  Create a new token in VibeHub \u2192 Settings \u2192 Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.authRejected === !1 ? console.log("Connected: yes") : console.log("Connected: not yet \u2014 waiting for the first heartbeat. Open an AI tool session and check again in ~30s.") : console.log("Connected: no \u2014 daemon isn't running. Run `vibehub-tracker start`.");
 });
 program2.command("stop").description("stop the running tracker daemon").action(() => {
   stopDaemon();

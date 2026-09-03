@@ -1,5 +1,17 @@
 import type { Session } from "@prisma/client";
 import { prisma } from "../db";
+import { env } from "../env";
+
+// Round 5: presence must decay from `lastHeartbeatAt` at *read* time, not trust
+// the stored `Session.status` column. That column is only advanced by the ~30s
+// sweep (jobs/session-rollup.ts), and if the tracker vanishes mid-session
+// (laptop closed, process killed, network drop) with no final session_end, it
+// never gets a chance to run again for that row — the session sits at
+// `status: "ACTIVE"` forever and every read of it reported "active" with no
+// upper bound. `ONLINE_AFTER_MS` is the single source of truth for the
+// active→idle edge, shared with the sweep so both agree; the idle→offline edge
+// reuses the existing, already-configurable `SESSION_IDLE_TIMEOUT_MS`.
+export const ONLINE_AFTER_MS = 2 * 60_000;
 
 // Session lifecycle helpers shared by the heartbeat route (routes/tracker.ts) and the
 // rollup job (jobs/session-rollup.ts). Contract: ARCHITECTURE.md §2.8, §2.10, §2.11, §4.3.
@@ -106,16 +118,22 @@ export function sessionToActivity(session: Session): PresenceActivity {
   };
 }
 
-/** Current presence for a user, derived from the freshest non-ended Session row. */
+/**
+ * Current presence for a user, derived from the freshest non-ended Session row —
+ * decayed from `lastHeartbeatAt` on every call, never trusting the stored
+ * `status` column alone (see ONLINE_AFTER_MS above for why).
+ */
 export async function presenceFor(userId: string, username: string): Promise<PresenceSnapshot> {
   const session = await prisma.session.findFirst({
     where: { userId, status: { not: "ENDED" } },
     orderBy: { lastHeartbeatAt: "desc" },
   });
   if (!session) return { username, status: "offline", activity: null };
-  return {
-    username,
-    status: session.status === "IDLE" ? "idle" : "active",
-    activity: sessionToActivity(session),
-  };
+
+  const silentForMs = Date.now() - session.lastHeartbeatAt.getTime();
+  const status: PresenceStatus =
+    silentForMs > env.sessionIdleTimeoutMs ? "offline" : silentForMs > ONLINE_AFTER_MS ? "idle" : "active";
+
+  if (status === "offline") return { username, status: "offline", activity: null };
+  return { username, status, activity: sessionToActivity(session) };
 }

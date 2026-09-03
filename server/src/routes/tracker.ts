@@ -15,6 +15,23 @@ import { emitPresenceUpdate } from "../ws/hub";
 
 const router = Router();
 
+// Round 5: `vibehub-tracker login <token>` calls this to validate the token before
+// ever writing it to ~/.vibehub/config.json, so a bad paste fails loudly at login
+// time instead of silently queuing rejected heartbeats forever. GET + no body so it
+// never creates a Session/ActivityEvent row the way a real heartbeat would — this is
+// purely "is this token good," same 401 shape as heartbeat via the same middleware.
+router.get(
+  "/tracker/verify",
+  requireTrackerToken,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: req.trackerUserId! },
+      select: { username: true },
+    });
+    res.json({ username: user.username });
+  })
+);
+
 const UNKNOWN = "unknown";
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
 

@@ -23,3 +23,21 @@ export function writeStatus(status: StatusFile): void {
 export function writeOfflineStatus(): void {
   writeStatus({ ...OFFLINE_STATUS, updatedAt: new Date().toISOString() });
 }
+
+/**
+ * Flips the `authRejected` flag without touching the rest of the status —
+ * called on every send attempt (live or queued-retry) so `status` reflects
+ * the current token's health, not just whatever the last heartbeat reported.
+ */
+export function markAuthRejected(rejected: boolean): void {
+  const current = readStatus();
+  // Strict equality on purpose: `undefined` ("never attempted yet") must NOT be
+  // treated as equal to `false` ("confirmed good") — collapsing them here (an
+  // earlier version of this used `?? false`) meant the very first successful
+  // send after login never actually got persisted, since undefined already
+  // looked like a match for `false` and the write was skipped as a no-op.
+  // `status` then stayed stuck reporting "not yet" forever, even once the
+  // tracker was genuinely connected.
+  if (current.authRejected === rejected) return;
+  writeStatus({ ...current, authRejected: rejected });
+}

@@ -80,6 +80,18 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Root-caused presence bug (round 5): this effect re-runs on every `setUser`
+    // (any profile edit — bio, avatar, username, roles — all mint a new `user`
+    // object even though the account didn't change), which tears down and
+    // reopens the socket below. The snapshot fetch that follows is always
+    // correct as of *now*, but `presencesRef` previously carried over whatever
+    // was left in it from the *previous* cycle — so a stale live-pushed status
+    // from before this re-run got merged back on top of the fresh, corrected
+    // read, silently reintroducing the wrong value. Reset here so only pushes
+    // that arrive during *this* cycle's in-flight fetch (a real race worth
+    // keeping) ever get merged onto it.
+    presencesRef.current = new Map();
+
     // Initial snapshot — the socket only pushes *changes*, so without this the
     // header badge and "Live now" stay empty until something happens.
     let cancelled = false;
@@ -150,7 +162,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.close();
       socketRef.current = null;
     };
-  }, [user, pushToast, refreshRequests]);
+    // Deliberately depend on the account identity (`user.id`), not the `user`
+    // object itself: `setUser` mints a new object on every profile edit (bio,
+    // avatar, username, roles) with no identity change, and re-running this
+    // tore the socket down and refetched presence on every such edit — the
+    // other half of the round-5 presence bug (see the reset comment above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, pushToast, refreshRequests]);
 
   const watchWall = useMemo(
     () => (username: string, onComment: (comment: WallComment) => void) => {

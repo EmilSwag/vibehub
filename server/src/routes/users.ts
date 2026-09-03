@@ -6,6 +6,7 @@ import multer from "multer";
 import { prisma } from "../db";
 import { env } from "../env";
 import { generateRawToken, hashToken } from "../lib/crypto";
+import { decryptGithubToken, fetchOwnRepos, NoGithubTokenError } from "../lib/github";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { computeLevel, computeLevels } from "../lib/level";
 import { detectIcon, detectLabel } from "../lib/links";
@@ -157,6 +158,29 @@ router.post(
       data: { onboardedAt: req.user!.onboardedAt ?? new Date() },
     });
     res.json({ user: toMeUser(user) });
+  })
+);
+
+/**
+ * Repo picker (round 5) — the owner's own repos, for attaching one to a project.
+ * Auth precedence and scope policy: lib/github.ts's fetchOwnRepos. 409 (not 401/
+ * 403) when there's simply no GitHub account connected yet — this is a normal,
+ * expected state for a dev-login/username account, not an auth failure.
+ */
+router.get(
+  "/users/me/github/repos",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const token = decryptGithubToken(req.user!.githubAccessToken);
+    try {
+      const repos = await fetchOwnRepos(req.user!.id, token);
+      res.json({ repos });
+    } catch (err) {
+      if (err instanceof NoGithubTokenError) {
+        throw new HttpError(409, "No GitHub account connected. Sign in with GitHub to list your repos.");
+      }
+      throw err;
+    }
   })
 );
 

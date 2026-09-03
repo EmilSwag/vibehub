@@ -2,7 +2,8 @@ import { heartbeatIntervalMs, idleThresholdMs } from "./config";
 import { Detector } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
 import { enqueue, flushQueue } from "./queue";
-import { writeOfflineStatus, writeStatus } from "./statusFile";
+import type { SendResult } from "./queue";
+import { markAuthRejected, readStatus, writeOfflineStatus, writeStatus } from "./statusFile";
 import type { HeartbeatPayload, QueuedEvent, TrackerConfig } from "./types";
 
 const UNKNOWN_MODEL = "unknown";
@@ -35,13 +36,16 @@ export function createLoopState(config?: TrackerConfig): LoopState {
 
 /**
  * POSTs one heartbeat event per docs/ARCHITECTURE.md §4.3. Never throws —
- * network/parse failures resolve to `false` so the caller can queue instead.
+ * network/parse failures resolve to `{ ok: false, authRejected: false }` so
+ * the caller can queue instead. A 401 is reported distinctly (`authRejected:
+ * true`): that's the server saying the token itself is bad, not a transient
+ * failure — see queue.ts's flushQueue for why that must not be retried.
  */
 export async function postHeartbeat(
   apiUrl: string,
   deviceToken: string,
   payload: HeartbeatPayload
-): Promise<boolean> {
+): Promise<SendResult> {
   try {
     const res = await fetch(
       `${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/heartbeat`,
@@ -54,9 +58,9 @@ export async function postHeartbeat(
         body: JSON.stringify(payload),
       }
     );
-    return res.ok;
+    return { ok: res.ok, authRejected: res.status === 401 };
   } catch {
-    return false;
+    return { ok: false, authRejected: false };
   }
 }
 
@@ -64,20 +68,29 @@ async function sendOrQueue(
   config: TrackerConfig,
   payload: HeartbeatPayload
 ): Promise<void> {
-  const ok = await postHeartbeat(config.apiUrl, config.deviceToken, payload);
-  if (!ok) {
-    enqueue({ payload, apiUrl: config.apiUrl, deviceToken: config.deviceToken });
+  const result = await postHeartbeat(config.apiUrl, config.deviceToken, payload);
+  if (result.authRejected) {
+    markAuthRejected(true);
+    return; // don't enqueue a payload that's guaranteed to fail again
   }
+  if (!result.ok) {
+    enqueue({ payload, apiUrl: config.apiUrl, deviceToken: config.deviceToken });
+    return;
+  }
+  markAuthRejected(false);
 }
 
 /** Retries queued events in order; stops at the first still-failing send. */
 export async function flushOfflineQueue(): Promise<{
   delivered: number;
   remaining: number;
+  authRejected: boolean;
 }> {
-  return flushQueue((event: QueuedEvent) =>
+  const result = await flushQueue((event: QueuedEvent) =>
     postHeartbeat(event.apiUrl, event.deviceToken, event.payload)
   );
+  if (result.authRejected) markAuthRejected(true);
+  return result;
 }
 
 function endActiveSession(
@@ -150,6 +163,8 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     state.pendingTokensOut = 0;
 
     state.lastActivityAt = now;
+    // Preserve authRejected — sendOrQueue above may have just set/cleared it, and
+    // this write must not clobber that back to undefined every active tick.
     writeStatus({
       status: "active",
       projectAlias: alias,
@@ -157,6 +172,7 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
       model,
       sessionStartedAt: session.startedAt,
       updatedAt: nowIso,
+      authRejected: readStatus().authRejected,
     });
     return;
   }
@@ -177,6 +193,7 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
       model: ended.model,
       sessionStartedAt: ended.startedAt,
       updatedAt: nowIso,
+      authRejected: readStatus().authRejected,
     });
   }
 }

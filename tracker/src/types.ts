@@ -20,6 +20,13 @@ export interface StatusFile {
   model: string | null;
   sessionStartedAt: string | null;
   updatedAt: string;
+  /**
+   * Round 5: set when the server has rejected the configured device token with a
+   * 401 (bad/revoked) — as opposed to a transient network/5xx failure, which
+   * doesn't set this. `vibehub-tracker status` surfaces it directly instead of
+   * the daemon queuing rejected heartbeats forever with no visible symptom.
+   */
+  authRejected?: boolean;
 }
 
 export type HeartbeatEventType =

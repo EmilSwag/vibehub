@@ -1,15 +1,21 @@
 import { prisma } from "../db";
 import { env } from "../env";
-import { closeSession, presenceFor } from "../lib/sessions";
+import { closeSession, ONLINE_AFTER_MS, presenceFor } from "../lib/sessions";
 import { emitPresenceUpdate } from "../ws/hub";
 
 // Session sweeper — ARCHITECTURE.md §2.8 / §4.4. The tracker heartbeats every ~60s while
 // the developer is typing; when heartbeats stop we degrade the session in two steps:
-//   ACTIVE --(no heartbeat > IDLE_AFTER_MS)--> IDLE --(no heartbeat > sessionIdleTimeoutMs)--> ENDED
-// Ending a session folds it into DailyStat (lib/sessions.ts). Presence updates are
-// pushed to friends on every transition so the friends list never shows a ghost.
-
-export const IDLE_AFTER_MS = 2 * 60_000;
+//   ACTIVE --(no heartbeat > ONLINE_AFTER_MS)--> IDLE --(no heartbeat > sessionIdleTimeoutMs)--> ENDED
+// Ending a session folds it into DailyStat (lib/sessions.ts) — this job is what actually
+// closes stale sessions and is still required for that. The IDLE column write below is
+// no longer what presence *reads* trust (lib/sessions.ts's presenceFor decays from
+// lastHeartbeatAt directly on every read), but it's kept for bookkeeping/debugging and
+// so a DB inspection shows the right state without waiting on a read.
+//
+// Presence updates are pushed to friends on every transition this sweep detects so the
+// friends list self-corrects over the wire too, not just on next fetch — a friend who
+// disappears mid-session shows idle within one sweep tick and offline within the
+// timeout, no manual refresh needed.
 export const SWEEP_INTERVAL_MS = 30_000;
 
 export async function sweepSessions(now: Date = new Date()): Promise<{ idled: number; ended: number }> {
@@ -29,7 +35,7 @@ export async function sweepSessions(now: Date = new Date()): Promise<{ idled: nu
       await closeSession(session, session.lastHeartbeatAt);
       ended += 1;
       touchedUsers.set(session.userId, session.user.username);
-    } else if (silentFor > IDLE_AFTER_MS && session.status === "ACTIVE") {
+    } else if (silentFor > ONLINE_AFTER_MS && session.status === "ACTIVE") {
       await prisma.session.update({ where: { id: session.id }, data: { status: "IDLE" } });
       idled += 1;
       touchedUsers.set(session.userId, session.user.username);

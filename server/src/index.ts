@@ -93,6 +93,27 @@ app.use("/api/v1/auth", (req, res, next) => {
   next();
 });
 
+// Round 5: these two routes previously had zero access logging (only /api/v1/auth
+// did), which made a silently-failing tracker connection undiagnosable from prod
+// logs alone — the exact gap hit verifying @emilswag's onboarding. One line per
+// request: method, path, status, latency. Never the token or body.
+const TRACKER_LOGGED_ROUTES = new Set([
+  "POST /api/v1/users/me/tracker-tokens",
+  "POST /api/v1/tracker/heartbeat",
+]);
+app.use((req, res, next) => {
+  const key = `${req.method} ${req.originalUrl.split("?")[0]}`;
+  if (!TRACKER_LOGGED_ROUTES.has(key)) {
+    next();
+    return;
+  }
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    console.log(`[tracker] ${key} -> ${res.statusCode} ${Date.now() - startedAt}ms`);
+  });
+  next();
+});
+
 app.use("/api/v1/auth", authRoutes); // routes/auth.ts defines /github, /dev-login, /logout, /me
 app.use("/api/v1", usersRoutes);
 app.use("/api/v1", friendsRoutes);

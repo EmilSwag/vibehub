@@ -24,22 +24,42 @@ export function queueLength(): number {
   return readQueue().length;
 }
 
+export interface SendResult {
+  ok: boolean;
+  /** The server rejected the device token itself (401) — retrying won't help. */
+  authRejected: boolean;
+}
+
 /**
  * Attempts to deliver queued events in FIFO order via `send`. Stops at the
- * first failure (network still down) so ordering and at-least-once delivery
- * are preserved for the remainder — never reorders, never drops on failure.
+ * first transient failure (network still down / server 5xx) so ordering and
+ * at-least-once delivery are preserved for the remainder — never reorders,
+ * never drops those on failure.
+ *
+ * A 401 is different: every queued event carries the *same* device token, so
+ * once one comes back rejected, all of them — and every future queued event —
+ * are guaranteed to fail the same way. Retrying forever would just grow the
+ * queue file without bound for a token that will never start working again;
+ * the whole queue is dropped instead, and the caller (heartbeat.ts) records
+ * the rejection so `vibehub-tracker status` can say so.
  */
 export async function flushQueue(
-  send: (event: QueuedEvent) => Promise<boolean>
-): Promise<{ delivered: number; remaining: number }> {
+  send: (event: QueuedEvent) => Promise<SendResult>
+): Promise<{ delivered: number; remaining: number; authRejected: boolean }> {
   const queue = readQueue();
   let delivered = 0;
+  let authRejected = false;
   while (queue.length > 0) {
-    const ok = await send(queue[0]);
-    if (!ok) break;
+    const result = await send(queue[0]);
+    if (result.authRejected) {
+      authRejected = true;
+      queue.length = 0;
+      break;
+    }
+    if (!result.ok) break;
     queue.shift();
     delivered++;
   }
   writeQueue(queue);
-  return { delivered, remaining: queue.length };
+  return { delivered, remaining: queue.length, authRejected };
 }

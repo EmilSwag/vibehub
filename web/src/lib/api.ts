@@ -5,6 +5,7 @@ import type {
   Archetype,
   Friend,
   FriendRequest,
+  GithubRepoSummary,
   LevelBreakdown,
   Project,
   Presence,
@@ -139,6 +140,9 @@ export const usersApi = {
 
   revokeTrackerToken: (id: string) =>
     request<void>(`/api/v1/users/me/tracker-tokens/${id}`, { method: "DELETE" }),
+
+  /** Repo picker (round 5). Throws ApiError(409) if no GitHub account is connected. */
+  githubRepos: () => request<{ repos: GithubRepoSummary[] }>("/api/v1/users/me/github/repos"),
 };
 
 // ---- Friends (§5.3) ----
@@ -189,6 +193,9 @@ export const projectsApi = {
     files.forEach((f) => form.append("files", f));
     return request<{ project: Project }>(`/api/v1/projects/${id}/images`, { method: "POST", body: form });
   },
+  /** Project detail — round 5. `liked` reflects the viewer, `false` when signed out. */
+  get: (id: string) =>
+    request<{ project: Project; owner: User; liked: boolean }>(`/api/v1/projects/${id}`),
   commits: (id: string) => request<RepoActivity>(`/api/v1/projects/${id}/commits`),
   update: (id: string, body: Partial<{ name: string; description: string; repoUrl: string; liveUrl: string; isPublic: boolean; imageUrls: string[]; coverImageUrl: string | null }>) =>
     request<{ project: Project }>(`/api/v1/projects/${id}`, {

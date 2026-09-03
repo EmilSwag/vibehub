@@ -106,11 +106,48 @@ export interface RepoCommit {
   authorAvatarUrl: string | null;
   committedAt: string;
   url: string;
+  /** null when GitHub rate-limited the per-commit stats call. */
+  additions: number | null;
+  deletions: number | null;
+  filesChanged: number | null;
 }
+
+/** Most recent GitHub Actions run for the repo, or null (no Actions / unreachable). */
+export interface RepoBuild {
+  status: string;
+  url: string;
+  branch: string;
+  headSha: string;
+  updatedAt: string;
+}
+
+/** Latest published GitHub release, or null (none / unreachable). */
+export interface RepoRelease {
+  tag: string;
+  name: string;
+  url: string;
+  publishedAt: string;
+}
+
 export interface RepoActivity {
   repo: { owner: string; repo: string } | null;
   commits: RepoCommit[];
   lastPushAt: string | null;
+  build: RepoBuild | null;
+  latestRelease: RepoRelease | null;
+}
+
+/** GET /users/me/github/repos row — the signed-in user's own GitHub repos (repo picker). */
+export interface GithubRepoSummary {
+  fullName: string;
+  name: string;
+  htmlUrl: string;
+  description: string | null;
+  private: boolean;
+  pushedAt: string | null;
+  defaultBranch: string;
+  language: string | null;
+  stars: number;
 }
 
 export interface Activity {

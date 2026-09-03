@@ -40,6 +40,13 @@ Invoke-WebRequest -Uri "$WebUrl/tracker/vibehub-tracker.cjs" -OutFile $Bin -UseB
 
 Write-Host "-> saving token"
 node $Bin login $Token --api-url $ApiUrl
+# $ErrorActionPreference only governs PowerShell cmdlets — a native exe's non-zero
+# exit code doesn't throw on its own, so `login`'s exit(1) on a rejected token
+# (round 5) would otherwise be silently ignored and the script would carry on to
+# start a daemon with a token it already knows is bad. Check explicitly.
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "Login failed — see the message above."
+}
 
 Write-Host "-> starting daemon"
 try { node $Bin stop | Out-Null } catch {}

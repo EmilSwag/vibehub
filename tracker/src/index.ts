@@ -21,11 +21,45 @@ const STATUS_PATH_LABEL = "~/.vibehub/status.json";
 const program = new Command();
 program.name("vibehub-tracker").description("VibeHub local activity tracker");
 
+/**
+ * Round 5: validates the token against the server before trusting it, so a bad
+ * paste fails loudly here instead of silently queuing rejected heartbeats
+ * forever once `start` runs. A 401 is unambiguous — refuse to save and exit
+ * non-zero. Anything else (offline right now, server hiccup) can't tell us the
+ * token is actually bad, so we save it anyway and say so; the daemon's own
+ * `authRejected` reporting (see `status`) covers that case once it starts.
+ */
+async function verifyToken(apiUrl: string, deviceToken: string): Promise<{ ok: boolean; rejected: boolean; detail: string }> {
+  try {
+    const res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/verify`, {
+      headers: { Authorization: `Bearer ${deviceToken}` },
+    });
+    if (res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { username?: string };
+      return { ok: true, rejected: false, detail: body.username ? `@${body.username}` : "" };
+    }
+    if (res.status === 401) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, rejected: true, detail: body.error ?? "Invalid or revoked tracker token" };
+    }
+    return { ok: false, rejected: false, detail: `server returned ${res.status}` };
+  } catch (err) {
+    return { ok: false, rejected: false, detail: err instanceof Error ? err.message : "network error" };
+  }
+}
+
 program
   .command("login <deviceToken>")
-  .description(`write ${CONFIG_PATH_LABEL} with the given device token`)
+  .description(`validate the token with the server, then write ${CONFIG_PATH_LABEL}`)
   .option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL)
-  .action((deviceToken: string, options: { apiUrl: string }) => {
+  .action(async (deviceToken: string, options: { apiUrl: string }) => {
+    const verified = await verifyToken(options.apiUrl, deviceToken);
+    if (verified.rejected) {
+      console.error(`Login failed: token rejected by the server (${verified.detail}).`);
+      console.error("Create a new token in VibeHub → Settings → Tracker and try again.");
+      process.exit(1);
+    }
+
     const existing = readConfig();
     const config: TrackerConfig = {
       apiUrl: options.apiUrl,
@@ -36,7 +70,14 @@ program
       toolProcessNames: existing?.toolProcessNames,
     };
     writeConfig(config);
-    console.log(`Logged in. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`);
+
+    if (verified.ok) {
+      console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`);
+    } else {
+      console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`);
+      console.log(`Could not verify with the server right now (${verified.detail}) — saved anyway.`);
+      console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected.");
+    }
   });
 
 program
@@ -83,6 +124,23 @@ program
       console.log(`Started: ${status.sessionStartedAt}`);
     }
     console.log(`Updated: ${status.updatedAt}`);
+
+    // Round 5: a rejected or never-yet-successful token used to fail completely
+    // silently — the daemon "ran," the card just never flipped, with nothing
+    // anywhere saying why. `authRejected` is set/cleared on every send attempt
+    // (heartbeat.ts); a literal "Connected:" line also gives the connect-prompt
+    // an AI agent pastes something unambiguous to check for.
+    if (status.authRejected) {
+      console.log("Connected: no — token rejected by the server.");
+      console.log("  Create a new token in VibeHub → Settings → Tracker, then run:");
+      console.log("  vibehub-tracker login <newToken>");
+    } else if (!running) {
+      console.log("Connected: no — daemon isn't running. Run `vibehub-tracker start`.");
+    } else if (status.authRejected === false) {
+      console.log("Connected: yes");
+    } else {
+      console.log("Connected: not yet — waiting for the first heartbeat. Open an AI tool session and check again in ~30s.");
+    }
   });
 
 program

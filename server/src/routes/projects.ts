@@ -5,7 +5,7 @@ import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../db";
 import { env } from "../env";
-import { fetchRepoActivity, parseGithubRepoUrl } from "../lib/github";
+import { decryptGithubToken, fetchRepoActivity, parseGithubRepoUrl } from "../lib/github";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import {
   createProjectSchema,
@@ -14,7 +14,7 @@ import {
   MAX_PROJECT_IMAGES,
   patchProjectSchema,
 } from "../lib/schemas";
-import { toPublicProject } from "../lib/serializers";
+import { toPublicProject, toPublicUser } from "../lib/serializers";
 import { optionalAuth, requireAuth, requireUserOrToken } from "../middleware/auth";
 
 // Project cards + likes — ARCHITECTURE.md §5.5. `likeCount` is denormalized and updated
@@ -192,8 +192,39 @@ router.post(
 );
 
 /**
- * Recent pushes for the linked GitHub repo (owner's OAuth token when we have it,
- * so private repos work for their owner). Empty list when the URL isn't GitHub.
+ * Project detail — round 5. Public if `isPublic`; the owner can always see their
+ * own (including private) projects. `liked` reflects the viewer, `false` when
+ * signed out — mirrors the `likedIds` pattern on the list endpoint (§5.5).
+ */
+router.get(
+  "/projects/:id",
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const project = await prisma.project.findUnique({
+      where: { id: req.params.id },
+      include: { owner: true },
+    });
+    if (!project || (!project.isPublic && project.ownerId !== req.user?.id)) {
+      throw new HttpError(404, "Project not found");
+    }
+
+    let liked = false;
+    if (req.user) {
+      const like = await prisma.like.findUnique({
+        where: { projectId_userId: { projectId: project.id, userId: req.user.id } },
+      });
+      liked = Boolean(like);
+    }
+
+    res.json({ project: toPublicProject(project), owner: toPublicUser(project.owner), liked });
+  })
+);
+
+/**
+ * Recent pushes for the linked GitHub repo (owner's decrypted OAuth token when we
+ * have it, so private repos work for their owner), plus per-commit line stats,
+ * latest CI run, and latest release (round 5). Empty/null fields when the URL
+ * isn't GitHub or GitHub can't be reached — the card still renders either way.
  */
 router.get(
   "/projects/:id/commits",
@@ -208,15 +239,16 @@ router.get(
     }
     const ref = parseGithubRepoUrl(project.repoUrl);
     if (!ref) {
-      res.json({ repo: null, commits: [], lastPushAt: null });
+      res.json({ repo: null, commits: [], lastPushAt: null, build: null, latestRelease: null });
       return;
     }
     try {
-      const activity = await fetchRepoActivity(ref, project.owner.githubAccessToken, 10);
+      const token = decryptGithubToken(project.owner.githubAccessToken);
+      const activity = await fetchRepoActivity(ref, token, 30);
       res.json(activity);
     } catch {
       // GitHub hiccup — the card still renders, just without the push list.
-      res.json({ repo: ref, commits: [], lastPushAt: null, fetchedAt: new Date().toISOString() });
+      res.json({ repo: ref, commits: [], lastPushAt: null, fetchedAt: new Date().toISOString(), build: null, latestRelease: null });
     }
   })
 );
