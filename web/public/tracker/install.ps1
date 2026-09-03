@@ -21,7 +21,15 @@ $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
   Write-Error "Node.js 18+ is required. Install it from https://nodejs.org and re-run."
 }
-$major = [int](node -p 'process.versions.node.split(".")[0]')
+# Parsed from `node --version` rather than `node -p '...split(".")...'`: Windows
+# PowerShell 5.1 strips embedded double-quotes when it rewrites a quoted argument
+# for a native (non-PowerShell) executable, so the eval'd JS arrived as
+# `process.versions.node.split(.)[0]` (a SyntaxError) on every real Windows
+# machine — `$major` always came out 0 and this always aborted with a false
+# "Node.js 0 found; 18+ is required.", even with Node 18+ installed. Parsing
+# PowerShell's own string output avoids passing quoted JS through the native
+# command line at all.
+$major = [int]((node --version).Trim() -replace '^v(\d+)\..*', '$1')
 if ($major -lt 18) {
   Write-Error "Node.js $major found; 18+ is required."
 }
