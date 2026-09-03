@@ -13,6 +13,7 @@ import {
   createTrackerTokenSchema,
   patchMeSchema,
   putLinksSchema,
+  rolesToCsv,
   suggestedUsersQuerySchema,
 } from "../lib/schemas";
 import { toMeUser, toPublicLink, toPublicUser } from "../lib/serializers";
@@ -163,12 +164,15 @@ router.patch(
   "/users/me",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const data = patchMeSchema.parse(req.body);
-    if (data.username && data.username !== req.user!.username) {
-      const taken = await prisma.user.findUnique({ where: { username: data.username } });
+    const { roles, ...rest } = patchMeSchema.parse(req.body);
+    if (rest.username && rest.username !== req.user!.username) {
+      const taken = await prisma.user.findUnique({ where: { username: rest.username } });
       if (taken) throw new HttpError(409, "That nickname is taken");
     }
-    const user = await prisma.user.update({ where: { id: req.user!.id }, data });
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { ...rest, ...(roles ? { roles: rolesToCsv(roles) } : {}) },
+    });
     res.json({ user: toMeUser(user) });
   })
 );
@@ -243,6 +247,43 @@ router.get(
         revokedAt: t.revokedAt,
         createdAt: t.createdAt,
       })),
+    });
+  })
+);
+
+/**
+ * "Is my tracker actually talking to us?" — drives the Connect-your-tools panel
+ * (onboarding step, Home banner, Settings). `connected` flips true on the first
+ * authenticated heartbeat (TrackerToken.lastUsedAt); `tools` lists what it has
+ * seen recently so the user gets confirmation that e.g. Claude Code is counted.
+ */
+router.get(
+  "/users/me/tracker",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.user!.id;
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [tokens, sessions] = await Promise.all([
+      prisma.trackerToken.findMany({
+        where: { userId, revokedAt: null },
+        select: { lastUsedAt: true },
+      }),
+      prisma.session.findMany({
+        where: { userId, lastHeartbeatAt: { gte: since } },
+        distinct: ["tool"],
+        select: { tool: true },
+        orderBy: { lastHeartbeatAt: "desc" },
+      }),
+    ]);
+    const lastSeenAt = tokens.reduce<Date | null>(
+      (max, t) => (t.lastUsedAt && (!max || t.lastUsedAt > max) ? t.lastUsedAt : max),
+      null
+    );
+    res.json({
+      connected: lastSeenAt !== null,
+      lastSeenAt,
+      activeTokens: tokens.length,
+      tools: sessions.map((s) => s.tool),
     });
   })
 );

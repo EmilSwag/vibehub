@@ -53,11 +53,47 @@ kept in lockstep in `tokens.css`.
 - Generous whitespace (24/40 spacing steps), calm density.
 
 ## Logo usage
-The in-app mark (`TopBar`/`LoginPage`) is CSS-only and driven entirely by `--vh-accent`, so it
-inherits the monochrome palette automatically in both themes. The standalone brand asset in
-`assets/branding/` keeps its own original colorway and is not used inside the SPA — never pull
-it into a component in place of the token-driven mark. Never stretch, never recolor outside the
-`--vh-*` palette in-app.
+
+The mark is a **presence ring**: three uneven session arcs, a solid centre node (you), and a
+bead riding the ring (your live status). It is single-colour and painted with `currentColor`,
+so it resolves to `--vh-accent` and introduces no hue in either theme.
+
+- **Geometry is generated.** `scripts/build-brand.mjs` is the single source. It emits the
+  standalone SVGs, the Lottie loop, and `web/src/components/ui/logo-geometry.ts` that the
+  in-app `<Logo>` imports. Never hand-edit the derived files; change the script and rerun
+  `node scripts/build-brand.mjs`.
+- **Legibility floor is 16px.** Below that the 24-degree gaps close up and the ring reads solid.
+  Favicon 16, onboarding brand row 16, top bar 20, sign-in 56.
+- **Motion.** One 2.4s loop: the bead makes exactly one revolution while the node beats twice
+  and a pulse leaves it and dissolves past the ring. Frame 144 renders identically to frame 0,
+  so it loops with no seam. `Logo.module.css` reproduces it in CSS for in-app use;
+  `assets/branding/vibehub-mark-loop-*.json` is the portable Lottie.
+- **Where it animates.** Sign-in runs the Lottie (a brand moment, once per session). The top bar
+  runs the CSS loop only while the home link is hovered or focused. Everywhere else the mark is
+  still: perpetual motion in chrome is decoration, not communication.
+- Never stretch, never recolour outside the `--vh-*` palette, never add a second hue.
+
+### Brand files
+| File | Use |
+|---|---|
+| `assets/branding/vibehub-mark.svg` | favicon: follows `prefers-color-scheme` |
+| `assets/branding/vibehub-mark-{ink,paper}.svg` | explicit colourway, for embedding |
+| `assets/branding/vibehub-lockup-{ink,paper}.svg` | mark + serif wordmark |
+| `assets/branding/vibehub-mark-loop-ink.json` | Lottie, `#111111`, for light grounds |
+| `assets/branding/vibehub-mark-loop-paper.json` | Lottie, `#F2F2F2`, for dark grounds |
+| `assets/branding/vibehub-mark-1024*.png` | raster mark, transparent, both colourways |
+| `assets/branding/banner.png` | README banner, 1280x400 |
+| `web/public/brand/` | the copies the SPA serves |
+
+`logo.png`, `icon.png` and `banner_source.png` are the earlier colourway and are superseded.
+
+**Pick the colourway explicitly when embedding.** An `<img>` resolves
+`prefers-color-scheme` against the OS, not the page it sits on, so the auto file disappears on a
+light page under a dark OS. Only the favicon should be auto.
+
+The SPA ships one Lottie colourway and overrides its baked fill with `currentColor` in
+`LogoLottie.module.css`, so a single file follows the theme. The two baked colourways exist for
+players that cannot be themed.
 
 ## Voice
 Short, warm, lowercase-friendly microcopy ("friends for 214 days", "burning tokens in neon-app").

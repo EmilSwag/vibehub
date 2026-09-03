@@ -1,4 +1,5 @@
 import type { ExternalLink, Project, User } from "@prisma/client";
+import { imageUrlsFromJson, rolesFromCsv } from "./schemas";
 
 // Never spread a raw User/Project row into a response — githubAccessToken and
 // passwordHash must never leave the server (ARCHITECTURE.md §3 privacy model).
@@ -10,7 +11,7 @@ export function toPublicUser(user: User) {
     avatarUrl: user.avatarUrl,
     bio: user.bio,
     archetype: user.archetype,
-    role: user.role,
+    roles: rolesFromCsv(user.roles),
     isDevAccount: user.isDevAccount,
     createdAt: user.createdAt,
   };
@@ -46,6 +47,7 @@ export function toPublicProject(project: Project) {
     repoUrl: project.repoUrl,
     liveUrl: project.liveUrl,
     coverImageUrl: project.coverImageUrl,
+    imageUrls: imageUrlsFromJson(project.imageUrls),
     isPublic: project.isPublic,
     likeCount: project.likeCount,
     createdAt: project.createdAt,

@@ -8,7 +8,9 @@ import type {
   LevelBreakdown,
   Project,
   Presence,
+  RepoActivity,
   SuggestedUser,
+  TrackerStatus,
   TrackerToken,
   User,
   UserRole,
@@ -17,6 +19,8 @@ import type {
 } from "../types";
 
 const BASE_URL = import.meta.env.VITE_API_URL;
+/** Absolute API origin for user-facing snippets (curl prompts, install one-liners). */
+export const API_BASE: string = BASE_URL ?? "";
 
 export class ApiError extends Error {
   status: number;
@@ -103,7 +107,8 @@ export const usersApi = {
     );
   },
 
-  updateMe: (body: { username?: string; displayName?: string; bio?: string; role?: UserRole | null }) =>
+  trackerStatus: () => request<TrackerStatus>("/api/v1/users/me/tracker"),
+  updateMe: (body: { username?: string; displayName?: string; bio?: string; roles?: UserRole[] }) =>
     request<{ user: User }>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
 
   completeOnboarding: () =>
@@ -175,10 +180,17 @@ export const wallApi = {
 
 export const projectsApi = {
   list: (username: string) =>
-    request<{ projects: Project[] }>(`/api/v1/users/${encodeURIComponent(username)}/projects`),
-  create: (body: { name: string; description?: string; repoUrl?: string; liveUrl?: string }) =>
+    request<{ projects: Project[]; likedIds: string[] }>(`/api/v1/users/${encodeURIComponent(username)}/projects`),
+  create: (body: { name: string; description?: string; repoUrl?: string; liveUrl?: string; isPublic?: boolean }) =>
     request<{ project: Project }>("/api/v1/projects", json(body)),
-  update: (id: string, body: Partial<{ name: string; description: string; repoUrl: string; liveUrl: string; isPublic: boolean }>) =>
+  /** Multipart screenshots (≤8, ≤8 MB each). First upload becomes the cover. */
+  uploadImages: (id: string, files: File[]) => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    return request<{ project: Project }>(`/api/v1/projects/${id}/images`, { method: "POST", body: form });
+  },
+  commits: (id: string) => request<RepoActivity>(`/api/v1/projects/${id}/commits`),
+  update: (id: string, body: Partial<{ name: string; description: string; repoUrl: string; liveUrl: string; isPublic: boolean; imageUrls: string[]; coverImageUrl: string | null }>) =>
     request<{ project: Project }>(`/api/v1/projects/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),

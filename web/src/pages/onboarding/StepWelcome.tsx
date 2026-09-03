@@ -3,7 +3,7 @@ import type { User } from "../../types";
 import { Avatar } from "../../components/ui/Avatar";
 import { Button } from "../../components/ui/Button";
 import { Confetti } from "../../components/ui/Confetti";
-import { roleTitle } from "../../components/ui/RoleGlyph";
+import { rolesLabel } from "../../components/ui/RoleGlyph";
 import styles from "./Onboarding.module.css";
 
 interface Props {
@@ -18,7 +18,7 @@ const WORDS = ["Welcome,", "bro."];
 export function StepWelcome({ user, invited, busy, onEnter }: Props) {
   const chips = [
     `@${user.username}`,
-    roleTitle(user.role) ?? "Explorer",
+    rolesLabel(user.roles) ?? "Explorer",
     invited > 0 ? `${invited} invite${invited === 1 ? "" : "s"} sent` : "Friends can find you",
   ];
 

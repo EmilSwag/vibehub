@@ -1,0 +1,83 @@
+/*
+ * The mark's motion, in CSS, matching assets/branding/vibehub-mark-loop-*.json
+ * frame for frame: 2.4s revolution, two 1.2s beats inside it. Only opacity,
+ * transform and the circle's own `r` animate (skills/emil_design_eng §4).
+ *
+ * Everything collapses under prefers-reduced-motion via motion.css, which zeroes
+ * the durations globally. Each loop below ends on its rest state, so the frozen
+ * result is exactly the static mark.
+ */
+
+.mark {
+  display: block;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+/* Rest state. Nothing moves until .live is set. */
+.ripple {
+  opacity: 0;
+}
+
+.live .orbit {
+  transform-box: view-box;
+  transform-origin: 24px 24px;
+  animation: vh-logo-orbit 2.4s linear infinite;
+}
+
+.live .node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vh-logo-beat 1.2s var(--ease-out) infinite;
+}
+
+.live .ripple {
+  animation: vh-logo-ripple 1.2s var(--ease-out) infinite;
+}
+
+/* One exact revolution, linear, so the wrap is invisible. */
+@keyframes vh-logo-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Fast thump out, slow settle back, then flat until the next beat. */
+@keyframes vh-logo-beat {
+  0% {
+    transform: scale(1);
+    animation-timing-function: var(--ease-out);
+  }
+  11% {
+    transform: scale(1.12);
+    animation-timing-function: var(--ease-in-out);
+  }
+  61%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* The pulse leaving the node and dissolving past the ring. Animating `r` keeps
+ * the stroke weight constant; a scale transform would fatten it on the way out. */
+@keyframes vh-logo-ripple {
+  0% {
+    r: 6.5;
+    opacity: 0;
+    animation-timing-function: var(--ease-out);
+  }
+  5.5% {
+    opacity: 0.18;
+  }
+  86% {
+    r: 21;
+    opacity: 0;
+  }
+  100% {
+    r: 6.5;
+    opacity: 0;
+  }
+}

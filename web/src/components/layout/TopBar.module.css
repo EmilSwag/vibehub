@@ -20,7 +20,10 @@
   gap: var(--vh-space-4);
 }
 
+/* The mark is token-driven: it paints with `currentColor`, which resolves to the
+ * ink/paper accent here. Never recolour it outside the --vh-* palette. */
 .logo {
+  color: var(--vh-accent);
   display: inline-flex;
   align-items: center;
   gap: var(--vh-space-2);
@@ -30,14 +33,6 @@
   font-size: 17px;
   color: var(--vh-text);
   text-decoration: none;
-}
-
-.logoMark {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: var(--vh-accent);
-  flex-shrink: 0;
 }
 
 /* Segmented control — the native way to say "these are peers". */
@@ -148,8 +143,24 @@
   color: var(--vh-text-faint);
 }
 
+.menuIcon {
+  flex: none;
+  color: var(--vh-text-muted);
+  transition: color var(--dur-press) var(--ease-out);
+}
+.menuItem:hover .menuIcon {
+  color: var(--vh-text);
+}
+.menuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--vh-border);
+}
+
 .menuItem {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   text-align: left;
   padding: 8px 10px;

@@ -14,16 +14,19 @@ interface Props {
 }
 
 export function StepRole({ user, onSaved, onBack, onNext }: Props) {
-  const [role, setRole] = useState<UserRole | null>(user.role);
+  const [roles, setRoles] = useState<UserRole[]>(user.roles ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const toggle = (id: UserRole) =>
+    setRoles((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+
   const submit = async () => {
-    if (!role || saving) return;
+    if (roles.length === 0 || saving) return;
     setSaving(true);
     setError(null);
     try {
-      const { user: updated } = await usersApi.updateMe({ role });
+      const { user: updated } = await usersApi.updateMe({ roles });
       onSaved(updated);
       onNext();
     } catch (err) {
@@ -35,27 +38,29 @@ export function StepRole({ user, onSaved, onBack, onNext }: Props) {
 
   return (
     <div className={styles.step}>
-      <h1 className={styles.title}>What do you mostly make?</h1>
-      <p className={styles.lead}>One card. It shapes your profile; the stats will tell the real story.</p>
+      <h1 className={styles.title}>What do you make?</h1>
+      <p className={styles.lead}>Pick everything that fits — most of us wear a few hats.</p>
 
-      <div className={[styles.roleGrid, "stagger"].join(" ")} role="radiogroup" aria-label="Role">
+      <div className={[styles.roleGrid, "stagger"].join(" ")} role="group" aria-label="Roles">
         {ROLES.map((r, i) => {
-          const selected = role === r.id;
+          const selected = roles.includes(r.id);
           return (
             <button
               key={r.id}
               type="button"
-              role="radio"
+              role="checkbox"
               aria-checked={selected}
               className={[styles.roleCard, selected && styles.roleCardSelected].filter(Boolean).join(" ")}
               style={{ "--i": i } as CSSProperties}
-              onClick={() => setRole(r.id)}
+              onClick={() => toggle(r.id)}
             >
               <span className={styles.roleGlyph}>
                 <RoleGlyph role={r.id} size={26} />
               </span>
-              <span className={styles.roleTitle}>{r.title}</span>
-              <span className={styles.roleBlurb}>{r.blurb}</span>
+              <span className={styles.roleText}>
+                <span className={styles.roleTitle}>{r.title}</span>
+                <span className={styles.roleBlurb}>{r.blurb}</span>
+              </span>
               <span className={styles.roleCheck} aria-hidden="true">
                 {selected && (
                   <svg className="pop" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -74,8 +79,8 @@ export function StepRole({ user, onSaved, onBack, onNext }: Props) {
         <button type="button" className={styles.linkButton} onClick={onBack}>
           Back
         </button>
-        <Button type="button" onClick={submit} disabled={!role || saving}>
-          {saving ? "Saving…" : "Continue"}
+        <Button type="button" onClick={submit} disabled={roles.length === 0 || saving}>
+          {saving ? "Saving…" : roles.length > 1 ? `Continue with ${roles.length}` : "Continue"}
         </Button>
       </div>
     </div>

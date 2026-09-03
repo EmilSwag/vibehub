@@ -9,12 +9,12 @@ import "./styles/motion.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <AuthProvider>
-      <RealtimeProvider>
-        <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
+        <RealtimeProvider>
           <App />
-        </BrowserRouter>
-      </RealtimeProvider>
-    </AuthProvider>
+        </RealtimeProvider>
+      </AuthProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );

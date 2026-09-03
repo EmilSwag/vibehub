@@ -1,0 +1,45 @@
+# VibeHub tracker — one-line install for Windows (PowerShell).
+#
+#   $env:VIBEHUB_TOKEN="<TRACKER_TOKEN>"; irm https://web-production-da778.up.railway.app/tracker/install.ps1 | iex
+#
+# Downloads the single-file tracker to %USERPROFILE%\.vibehub\app, saves your
+# token, and starts the background daemon. Reads only local AI-tool logs and
+# window titles; no code, prompts or diffs ever leave your machine.
+$ErrorActionPreference = "Stop"
+
+$Token  = $env:VIBEHUB_TOKEN
+$WebUrl = if ($env:VIBEHUB_WEB_URL) { $env:VIBEHUB_WEB_URL } else { "https://web-production-da778.up.railway.app" }
+$ApiUrl = if ($env:VIBEHUB_API_URL) { $env:VIBEHUB_API_URL } else { "https://server-production-cc06.up.railway.app" }
+$AppDir = Join-Path $HOME ".vibehub\app"
+$Bin    = Join-Path $AppDir "vibehub-tracker.cjs"
+
+if (-not $Token) {
+  Write-Error 'Set $env:VIBEHUB_TOKEN first (create a token in VibeHub → Settings → Tracker).'
+}
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+  Write-Error "Node.js 18+ is required. Install it from https://nodejs.org and re-run."
+}
+$major = [int](node -p 'process.versions.node.split(".")[0]')
+if ($major -lt 18) {
+  Write-Error "Node.js $major found; 18+ is required."
+}
+
+New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+Write-Host "-> downloading tracker"
+Invoke-WebRequest -Uri "$WebUrl/tracker/vibehub-tracker.cjs" -OutFile $Bin -UseBasicParsing
+
+Write-Host "-> saving token"
+node $Bin login $Token --api-url $ApiUrl
+
+Write-Host "-> starting daemon"
+try { node $Bin stop | Out-Null } catch {}
+node $Bin start
+
+Write-Host ""
+Write-Host "OK  VibeHub tracker is running."
+Write-Host "    Open your VibeHub tab - 'Connect your tools' flips to Connected within ~30s."
+Write-Host "    status:  node $Bin status"
+Write-Host "    stop:    node $Bin stop"
+Write-Host "    after reboot:  node $Bin start"

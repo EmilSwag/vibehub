@@ -15,6 +15,15 @@ export const ROLES: RoleDef[] = [
   { id: "founder", title: "Founder", blurb: "Products, teams, bets. You make it happen." },
 ];
 
+/** "Developer · Designer" for chips/badges; null when nothing is selected. */
+export function rolesLabel(roles: UserRole[] | null | undefined): string | null {
+  if (!roles?.length) return null;
+  return roles
+    .map((r) => roleTitle(r))
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function roleTitle(role: UserRole | null | undefined): string | null {
   return ROLES.find((r) => r.id === role)?.title ?? null;
 }

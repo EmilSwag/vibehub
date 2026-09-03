@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-label="VibeHub">
+  <style>:root { color: #F2F2F2; }</style>
+  <g stroke="currentColor" stroke-width="5" stroke-linecap="round">
+    <path d="M39.757 21.222A16 16 0 0 1 27.871 39.525"/>
+    <path d="M21.222 39.757A16 16 0 0 1 11.056 14.595"/>
+    <path d="M16 10.144A16 16 0 0 1 32.947 10.735"/>
+  </g>
+  <circle cx="24" cy="24" r="6.5" fill="currentColor"/>
+  <circle cx="37.419" cy="15.286" r="4.3" fill="currentColor"/>
+</svg>

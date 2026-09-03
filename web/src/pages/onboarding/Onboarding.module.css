@@ -18,11 +18,10 @@
   color: var(--vh-text-dim);
 }
 
+/* The row is dimmed, the mark is not: it keeps the full ink/paper accent.
+ * 16px is the mark's legibility floor -- below it the ring's gaps close up. */
 .brandMark {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--vh-accent);
+  color: var(--vh-accent);
 }
 
 /* ---- Progress dots ---- */
@@ -234,24 +233,22 @@
 
 /* ---- Step 2: role cards ---- */
 
+/* Five options → one uniform column of rows. A 2-col grid leaves an orphan. */
 .roleGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: 1fr;
+  gap: 8px;
   width: 100%;
   margin-top: 4px;
-}
-.roleGrid > :last-child:nth-child(odd) {
-  grid-column: 1 / -1;
 }
 
 .roleCard {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 16px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 22px;
+  align-items: center;
+  column-gap: 14px;
+  padding: 14px 14px 14px 16px;
   text-align: left;
   font: inherit;
   color: var(--vh-text);
@@ -278,8 +275,20 @@
 
 .roleGlyph {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--vh-radius-md);
+  background: var(--vh-surface-2, var(--vh-accent-soft));
   color: var(--vh-text);
-  margin-bottom: 4px;
+}
+
+.roleText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .roleTitle {
@@ -294,9 +303,6 @@
 }
 
 .roleCheck {
-  position: absolute;
-  top: 12px;
-  right: 12px;
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -442,12 +448,6 @@
   }
   .welcomeTitle {
     font-size: 34px;
-  }
-  .roleGrid {
-    grid-template-columns: 1fr;
-  }
-  .roleGrid > :last-child:nth-child(odd) {
-    grid-column: auto;
   }
   .level {
     display: none;

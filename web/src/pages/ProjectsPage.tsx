@@ -1,160 +1,150 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useRealtime } from "../context/RealtimeContext";
 import { projectsApi } from "../lib/api";
+import { stagger } from "../lib/motion";
 import type { Project } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
-import { FieldLabel, Input, Textarea } from "../components/ui/Input";
+import { Icon } from "../components/ui/Icon";
 import { Skeleton } from "../components/ui/Skeleton";
 import { ProjectCard } from "../components/ProjectCard";
+import { ProjectComposer } from "../components/projects/ProjectComposer";
+import { PublishFromAI } from "../components/projects/PublishFromAI";
 import styles from "./ProjectsPage.module.css";
-
-const EMPTY_FORM = { name: "", description: "", repoUrl: "", liveUrl: "" };
 
 export function ProjectsPage() {
   const { user } = useAuth();
+  const { pushToast } = useRealtime();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [composer, setComposer] = useState<{ open: boolean; editing: Project | null }>({
+    open: false,
+    editing: null,
+  });
 
   useEffect(() => {
     if (!user) return;
     projectsApi
       .list(user.username)
-      .then(({ projects }) => setProjects(projects))
+      .then(({ projects, likedIds }) => {
+        setProjects(projects);
+        setLikedIds(new Set(likedIds));
+      })
       .finally(() => setLoading(false));
   }, [user]);
 
-  function startCreate() {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setShowForm(true);
-  }
-
-  function startEdit(project: Project) {
-    setEditingId(project.id);
-    setForm({
-      name: project.name,
-      description: project.description ?? "",
-      repoUrl: project.repoUrl ?? "",
-      liveUrl: project.liveUrl ?? "",
+  function saved(project: Project) {
+    setProjects((prev) => {
+      const exists = prev.some((p) => p.id === project.id);
+      return exists ? prev.map((p) => (p.id === project.id ? project : p)) : [project, ...prev];
     });
-    setShowForm(true);
+    setComposer({ open: false, editing: null });
+    pushToast({
+      title: composer.editing ? "Project updated" : "Published",
+      body: composer.editing ? project.name : `${project.name} is now on your profile.`,
+      href: `/u/${user?.username ?? ""}`,
+    });
   }
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      if (editingId) {
-        const { project } = await projectsApi.update(editingId, form);
-        setProjects((prev) => prev.map((p) => (p.id === editingId ? project : p)));
-      } else {
-        const { project } = await projectsApi.create(form);
-        setProjects((prev) => [project, ...prev]);
-      }
-      setShowForm(false);
-      setForm(EMPTY_FORM);
-      setEditingId(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save project");
-    } finally {
-      setSaving(false);
-    }
+  async function remove(project: Project) {
+    if (!window.confirm(`Delete “${project.name}”? This can't be undone.`)) return;
+    await projectsApi.remove(project.id);
+    setProjects((prev) => prev.filter((p) => p.id !== project.id));
   }
 
-  async function handleDelete(id: string) {
-    await projectsApi.remove(id);
-    setProjects((prev) => prev.filter((p) => p.id !== id));
+  async function toggleLike(project: Project) {
+    const liked = likedIds.has(project.id);
+    const { likeCount } = liked ? await projectsApi.unlike(project.id) : await projectsApi.like(project.id);
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (liked) next.delete(project.id);
+      else next.add(project.id);
+      return next;
+    });
+    setProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, likeCount } : p)));
   }
+
+  if (!user) return null;
 
   return (
-    <div>
+    <div className={styles.page}>
       <div className={styles.header}>
-        <h1 className={styles.title}>Your projects</h1>
-        <Button onClick={() => (showForm ? setShowForm(false) : startCreate())}>
-          {showForm ? "Cancel" : "New project"}
-        </Button>
+        <div>
+          <h1 className={styles.title}>Your projects</h1>
+          <p className={styles.lead}>Posts your friends see on your profile and in their feed.</p>
+        </div>
+        {!composer.open && (
+          <Button onClick={() => setComposer({ open: true, editing: null })}>
+            <Icon name="plus" size={15} />
+            New post
+          </Button>
+        )}
       </div>
 
-      {showForm && (
-        <Card style={{ marginBottom: 24 }}>
-          <form className={styles.form} onSubmit={handleSubmit}>
-            <div className={styles.formFull}>
-              <FieldLabel htmlFor="p-name">Name</FieldLabel>
-              <Input
-                id="p-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            </div>
-            <div className={styles.formFull}>
-              <FieldLabel htmlFor="p-desc">Description</FieldLabel>
-              <Textarea
-                id="p-desc"
-                rows={2}
-                maxLength={500}
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </div>
-            <div>
-              <FieldLabel htmlFor="p-repo">Repo URL</FieldLabel>
-              <Input
-                id="p-repo"
-                value={form.repoUrl}
-                onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
-              />
-            </div>
-            <div>
-              <FieldLabel htmlFor="p-live">Live URL</FieldLabel>
-              <Input
-                id="p-live"
-                value={form.liveUrl}
-                onChange={(e) => setForm({ ...form, liveUrl: e.target.value })}
-              />
-            </div>
-            {error && <span className={styles.formFull} style={{ color: "var(--vh-accent-hover)", fontSize: 13 }}>{error}</span>}
-            <div className={styles.formActions}>
-              <Button type="submit" disabled={saving || !form.name.trim()}>
-                {saving ? "Saving…" : editingId ? "Save changes" : "Create project"}
-              </Button>
-            </div>
-          </form>
+      {composer.open && (
+        <Card className={styles.composerCard}>
+          <div className={styles.composerHead}>
+            <Icon name={composer.editing ? "text" : "sparkles"} size={15} />
+            {composer.editing ? "Edit post" : "New post"}
+          </div>
+          <ProjectComposer
+            key={composer.editing?.id ?? "new"}
+            owner={user}
+            editing={composer.editing}
+            onSaved={saved}
+            onCancel={() => setComposer({ open: false, editing: null })}
+          />
         </Card>
       )}
+
+      <div className={styles.aiCard}>
+        <PublishFromAI />
+      </div>
 
       {loading ? (
         <div className={styles.grid}>
           {Array.from({ length: 3 }, (_, i) => (
-            <Skeleton key={i} variant="block" height={140} style={{ "--i": i } as CSSProperties} />
+            <Skeleton key={i} variant="block" height={220} style={stagger(i)} />
           ))}
         </div>
       ) : projects.length === 0 ? (
-        <p className={styles.empty}>No projects yet — create your first one above.</p>
+        <Card className={styles.empty}>
+          <Icon name="image" size={22} />
+          <p>No posts yet. Ship something, then hit “New post” — or let your AI publish it for you.</p>
+        </Card>
       ) : (
         <div className={[styles.grid, "stagger"].join(" ")}>
           {projects.map((project, i) => (
             <ProjectCard
               key={project.id}
               project={project}
-              style={{ "--i": i } as CSSProperties}
+              owner={user}
+              liked={likedIds.has(project.id)}
+              onToggleLike={toggleLike}
+              style={stagger(i)}
               actions={
-                <div className={styles.rowActions}>
-                  <button type="button" className={styles.iconBtn} onClick={() => startEdit(project)}>
-                    edit
+                <>
+                  <button
+                    type="button"
+                    className={styles.iconBtn}
+                    onClick={() => setComposer({ open: true, editing: project })}
+                    aria-label="Edit"
+                    title="Edit"
+                  >
+                    <Icon name="text" size={15} />
                   </button>
-                  <button type="button" className={styles.iconBtn} onClick={() => handleDelete(project.id)}>
-                    delete
+                  <button
+                    type="button"
+                    className={[styles.iconBtn, styles.iconBtnDanger].join(" ")}
+                    onClick={() => remove(project)}
+                    aria-label="Delete"
+                    title="Delete"
+                  >
+                    <Icon name="trash" size={15} />
                   </button>
-                </div>
+                </>
               }
             />
           ))}

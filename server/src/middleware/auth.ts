@@ -43,6 +43,31 @@ export const requireAuth = asyncHandler(async (req: Request, _res: Response, nex
   next();
 });
 
+/**
+ * Session cookie *or* `Authorization: Bearer <device token>` → `req.user`.
+ * Lets AI agents (Claude Code, Codex, a curl in CI) publish projects with the
+ * same token the tracker uses. Unlike `requireTrackerToken` it does NOT bump
+ * `lastUsedAt` — publishing a project must not make the tracker look connected.
+ */
+export const requireUserOrToken = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+  const fromCookie = await resolveSessionUser(req.cookies?.[SESSION_COOKIE]);
+  if (fromCookie) {
+    req.user = fromCookie;
+    next();
+    return;
+  }
+  const header = req.header("authorization");
+  if (!header?.startsWith("Bearer ")) throw new HttpError(401, "Not authenticated");
+  const token = await prisma.trackerToken.findUnique({
+    where: { tokenHash: hashToken(header.slice("Bearer ".length).trim()) },
+    include: { user: true },
+  });
+  if (!token || token.revokedAt) throw new HttpError(401, "Invalid or revoked token");
+  req.user = token.user;
+  req.trackerTokenId = token.id;
+  next();
+});
+
 export const requireTrackerToken = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
   const header = req.header("authorization");
   if (!header?.startsWith("Bearer ")) throw new HttpError(401, "Missing bearer token");

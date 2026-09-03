@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { FieldLabel, Input } from "../components/ui/Input";
+import { LogoLottie } from "../components/ui/LogoLottie";
 import buttonStyles from "../components/ui/Button.module.css";
 import styles from "./LoginPage.module.css";
 
@@ -86,7 +87,7 @@ export function LoginPage() {
   return (
     <div className={styles.page}>
       <Card className={styles.card}>
-        <div className={styles.mark} />
+        <LogoLottie size={56} className={styles.mark} />
         <h1 className={styles.title}>Welcome to VibeHub</h1>
         <p className={styles.subtitle}>Steam, for people who ship with an AI pair.</p>
 

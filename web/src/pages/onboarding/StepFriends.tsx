@@ -5,7 +5,7 @@ import type { SuggestedUser } from "../../types";
 import { Avatar } from "../../components/ui/Avatar";
 import { Button } from "../../components/ui/Button";
 import { SkeletonRow } from "../../components/ui/Skeleton";
-import { roleTitle } from "../../components/ui/RoleGlyph";
+import { rolesLabel } from "../../components/ui/RoleGlyph";
 import styles from "./Onboarding.module.css";
 
 interface Props {
@@ -95,7 +95,7 @@ export function StepFriends({ onInvited, onBack, onNext }: Props) {
                     <span className={styles.rowName}>{u.displayName}</span>
                     <span className={styles.rowMeta}>
                       @{u.username}
-                      {roleTitle(u.role) && <> · {roleTitle(u.role)}</>}
+                      {rolesLabel(u.roles) && <> · {rolesLabel(u.roles)}</>}
                     </span>
                   </span>
                   <span className={styles.level} title="Account level">

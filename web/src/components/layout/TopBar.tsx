@@ -3,6 +3,8 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../context/RealtimeContext";
 import { Avatar } from "../ui/Avatar";
+import { Logo } from "../ui/Logo";
+import { Icon } from "../ui/Icon";
 import styles from "./TopBar.module.css";
 
 const NAV_ITEMS = [
@@ -19,6 +21,9 @@ export function TopBar() {
   const { user, logout } = useAuth();
   const { incomingRequests } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The mark runs its loop only while the home link is hovered or focused, so the
+  // chrome stays still (skills/emil_design_eng §4: motion has to say something).
+  const [logoLive, setLogoLive] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
 
@@ -44,8 +49,16 @@ export function TopBar() {
   return (
     <header className={styles.bar}>
       <div className={styles.inner}>
-        <NavLink to="/" className={styles.logo} aria-label="VibeHub home">
-          <span className={styles.logoMark} />
+        <NavLink
+          to="/"
+          className={styles.logo}
+          aria-label="VibeHub home"
+          onMouseEnter={() => setLogoLive(true)}
+          onMouseLeave={() => setLogoLive(false)}
+          onFocus={() => setLogoLive(true)}
+          onBlur={() => setLogoLive(false)}
+        >
+          <Logo size={20} animated={logoLive} />
           <span className={styles.logoText}>VibeHub</span>
         </NavLink>
 
@@ -83,12 +96,16 @@ export function TopBar() {
                     <span className={styles.menuHandle}>@{user.username}</span>
                   </div>
                   <Link to={`/u/${user.username}`} role="menuitem" className={styles.menuItem}>
+                    <Icon name="user" className={styles.menuIcon} />
                     Profile
                   </Link>
                   <Link to="/settings" role="menuitem" className={styles.menuItem}>
+                    <Icon name="settings" className={styles.menuIcon} />
                     Settings
                   </Link>
+                  <div className={styles.menuDivider} role="separator" />
                   <button type="button" role="menuitem" className={styles.menuItem} onClick={() => logout()}>
+                    <Icon name="logout" className={styles.menuIcon} />
                     Log out
                   </button>
                 </div>

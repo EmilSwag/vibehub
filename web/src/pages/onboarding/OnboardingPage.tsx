@@ -5,10 +5,13 @@ import { usersApi } from "../../lib/api";
 import { StepIdentity } from "./StepIdentity";
 import { StepRole } from "./StepRole";
 import { StepFriends } from "./StepFriends";
+import { StepConnect } from "./StepConnect";
 import { StepWelcome } from "./StepWelcome";
+import { Logo } from "../../components/ui/Logo";
 import styles from "./Onboarding.module.css";
 
-const STEPS = ["identity", "role", "friends", "welcome"] as const;
+const STEPS = ["identity", "role", "friends", "connect", "welcome"] as const;
+const STEP_KEY = "vh.onboarding.step";
 type Step = (typeof STEPS)[number];
 
 /**
@@ -20,18 +23,29 @@ export function OnboardingPage() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
   // Resume where the user left off: role saved → skip identity, etc.
-  const [step, setStep] = useState<Step>(() => (user?.role ? "friends" : "identity"));
+  // Survive a reload mid-wizard (a token was just minted, a terminal opened…):
+  // resume where the user was, but never *ahead* of what the account allows.
+  const [step, setStep] = useState<Step>(() => {
+    const floor: Step = user?.roles?.length ? "friends" : "identity";
+    const saved = sessionStorage.getItem(STEP_KEY) as Step | null;
+    if (saved && STEPS.includes(saved) && STEPS.indexOf(saved) > STEPS.indexOf(floor)) return saved;
+    return floor;
+  });
   const [invited, setInvited] = useState(0);
   const [finishing, setFinishing] = useState(false);
 
   const index = STEPS.indexOf(step);
-  const go = useCallback((next: Step) => setStep(next), []);
+  const go = useCallback((next: Step) => {
+    sessionStorage.setItem(STEP_KEY, next);
+    setStep(next);
+  }, []);
 
   const finish = useCallback(async () => {
     if (finishing) return;
     setFinishing(true);
     try {
       const { user: updated } = await usersApi.completeOnboarding();
+      sessionStorage.removeItem(STEP_KEY);
       setUser(updated);
       navigate("/", { replace: true });
     } finally {
@@ -44,7 +58,7 @@ export function OnboardingPage() {
   return (
     <div className={styles.screen}>
       <div className={styles.brand}>
-        <span className={styles.brandMark} />
+        <Logo size={16} className={styles.brandMark} />
         VibeHub
       </div>
 
@@ -71,8 +85,11 @@ export function OnboardingPage() {
           <StepFriends
             onInvited={(n) => setInvited(n)}
             onBack={() => go("role")}
-            onNext={() => go("welcome")}
+            onNext={() => go("connect")}
           />
+        )}
+        {step === "connect" && (
+          <StepConnect onBack={() => go("friends")} onNext={() => go("welcome")} />
         )}
         {step === "welcome" && (
           <StepWelcome user={user} invited={invited} busy={finishing} onEnter={finish} />

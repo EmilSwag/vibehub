@@ -1,0 +1,30 @@
+/*
+ * The Lottie ships one baked colourway (ink) so the file stays portable to
+ * players that cannot theme. In the SPA we override the baked fill and stroke
+ * with `currentColor`, which resolves to --vh-accent and follows light/dark
+ * without a second file. CSS beats presentation attributes, so this is enough.
+ *
+ * The ring paths carry fill-opacity="0" from the exporter, so giving them a fill
+ * here is inert; the solid shapes carry no stroke width, so the stroke is too.
+ */
+
+.host {
+  position: relative;
+  display: grid;
+  place-items: center;
+  color: var(--vh-accent);
+}
+
+.host > * {
+  grid-area: 1 / 1;
+}
+
+.player {
+  width: 100%;
+  height: 100%;
+}
+
+.player svg path {
+  fill: currentColor;
+  stroke: currentColor;
+}

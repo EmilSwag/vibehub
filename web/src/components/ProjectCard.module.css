@@ -83,3 +83,141 @@
 .liked {
   color: var(--vh-accent);
 }
+
+
+/* ---- round 4: post anatomy ---- */
+.owner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+  font-size: 13px;
+  min-width: 0;
+}
+.ownerName {
+  font-weight: 600;
+  color: var(--vh-text);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ownerName:hover {
+  text-decoration: underline;
+}
+.ownerHandle {
+  color: var(--vh-text-faint);
+  white-space: nowrap;
+}
+.privateTag {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--vh-border);
+  font-size: 11.5px;
+  color: var(--vh-text-muted);
+}
+
+.media {
+  position: relative;
+  margin-top: 10px;
+}
+.owner + .media {
+  margin-top: 10px;
+}
+.media .cover {
+  animation: vh-fade-up var(--dur-reveal) var(--ease-out) both;
+}
+.strip {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.strip::-webkit-scrollbar {
+  display: none;
+}
+.thumb {
+  flex: none;
+  width: 52px;
+  height: 36px;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface-2);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--dur-press) var(--ease-out), border-color var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.thumb:hover {
+  opacity: 1;
+}
+.thumb:active {
+  transform: scale(0.96);
+}
+.thumbActive {
+  opacity: 1;
+  border-color: var(--vh-text);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.links {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.heart {
+  transition: transform var(--dur-press) var(--ease-spring, var(--ease-out));
+}
+.likeBtn:active .heart {
+  transform: scale(0.85);
+}
+.liked .heart {
+  fill: currentColor;
+}
+.likeBtn:disabled {
+  cursor: default;
+}
+.likeBtn:disabled:hover {
+  background: none;
+}
+
+.date {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--vh-text-faint);
+}
+.actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media .cover {
+    animation: none;
+  }
+}

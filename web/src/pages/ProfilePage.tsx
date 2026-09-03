@@ -147,7 +147,9 @@ export function ProfilePage() {
             <h1 className={styles.displayName}>{user.displayName}</h1>
             <span className={styles.username}>@{user.username}</span>
             <Badge>Lvl {level}</Badge>
-            {roleTitle(user.role) && <Badge>{roleTitle(user.role)}</Badge>}
+            {user.roles.map((r) => (
+              <Badge key={r}>{roleTitle(r)}</Badge>
+            ))}
             {user.archetype && (
               <Badge active>
                 <ArchetypeGlyph archetype={user.archetype} /> {archetypeLabel(user.archetype)}

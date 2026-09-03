@@ -28,7 +28,7 @@ model User {
   passwordHash        String?
   archetype           String? // Archetype: CODER | ARTIST | DIRECTOR | GENERALIST
   archetypeComputedAt DateTime?
-  role                String? // designer | developer | gamedev | creator | founder (onboarding)
+  roles               String? // CSV of designer | developer | gamedev | creator | founder (onboarding)
   onboardedAt         DateTime?
   isDevAccount        Boolean   @default(false)
   createdAt           DateTime  @default(now())
@@ -114,6 +114,7 @@ model Project {
   repoUrl       String?
   liveUrl       String?
   coverImageUrl String?
+  imageUrls     String?
   isPublic      Boolean  @default(true)
   likeCount     Int      @default(0)
   createdAt     DateTime @default(now())

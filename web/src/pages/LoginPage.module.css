@@ -13,11 +13,9 @@
   text-align: center;
 }
 
+/* The one screen where the brand loop earns its place: a single moment, above
+ * the fold, once per session. */
 .mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--vh-accent);
   margin: 0 auto var(--vh-space-4);
 }
 

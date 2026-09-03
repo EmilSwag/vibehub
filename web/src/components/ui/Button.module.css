@@ -69,3 +69,9 @@
   border-color: var(--vh-accent);
   color: var(--vh-accent-hover);
 }
+
+.sm {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}

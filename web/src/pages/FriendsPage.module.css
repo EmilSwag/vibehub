@@ -92,3 +92,127 @@
 .unfriendBtn:hover {
   color: var(--vh-accent-hover);
 }
+
+/* ---- round 3: people finder + request rows ---- */
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.head .title {
+  margin: 0;
+}
+.count {
+  font-size: 13px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.section + .section {
+  margin-top: 20px;
+}
+.section {
+  margin-bottom: 20px;
+}
+.pill {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  margin-left: 6px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-text);
+  color: var(--vh-bg);
+  font-size: 11.5px;
+  font-weight: 600;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+.cardHot {
+  border-color: var(--vh-text-muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--vh-border);
+}
+.row:last-child {
+  border-bottom: 0;
+}
+.rowIdentity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+  color: inherit;
+  text-decoration: none;
+}
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rowName {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rowMeta {
+  font-size: 12.5px;
+  color: var(--vh-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rowActions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.level {
+  flex: none;
+  font-size: 12px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pending {
+  flex: none;
+  font-size: 12px;
+  color: var(--vh-text-faint);
+}
+
+.search {
+  position: relative;
+  margin-bottom: 8px;
+}
+.searchIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--vh-text-faint);
+  pointer-events: none;
+}
+.searchInput {
+  padding-left: 36px;
+}
+.dim {
+  opacity: 0.55;
+  transition: opacity var(--dur-fade) var(--ease-out);
+}
+
+@media (max-width: 720px) {
+  .rowActions {
+    flex-direction: column;
+  }
+}

@@ -16,8 +16,8 @@ export interface User {
   bio: string | null;
   githubUsername: string | null;
   archetype: Archetype | null;
-  /** Self-selected in onboarding step 2. */
-  role: UserRole | null;
+  /** Self-selected in onboarding step 2; multi-select, empty until chosen. */
+  roles: UserRole[];
   /** Only present on /auth/me responses; null until onboarding is finished. */
   onboardedAt?: string | null;
 }
@@ -25,6 +25,15 @@ export interface User {
 /** GET /users/suggested row — public user plus derived account level. */
 export interface SuggestedUser extends User {
   level: number;
+}
+
+/** GET /users/me/tracker — is the local tracker reporting for this account? */
+export interface TrackerStatus {
+  connected: boolean;
+  lastSeenAt: string | null;
+  activeTokens: number;
+  /** Tool ids seen in the last 30 days, most recent first (e.g. "claude_code"). */
+  tools: string[];
 }
 
 export interface LevelBreakdown {
@@ -81,8 +90,27 @@ export interface Project {
   repoUrl: string | null;
   liveUrl: string | null;
   coverImageUrl: string | null;
+  /** Screenshots (max 8); the first one is the default cover. */
+  imageUrls: string[];
   isPublic: boolean;
   likeCount: number;
+  createdAt: string;
+}
+
+/** GET /projects/:id/commits — recent pushes parsed from the GitHub repo URL. */
+export interface RepoCommit {
+  sha: string;
+  message: string;
+  authorName: string | null;
+  authorLogin: string | null;
+  authorAvatarUrl: string | null;
+  committedAt: string;
+  url: string;
+}
+export interface RepoActivity {
+  repo: { owner: string; repo: string } | null;
+  commits: RepoCommit[];
+  lastPushAt: string | null;
 }
 
 export interface Activity {

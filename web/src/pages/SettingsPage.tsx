@@ -3,11 +3,13 @@ import type { FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import { usersApi } from "../lib/api";
 import type { ChangeEvent } from "react";
-import type { ExternalLink, TrackerToken } from "../types";
+import type { ExternalLink, UserRole } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
 import { FieldLabel, Input, Textarea } from "../components/ui/Input";
+import { ROLES, RoleGlyph } from "../components/ui/RoleGlyph";
+import { ConnectTools } from "../components/ConnectTools";
 import styles from "./SettingsPage.module.css";
 
 function ProfileSection() {
@@ -163,75 +165,54 @@ function LinksSection() {
   );
 }
 
-function TrackerTokensSection() {
-  const [tokens, setTokens] = useState<TrackerToken[]>([]);
-  const [label, setLabel] = useState("");
-  const [newToken, setNewToken] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+/** Same five cards as onboarding, as toggle chips. Saves on each change. */
+function RolesSection() {
+  const { user, refresh } = useAuth();
+  const [roles, setRoles] = useState<UserRole[]>(user?.roles ?? []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    usersApi.listTrackerTokens().then(({ tokens }) => setTokens(tokens));
-  }, []);
-
-  async function handleCreate(event: FormEvent) {
-    event.preventDefault();
-    if (!label.trim()) return;
-    setCreating(true);
-    try {
-      const { token, tokenId } = await usersApi.createTrackerToken(label.trim());
-      setNewToken(token);
-      setTokens((prev) => [...prev, { id: tokenId, label: label.trim(), lastUsedAt: null, revokedAt: null }]);
-      setLabel("");
-    } finally {
-      setCreating(false);
+  async function toggle(id: UserRole) {
+    const next = roles.includes(id) ? roles.filter((r) => r !== id) : [...roles, id];
+    if (next.length === 0) {
+      setError("Keep at least one.");
+      return;
     }
-  }
-
-  async function handleRevoke(id: string) {
-    await usersApi.revokeTrackerToken(id);
-    setTokens((prev) => prev.filter((t) => t.id !== id));
+    setError(null);
+    setRoles(next);
+    setSaving(true);
+    try {
+      await usersApi.updateMe({ roles: next });
+      await refresh();
+    } catch {
+      setRoles(roles);
+      setError("Could not save.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <Card>
-      <form className={styles.newTokenForm} onSubmit={handleCreate}>
-        <Input
-          placeholder="e.g. MacBook Pro"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-        />
-        <Button type="submit" disabled={creating || !label.trim()}>
-          {creating ? "Creating…" : "Create token"}
-        </Button>
-      </form>
-
-      {newToken && (
-        <div className={styles.tokenValue}>
-          {newToken}
-          <br />
-          <span style={{ color: "var(--vh-text-faint)", fontSize: 12 }}>
-            Shown once — copy it into ~/.vibehub/config.json now.
-          </span>
-        </div>
-      )}
-
-      {tokens.length === 0 ? (
-        <p className={styles.saved}>No tracker devices yet.</p>
-      ) : (
-        tokens.map((token) => (
-          <div className={styles.tokenRow} key={token.id}>
-            <div>
-              <div className={styles.tokenLabel}>{token.label}</div>
-              <div className={styles.tokenMeta}>
-                {token.lastUsedAt ? `last used ${token.lastUsedAt}` : "never used"}
-              </div>
-            </div>
-            <button type="button" className={styles.removeBtn} onClick={() => handleRevoke(token.id)}>
-              revoke
+      <div className={styles.chips} role="group" aria-label="Roles" aria-busy={saving}>
+        {ROLES.map((r) => {
+          const on = roles.includes(r.id);
+          return (
+            <button
+              key={r.id}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              className={[styles.chip, on && styles.chipOn].filter(Boolean).join(" ")}
+              onClick={() => toggle(r.id)}
+            >
+              <RoleGlyph role={r.id} size={18} />
+              {r.title}
             </button>
-          </div>
-        ))
-      )}
+          );
+        })}
+      </div>
+      {error && <p className={styles.saved}>{error}</p>}
     </Card>
   );
 }
@@ -247,13 +228,18 @@ export function SettingsPage() {
       </section>
 
       <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>What you make</h2>
+        <RolesSection />
+      </section>
+
+      <section className={styles.section}>
         <h2 className={styles.sectionTitle}>External links</h2>
         <LinksSection />
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Tracker devices</h2>
-        <TrackerTokensSection />
+        <h2 className={styles.sectionTitle}>Tracker</h2>
+        <ConnectTools variant="full" />
       </section>
     </div>
   );

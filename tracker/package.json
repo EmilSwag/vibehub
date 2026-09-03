@@ -10,13 +10,15 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --minify-syntax --outfile=../web/public/tracker/vibehub-tracker.cjs"
   },
   "dependencies": {
     "commander": "^12.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "esbuild": "^0.28.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0"
   }

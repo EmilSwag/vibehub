@@ -55,9 +55,10 @@ model User {
   passwordHash       String?
   archetype          Archetype?
   archetypeComputedAt DateTime?
-  // Self-selected in onboarding: designer | developer | gamedev | creator | founder.
-  // Plain String (not enum) so the SQLite mirror stays identical; validated by zod.
-  role               String?
+  // Self-selected in onboarding, multi-select: comma-separated subset of
+  // designer | developer | gamedev | creator | founder. Plain String (not an
+  // array/enum) so the SQLite mirror stays identical; validated by zod.
+  roles              String?
   onboardedAt        DateTime?
   isDevAccount       Boolean   @default(false)
   createdAt          DateTime  @default(now())
@@ -146,6 +147,9 @@ model Project {
   repoUrl       String?
   liveUrl       String?
   coverImageUrl String?
+  // JSON-encoded string[] of screenshot URLs (max 8). Plain String so the
+  // SQLite mirror stays identical; parsed in serializers.toPublicProject.
+  imageUrls     String?
   isPublic      Boolean  @default(true)
   likeCount     Int      @default(0)
   createdAt     DateTime @default(now())

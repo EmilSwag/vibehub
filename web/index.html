@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <link rel="icon" href="/vibehub-icon.png" />
+    <!-- SVG first: the mark carries its own ink/paper switch, so the tab icon
+         follows the OS theme. The PNG stays for browsers without SVG icons. -->
+    <link rel="icon" type="image/svg+xml" href="/brand/mark.svg" />
+    <link rel="alternate icon" href="/vibehub-icon.png" />
     <title>VibeHub</title>
   </head>
   <body>

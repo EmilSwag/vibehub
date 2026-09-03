@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
-import { friendsApi } from "../lib/api";
-import type { Friend } from "../types";
+import { friendsApi, usersApi } from "../lib/api";
+import { stagger } from "../lib/motion";
+import type { Friend, TrackerStatus } from "../types";
 import { Card } from "../components/ui/Card";
+import { Avatar } from "../components/ui/Avatar";
 import buttonStyles from "../components/ui/Button.module.css";
+import { ConnectTools } from "../components/ConnectTools";
 import { FriendListItem } from "../components/FriendListItem";
 import { Skeleton, SkeletonRow } from "../components/ui/Skeleton";
+import { SectionTitle } from "../components/ui/SectionTitle";
 import styles from "./HomePage.module.css";
 
 export function HomePage() {
@@ -16,6 +19,7 @@ export function HomePage() {
   const { presences, incomingRequests } = useRealtime();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tracker, setTracker] = useState<TrackerStatus | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -27,23 +31,37 @@ export function HomePage() {
       .finally(() => {
         if (active) setLoading(false);
       });
+    usersApi
+      .trackerStatus()
+      .then((s) => {
+        if (active) setTracker(s);
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
   }, []);
 
   const activeFriends = friends.filter((f) => presences.get(f.user.username)?.status === "active");
+  const me = user ? presences.get(user.username) : undefined;
 
   return (
     <div>
       <h1 className={styles.greeting}>Back at it, {user?.displayName}.</h1>
       <p className={styles.subtitle}>Here's what your friends are shipping right now.</p>
 
+      {/* Until the tracker reports, the profile is empty — keep offering the fix. */}
+      {tracker && !tracker.connected && (
+        <div className={[styles.banner, "reveal"].join(" ")}>
+          <ConnectTools onConnected={() => setTracker((t) => (t ? { ...t, connected: true } : t))} />
+        </div>
+      )}
+
       <div className={styles.grid}>
         <section>
-          <h2 className={styles.sectionTitle}>
-            Live now {activeFriends.length > 0 && `· ${activeFriends.length}`}
-          </h2>
+          <SectionTitle icon="sparkles" count={activeFriends.length}>
+            Live now
+          </SectionTitle>
           <Card className={styles.card}>
             {loading ? (
               <SkeletonRow count={4} />
@@ -56,7 +74,7 @@ export function HomePage() {
             ) : (
               <div className="stagger">
                 {activeFriends.map((f, i) => (
-                  <div key={f.user.id} style={{ "--i": i } as CSSProperties}>
+                  <div key={f.user.id} style={stagger(i)}>
                     <FriendListItem
                       user={f.user}
                       daysAsFriends={f.daysAsFriends}
@@ -70,8 +88,39 @@ export function HomePage() {
         </section>
 
         <aside className={styles.side}>
+          {user && (
+            <section>
+              <SectionTitle icon="user">You</SectionTitle>
+              <Card className={styles.youCard}>
+                <Avatar src={user.avatarUrl} name={user.displayName} size={40} />
+                <div className={styles.youText}>
+                  <span className={styles.youName}>{user.displayName}</span>
+                  <span className={styles.youStatus}>
+                    {me?.status === "active" && me.activity
+                      ? `Vibing in ${me.activity.projectAlias}`
+                      : me?.status === "active"
+                        ? "Active"
+                        : me?.status === "idle"
+                          ? "Idle"
+                          : tracker?.connected
+                            ? "Offline · tracker connected"
+                            : "Offline · tracker not connected"}
+                  </span>
+                </div>
+                <span
+                  className={[styles.youDot, me?.status === "active" && styles.youDotLive]
+                    .filter(Boolean)
+                    .join(" ")}
+                  aria-hidden="true"
+                />
+              </Card>
+            </section>
+          )}
+
           <section>
-            <h2 className={styles.sectionTitle}>Friend requests</h2>
+            <SectionTitle icon="inbox" count={incomingRequests.length} tone="hot">
+              Friend requests
+            </SectionTitle>
             <Card>
               {incomingRequests.length === 0 ? (
                 <span className={styles.empty} style={{ padding: 0 }}>
@@ -79,11 +128,27 @@ export function HomePage() {
                 </span>
               ) : (
                 <>
-                  <div className={styles.requestRow}>
-                    <span>{incomingRequests.length} pending</span>
+                  <div className="stagger">
+                    {incomingRequests.slice(0, 3).map((req, i) => (
+                      <Link
+                        key={req.id}
+                        to="/friends"
+                        className={styles.requestRow}
+                        style={stagger(i)}
+                      >
+                        <Avatar src={req.sender?.avatarUrl} name={req.sender?.displayName ?? "?"} size={28} />
+                        <span className={styles.requestName}>
+                          {req.sender?.displayName ?? "Someone"}
+                          <span className={styles.requestMeta}> @{req.sender?.username}</span>
+                        </span>
+                      </Link>
+                    ))}
                   </div>
-                  <Link to="/friends" className={[buttonStyles.btn, buttonStyles.secondary].join(" ")}>
-                    Review
+                  <Link
+                    to="/friends"
+                    className={[buttonStyles.btn, buttonStyles.secondary, styles.reviewBtn].join(" ")}
+                  >
+                    Review {incomingRequests.length > 3 ? `all ${incomingRequests.length}` : ""}
                   </Link>
                 </>
               )}
@@ -91,7 +156,9 @@ export function HomePage() {
           </section>
 
           <section>
-            <h2 className={styles.sectionTitle}>All friends</h2>
+            <SectionTitle icon="users" count={friends.length}>
+              All friends
+            </SectionTitle>
             <Card>
               {loading ? (
                 <>

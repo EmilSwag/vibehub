@@ -1,186 +1,291 @@
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useRealtime } from "../context/RealtimeContext";
-import { ApiError, friendsApi } from "../lib/api";
-import type { Friend, FriendRequest } from "../types";
+import { ApiError, friendsApi, usersApi } from "../lib/api";
+import { stagger } from "../lib/motion";
+import type { Friend, FriendRequest, SuggestedUser } from "../types";
 import { Card } from "../components/ui/Card";
+import { Avatar } from "../components/ui/Avatar";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { FriendListItem } from "../components/FriendListItem";
 import { SkeletonRow } from "../components/ui/Skeleton";
+import { SectionTitle } from "../components/ui/SectionTitle";
+import { rolesLabel } from "../components/ui/RoleGlyph";
+import { FriendListItem } from "../components/FriendListItem";
 import styles from "./FriendsPage.module.css";
 
+const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
+
+/**
+ * Friends — three things, in priority order: requests waiting on you, the
+ * people you already vibe with, and a people finder (same rows as onboarding:
+ * avatar · name · @user · role · Lvl · Invite).
+ */
 export function FriendsPage() {
-  const { presences, incomingRequests: liveIncoming } = useRealtime();
+  const { presences, incomingRequests, removeRequest, refreshRequests, pushToast } = useRealtime();
   const [friends, setFriends] = useState<Friend[]>([]);
-  const [incoming, setIncoming] = useState<FriendRequest[]>([]);
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [targetUsername, setTargetUsername] = useState("");
-  const [addMessage, setAddMessage] = useState<{ text: string; error: boolean } | null>(null);
 
-  const loadAll = () => {
-    friendsApi.list().then(({ friends }) => setFriends(friends));
-    friendsApi.requests().then(({ incoming, outgoing }) => {
-      setIncoming(incoming);
-      setOutgoing(outgoing);
-    });
-  };
+  const [query, setQuery] = useState("");
+  const [people, setPeople] = useState<SuggestedUser[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [invited, setInvited] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([friendsApi.list(), friendsApi.requests()])
+    Promise.all([friendsApi.list(), friendsApi.requests(), refreshRequests()])
       .then(([friendsRes, requestsRes]) => {
         setFriends(friendsRes.friends);
-        setIncoming(requestsRes.incoming);
         setOutgoing(requestsRes.outgoing);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshRequests]);
 
-  // merge realtime friend-request pushes into the incoming list
+  // People finder: debounced search; empty query = "people you may know".
   useEffect(() => {
-    if (liveIncoming.length === 0) return;
-    setIncoming((prev) => {
-      const ids = new Set(prev.map((r) => r.id));
-      const fresh = liveIncoming.filter((r) => !ids.has(r.id));
-      return fresh.length > 0 ? [...fresh, ...prev] : prev;
-    });
-  }, [liveIncoming]);
+    let cancelled = false;
+    setSearching(true);
+    const t = window.setTimeout(() => {
+      usersApi
+        .suggested(query.trim() || undefined, 20)
+        .then(({ users }) => {
+          if (!cancelled) setPeople(users);
+        })
+        .catch(() => {
+          if (!cancelled) setPeople([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, query ? 250 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [query]);
 
-  async function handleAddFriend(event: FormEvent) {
-    event.preventDefault();
-    setAddMessage(null);
+  async function invite(username: string) {
+    setBusy(username);
     try {
-      const { request } = await friendsApi.sendRequest(targetUsername.trim());
+      const { request } = await friendsApi.sendRequest(username);
       setOutgoing((prev) => [request, ...prev]);
-      setTargetUsername("");
-      setAddMessage({ text: "Friend request sent.", error: false });
+      setInvited((prev) => new Set(prev).add(username));
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Could not send request";
-      setAddMessage({ text: msg, error: true });
+      pushToast({
+        title: "Couldn't send invite",
+        body: err instanceof ApiError ? err.message : undefined,
+      });
+    } finally {
+      setBusy(null);
     }
   }
 
-  async function handleAccept(id: string) {
-    await friendsApi.acceptRequest(id);
-    setIncoming((prev) => prev.filter((r) => r.id !== id));
-    loadAll();
+  async function accept(req: FriendRequest) {
+    setBusy(req.id);
+    try {
+      await friendsApi.acceptRequest(req.id);
+      removeRequest(req.id);
+      const { friends: list } = await friendsApi.list();
+      setFriends(list);
+      pushToast({
+        title: `You and @${req.sender?.username ?? "them"} are now friends`,
+        href: req.sender ? `/u/${req.sender.username}` : undefined,
+      });
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function handleDecline(id: string) {
-    await friendsApi.declineRequest(id);
-    setIncoming((prev) => prev.filter((r) => r.id !== id));
+  async function decline(req: FriendRequest) {
+    setBusy(req.id);
+    try {
+      await friendsApi.declineRequest(req.id);
+      removeRequest(req.id);
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function handleUnfriend(username: string) {
+  async function unfriend(username: string) {
     await friendsApi.unfriend(username);
     setFriends((prev) => prev.filter((f) => f.user.username !== username));
   }
 
+  const pendingTo = new Set(outgoing.map((r) => r.receiver?.username).filter(Boolean));
+
   return (
     <div>
-      <h1 className={styles.title}>Friends</h1>
+      <div className={styles.head}>
+        <h1 className={styles.title}>Friends</h1>
+        <span className={styles.count}>
+          {friends.length} friend{friends.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {incomingRequests.length > 0 && (
+        <section className={cx(styles.section, "reveal")}>
+          <SectionTitle icon="inbox" count={incomingRequests.length} tone="hot">
+            Requests
+          </SectionTitle>
+          <Card className={cx(styles.card, styles.cardHot)}>
+            <div className="stagger">
+              {incomingRequests.map((req, i) => (
+                <div className={styles.row} key={req.id} style={stagger(i)}>
+                  <Link to={`/u/${req.sender?.username ?? ""}`} className={styles.rowIdentity}>
+                    <Avatar src={req.sender?.avatarUrl} name={req.sender?.displayName ?? "?"} size={40} />
+                    <span className={styles.rowText}>
+                      <span className={styles.rowName}>{req.sender?.displayName ?? "Someone"}</span>
+                      <span className={styles.rowMeta}>
+                        @{req.sender?.username ?? req.senderId}
+                        {rolesLabel(req.sender?.roles) && <> · {rolesLabel(req.sender?.roles)}</>}
+                      </span>
+                    </span>
+                  </Link>
+                  <div className={styles.rowActions}>
+                    <Button size="sm" onClick={() => accept(req)} disabled={busy === req.id}>
+                      Accept
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => decline(req)} disabled={busy === req.id}>
+                      Decline
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </section>
+      )}
 
       <div className={styles.grid}>
-        <section>
-          <h2 className={styles.sectionTitle}>
-            {friends.length} friend{friends.length === 1 ? "" : "s"}
-          </h2>
+        <section className={styles.section}>
+          <SectionTitle icon="users" count={friends.length}>
+            Your people
+          </SectionTitle>
           <Card className={styles.card}>
             {loading ? (
               <SkeletonRow count={5} />
             ) : friends.length === 0 ? (
-              <div className={styles.empty}>No friends yet — add one from the panel on the right.</div>
+              <div className={styles.empty}>No friends yet. Invite someone from the finder →</div>
             ) : (
-              friends.map((f) => (
-                <FriendListItem
-                  key={f.user.id}
-                  user={f.user}
-                  daysAsFriends={f.daysAsFriends}
-                  presence={presences.get(f.user.username)}
-                  action={
-                    <button
-                      type="button"
-                      className={styles.unfriendBtn}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        handleUnfriend(f.user.username);
-                      }}
-                    >
-                      unfriend
-                    </button>
-                  }
-                />
-              ))
+              <div className="stagger">
+                {friends.map((f, i) => (
+                  <div key={f.user.id} style={stagger(i)}>
+                    <FriendListItem
+                      user={f.user}
+                      daysAsFriends={f.daysAsFriends}
+                      presence={presences.get(f.user.username)}
+                      action={
+                        <button
+                          type="button"
+                          className={styles.unfriendBtn}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            void unfriend(f.user.username);
+                          }}
+                        >
+                          Unfriend
+                        </button>
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
             )}
           </Card>
         </section>
 
         <aside className={styles.side}>
-          <section>
-            <h2 className={styles.sectionTitle}>Add a friend</h2>
-            <Card>
-              <form className={styles.addForm} onSubmit={handleAddFriend}>
-                <Input
-                  placeholder="username"
-                  value={targetUsername}
-                  onChange={(e) => setTargetUsername(e.target.value)}
-                  required
-                />
-                <Button type="submit" disabled={!targetUsername.trim()}>
-                  Send
-                </Button>
-              </form>
-              {addMessage && (
-                <p
-                  className={styles.formMessage}
-                  style={{ color: addMessage.error ? "var(--vh-accent-hover)" : "var(--vh-text-dim)" }}
+          <section className={styles.section}>
+            <SectionTitle icon="search">Find people</SectionTitle>
+            <Card className={styles.card}>
+              <div className={styles.search}>
+                <svg
+                  className={styles.searchIcon}
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
                 >
-                  {addMessage.text}
-                </p>
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.5-3.5" />
+                </svg>
+                <Input
+                  className={styles.searchInput}
+                  placeholder="Name or @username"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label="Search people"
+                />
+              </div>
+
+              {people === null || (searching && people.length === 0) ? (
+                <SkeletonRow count={4} />
+              ) : people.length === 0 ? (
+                <div className={styles.empty}>
+                  {query ? `Nobody matches “${query}”.` : "Everyone here is already your friend."}
+                </div>
+              ) : (
+                <div className={cx("stagger", searching && styles.dim)}>
+                  {people.map((u, i) => {
+                    const sent = invited.has(u.username) || pendingTo.has(u.username);
+                    return (
+                      <div className={styles.row} key={u.id} style={stagger(i)}>
+                        <Link to={`/u/${u.username}`} className={styles.rowIdentity}>
+                          <Avatar src={u.avatarUrl} name={u.displayName} size={40} />
+                          <span className={styles.rowText}>
+                            <span className={styles.rowName}>{u.displayName}</span>
+                            <span className={styles.rowMeta}>
+                              @{u.username}
+                              {rolesLabel(u.roles) && <> · {rolesLabel(u.roles)}</>}
+                            </span>
+                          </span>
+                        </Link>
+                        <span className={styles.level} title="Account level">
+                          Lvl {u.level}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant={sent ? "secondary" : "primary"}
+                          onClick={() => invite(u.username)}
+                          disabled={sent || busy === u.username}
+                        >
+                          {sent ? "Sent" : "Invite"}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </Card>
           </section>
 
-          <section>
-            <h2 className={styles.sectionTitle}>Incoming requests</h2>
-            <Card className={styles.card}>
-              {incoming.length === 0 ? (
-                <div className={styles.empty}>Nothing pending.</div>
-              ) : (
-                incoming.map((req) => (
-                  <div className={styles.requestRow} key={req.id}>
-                    <span className={styles.requestName}>{req.sender?.displayName ?? req.senderId}</span>
-                    <div className={styles.requestActions}>
-                      <Button variant="secondary" onClick={() => handleAccept(req.id)}>
-                        Accept
-                      </Button>
-                      <Button variant="ghost" onClick={() => handleDecline(req.id)}>
-                        Decline
-                      </Button>
-                    </div>
+          {outgoing.length > 0 && (
+            <section className={styles.section}>
+              <SectionTitle icon="send" count={outgoing.length}>
+                Sent
+              </SectionTitle>
+              <Card className={styles.card}>
+                {outgoing.map((req) => (
+                  <div className={styles.row} key={req.id}>
+                    <Link to={`/u/${req.receiver?.username ?? ""}`} className={styles.rowIdentity}>
+                      <Avatar src={req.receiver?.avatarUrl} name={req.receiver?.displayName ?? "?"} size={32} />
+                      <span className={styles.rowText}>
+                        <span className={styles.rowName}>{req.receiver?.displayName ?? req.receiverId}</span>
+                        <span className={styles.rowMeta}>@{req.receiver?.username ?? ""}</span>
+                      </span>
+                    </Link>
+                    <span className={styles.pending}>Pending</span>
                   </div>
-                ))
-              )}
-            </Card>
-          </section>
-
-          <section>
-            <h2 className={styles.sectionTitle}>Outgoing requests</h2>
-            <Card className={styles.card}>
-              {outgoing.length === 0 ? (
-                <div className={styles.empty}>Nothing pending.</div>
-              ) : (
-                outgoing.map((req) => (
-                  <div className={styles.requestRow} key={req.id}>
-                    <span className={styles.requestName}>{req.receiver?.displayName ?? req.receiverId}</span>
-                    <span style={{ color: "var(--vh-text-faint)", fontSize: 12 }}>pending</span>
-                  </div>
-                ))
-              )}
-            </Card>
-          </section>
+                ))}
+              </Card>
+            </section>
+          )}
         </aside>
       </div>
     </div>
