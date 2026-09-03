@@ -23,6 +23,9 @@ vite.config.ts.timestamp-*
 .smoke-*.txt
 .rw-*.json
 
+# local-only smoke-test reports (see CLAUDE.md report convention) — never committed
+/reports/
+
 # agent/IDE local state
 .claude/settings.local.json
 .quadcodeai/
