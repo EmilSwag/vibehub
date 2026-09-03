@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { statsApi } from "../lib/api";
 import { formatActiveTime, formatTokens } from "../lib/format";
 import type { UserStats } from "../types";
+import { Skeleton } from "./ui/Skeleton";
 import { StatTile } from "./ui/StatTile";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
@@ -84,7 +85,21 @@ export function StatsPanel({ username }: { username: string }) {
     }
   }
 
-  if (loading) return <span style={{ color: "var(--vh-text-faint)" }}>Loading stats…</span>;
+  if (loading) {
+    return (
+      <div aria-busy="true">
+        <div className={styles.tiles}>
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} variant="block" height={72} style={{ "--i": i } as CSSProperties} />
+          ))}
+        </div>
+        <div className={styles.barList}>
+          <Skeleton height={10} width="80%" />
+          <Skeleton height={10} width="55%" />
+        </div>
+      </div>
+    );
+  }
   if (!stats) return null;
 
   return (

@@ -18,12 +18,15 @@ import { LinkIcon } from "../components/LinkIcon";
 import { ProjectCard } from "../components/ProjectCard";
 import { WallComment } from "../components/WallComment";
 import { StatsPanel } from "../components/StatsPanel";
+import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
+import { roleTitle } from "../components/ui/RoleGlyph";
 import styles from "./ProfilePage.module.css";
 
 interface ProfileData {
   user: User;
   links: ExternalLink[];
   friendCount: number;
+  level: number;
 }
 
 export function ProfilePage() {
@@ -111,10 +114,28 @@ export function ProfilePage() {
   }
 
   if (!profile) {
-    return <p className={styles.empty}>Loading profile…</p>;
+    // Same silhouette as the hero below so nothing jumps when data lands.
+    return (
+      <div>
+        <div className={styles.hero} aria-busy="true">
+          <Skeleton variant="circle" width={96} />
+          <div className={styles.heroInfo}>
+            <Skeleton width={220} height={26} style={{ marginBottom: 10 }} />
+            <Skeleton width={140} height={13} style={{ marginBottom: 14 }} />
+            <SkeletonText lines={2} />
+          </div>
+        </div>
+        <section className={styles.section}>
+          <Skeleton width={60} height={12} style={{ marginBottom: 12 }} />
+          <Card>
+            <SkeletonText lines={3} />
+          </Card>
+        </section>
+      </div>
+    );
   }
 
-  const { user, links, friendCount } = profile;
+  const { user, links, friendCount, level } = profile;
   const presence = presences.get(username);
 
   return (
@@ -125,6 +146,8 @@ export function ProfilePage() {
           <div className={styles.nameRow}>
             <h1 className={styles.displayName}>{user.displayName}</h1>
             <span className={styles.username}>@{user.username}</span>
+            <Badge>Lvl {level}</Badge>
+            {roleTitle(user.role) && <Badge>{roleTitle(user.role)}</Badge>}
             {user.archetype && (
               <Badge active>
                 <ArchetypeGlyph archetype={user.archetype} /> {archetypeLabel(user.archetype)}

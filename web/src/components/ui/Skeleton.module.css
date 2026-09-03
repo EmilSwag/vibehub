@@ -1,0 +1,79 @@
+.skeleton {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--vh-surface-2);
+  border-radius: var(--vh-radius-sm);
+  animation: vh-fade-in var(--dur-enter) var(--ease-out) both;
+}
+
+/* Low-contrast sweep, 1.4s linear — quiet enough to sit in a whole page of blocks. */
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%
+  );
+  animation: vh-shimmer 1.4s linear infinite;
+}
+
+:root[data-theme="dark"] .skeleton::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.06) 50%, transparent 100%);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .skeleton::after {
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.06) 50%, transparent 100%);
+  }
+}
+
+.line {
+  height: 12px;
+  width: 100%;
+  border-radius: 6px;
+}
+
+.circle {
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.block {
+  border-radius: var(--vh-radius-md);
+}
+
+.pill {
+  border-radius: var(--vh-radius-pill);
+  flex-shrink: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  animation: vh-fade-in var(--dur-enter) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+.rowText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+}

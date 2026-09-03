@@ -5,10 +5,13 @@ import type {
   Archetype,
   Friend,
   FriendRequest,
+  LevelBreakdown,
   Project,
   Presence,
+  SuggestedUser,
   TrackerToken,
   User,
+  UserRole,
   UserStats,
   WallComment,
 } from "../types";
@@ -87,10 +90,24 @@ export const usersApi = {
       links: { id: string; url: string; label: string | null; icon: string; order: number }[];
       archetype: Archetype | null;
       friendCount: number;
+      level: number;
+      levelBreakdown: LevelBreakdown;
     }>(`/api/v1/users/${encodeURIComponent(username)}`),
 
-  updateMe: (body: { displayName?: string; bio?: string }) =>
+  /** People you might know (not me, not friends, no pending request). `invitedIds` = already invited by me. */
+  suggested: (q?: string, limit = 30) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (q) params.set("q", q);
+    return request<{ users: SuggestedUser[]; invitedIds: string[] }>(
+      `/api/v1/users/suggested?${params.toString()}`
+    );
+  },
+
+  updateMe: (body: { username?: string; displayName?: string; bio?: string; role?: UserRole | null }) =>
     request<{ user: User }>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
+
+  completeOnboarding: () =>
+    request<{ user: User }>("/api/v1/users/me/onboarding/complete", { method: "POST" }),
 
   uploadAvatar: (file: File) => {
     const form = new FormData();

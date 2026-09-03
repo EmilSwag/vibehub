@@ -7,6 +7,7 @@ import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { FriendListItem } from "../components/FriendListItem";
+import { SkeletonRow } from "../components/ui/Skeleton";
 import styles from "./FriendsPage.module.css";
 
 export function FriendsPage() {
@@ -88,7 +89,7 @@ export function FriendsPage() {
           </h2>
           <Card className={styles.card}>
             {loading ? (
-              <div className={styles.empty}>Loading…</div>
+              <SkeletonRow count={5} />
             ) : friends.length === 0 ? (
               <div className={styles.empty}>No friends yet — add one from the panel on the right.</div>
             ) : (

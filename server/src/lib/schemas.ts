@@ -9,9 +9,20 @@ export const usernameSchema = z
 
 export const devLoginSchema = z.object({ username: usernameSchema });
 
+// Self-selected onboarding role cards (User.role). Archetype stays computed separately.
+export const USER_ROLES = ["designer", "developer", "gamedev", "creator", "founder"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export const patchMeSchema = z.object({
+  username: usernameSchema.optional(),
   displayName: z.string().min(1).max(60).optional(),
   bio: z.string().max(500).nullable().optional(),
+  role: z.enum(USER_ROLES).nullable().optional(),
+});
+
+export const suggestedUsersQuerySchema = z.object({
+  q: z.string().trim().max(40).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(30),
 });
 
 export const linkInputSchema = z.object({

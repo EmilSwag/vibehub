@@ -5,6 +5,8 @@ export type Archetype = "CODER" | "ARTIST" | "DIRECTOR" | "GENERALIST";
 export type FriendRequestStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "CANCELED";
 export type PresenceStatus = "active" | "idle" | "offline";
 
+export type UserRole = "designer" | "developer" | "gamedev" | "creator" | "founder";
+
 export interface User {
   id: string;
   username: string;
@@ -14,6 +16,25 @@ export interface User {
   bio: string | null;
   githubUsername: string | null;
   archetype: Archetype | null;
+  /** Self-selected in onboarding step 2. */
+  role: UserRole | null;
+  /** Only present on /auth/me responses; null until onboarding is finished. */
+  onboardedAt?: string | null;
+}
+
+/** GET /users/suggested row — public user plus derived account level. */
+export interface SuggestedUser extends User {
+  level: number;
+}
+
+export interface LevelBreakdown {
+  level: number;
+  xp: number;
+  activeHours: number;
+  totalTokens: number;
+  projects: number;
+  friends: number;
+  commits: number;
 }
 
 export interface ExternalLink {

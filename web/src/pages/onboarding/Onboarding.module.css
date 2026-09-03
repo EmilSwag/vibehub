@@ -1,0 +1,455 @@
+.screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 20px 48px;
+  background: var(--vh-bg);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: var(--vh-text-dim);
+}
+
+.brandMark {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--vh-accent);
+}
+
+/* ---- Progress dots ---- */
+
+.dots {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  margin: 28px 0 0;
+  padding: 0;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-border);
+  transition:
+    width var(--dur-enter) var(--ease-out),
+    background-color var(--dur-state) var(--ease-out);
+}
+
+.dotDone {
+  background: var(--vh-text-faint);
+}
+
+.dotActive {
+  width: 22px;
+  background: var(--vh-accent);
+}
+
+/* ---- Stage / step ---- */
+
+.stage {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 40px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.title {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+}
+
+.lead {
+  margin: 0 0 20px;
+  max-width: 400px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--vh-text-dim);
+}
+
+.error {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--vh-text);
+  background: var(--vh-accent-soft);
+  padding: 8px 12px;
+  border-radius: var(--vh-radius-sm);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  width: 100%;
+  margin-top: 28px;
+}
+
+.actionsCenter {
+  justify-content: center;
+}
+
+.linkButton {
+  background: none;
+  border: 0;
+  padding: 8px 4px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--vh-text-dim);
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.linkButton:hover {
+  color: var(--vh-text);
+}
+
+/* ---- Step 1: identity ---- */
+
+.avatarButton {
+  position: relative;
+  border: 0;
+  background: none;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  margin: 8px 0 20px;
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.avatarButton:hover {
+  transform: scale(1.02);
+}
+.avatarButton:disabled {
+  cursor: progress;
+}
+
+.avatarHint {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-accent);
+  color: var(--vh-on-accent);
+  white-space: nowrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  max-width: 340px;
+  text-align: left;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vh-text-dim);
+}
+
+.inputWrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  background: var(--vh-surface);
+  transition: border-color var(--dur-state) var(--ease-out), box-shadow var(--dur-state) var(--ease-out);
+}
+.inputWrap:focus-within {
+  border-color: var(--vh-text-faint);
+  box-shadow: 0 0 0 3px var(--vh-accent-soft);
+}
+.inputWrap .input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding-left: 4px;
+}
+.inputWrap .input:focus {
+  box-shadow: none;
+}
+
+.inputPrefix {
+  padding-left: 12px;
+  color: var(--vh-text-faint);
+  font-size: 15px;
+}
+
+.input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--vh-text);
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  outline: none;
+  transition: border-color var(--dur-state) var(--ease-out), box-shadow var(--dur-state) var(--ease-out);
+}
+.input:focus {
+  border-color: var(--vh-text-faint);
+  box-shadow: 0 0 0 3px var(--vh-accent-soft);
+}
+.input::placeholder {
+  color: var(--vh-text-faint);
+}
+
+.fieldHint {
+  font-size: 12px;
+  color: var(--vh-text-faint);
+  transition: color var(--dur-state) var(--ease-out);
+}
+.fieldHintBad {
+  color: var(--vh-text);
+}
+
+/* ---- Step 2: role cards ---- */
+
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+}
+.roleGrid > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.roleCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px;
+  text-align: left;
+  font: inherit;
+  color: var(--vh-text);
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-state) var(--ease-out),
+    background-color var(--dur-state) var(--ease-out),
+    transform var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-state) var(--ease-out);
+}
+.roleCard:hover {
+  border-color: var(--vh-text-faint);
+  transform: translateY(-1px);
+}
+.roleCardSelected,
+.roleCardSelected:hover {
+  border-color: var(--vh-accent);
+  box-shadow: 0 0 0 1px var(--vh-accent);
+  background: var(--vh-surface);
+}
+
+.roleGlyph {
+  display: inline-flex;
+  color: var(--vh-text);
+  margin-bottom: 4px;
+}
+
+.roleTitle {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.roleBlurb {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--vh-text-dim);
+}
+
+.roleCheck {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vh-border);
+  color: var(--vh-on-accent);
+  transition: background-color var(--dur-state) var(--ease-out), border-color var(--dur-state) var(--ease-out);
+}
+.roleCardSelected .roleCheck {
+  background: var(--vh-accent);
+  border-color: var(--vh-accent);
+}
+
+/* ---- Step 3: people list ---- */
+
+.search {
+  max-width: none;
+  margin-bottom: 8px;
+}
+
+.list {
+  width: 100%;
+  min-height: 300px;
+  text-align: left;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--vh-border);
+}
+.row:last-child {
+  border-bottom: 0;
+}
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rowName {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  font-size: 12.5px;
+  color: var(--vh-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.level {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-accent-soft);
+  color: var(--vh-text-dim);
+}
+
+.inviteButton {
+  min-width: 84px;
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.emptyRow {
+  margin: 0;
+  padding: 36px 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--vh-text-faint);
+}
+
+/* ---- Step 4: welcome ---- */
+
+.welcome {
+  padding-top: 24px;
+  min-height: 420px;
+  justify-content: center;
+}
+
+.welcomeAvatar {
+  margin-bottom: 16px;
+}
+
+.welcomeTitle {
+  font-size: 44px;
+  display: flex;
+  gap: 0.28em;
+  justify-content: center;
+}
+
+.word {
+  display: inline-block;
+  animation: vh-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: calc(140ms + var(--i, 0) * 160ms);
+}
+
+.chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.chip {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface);
+  color: var(--vh-text-dim);
+}
+
+@media (max-width: 560px) {
+  .title {
+    font-size: 26px;
+  }
+  .welcomeTitle {
+    font-size: 34px;
+  }
+  .roleGrid {
+    grid-template-columns: 1fr;
+  }
+  .roleGrid > :last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+  .level {
+    display: none;
+  }
+}

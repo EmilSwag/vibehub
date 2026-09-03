@@ -7,11 +7,17 @@
   font-weight: 500;
   font-size: 14px;
   line-height: 1;
-  padding: 10px 18px;
-  border-radius: var(--vh-radius-md);
+  min-height: 38px;
+  padding: 0 18px;
+  border-radius: var(--vh-radius-pill);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out),
+    opacity var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 
 .btn:disabled {

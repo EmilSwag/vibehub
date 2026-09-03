@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
@@ -7,6 +8,7 @@ import type { Friend } from "../types";
 import { Card } from "../components/ui/Card";
 import buttonStyles from "../components/ui/Button.module.css";
 import { FriendListItem } from "../components/FriendListItem";
+import { Skeleton, SkeletonRow } from "../components/ui/Skeleton";
 import styles from "./HomePage.module.css";
 
 export function HomePage() {
@@ -44,7 +46,7 @@ export function HomePage() {
           </h2>
           <Card className={styles.card}>
             {loading ? (
-              <div className={styles.empty}>Loading…</div>
+              <SkeletonRow count={4} />
             ) : friends.length === 0 ? (
               <div className={styles.empty}>
                 No friends yet — head to <Link to="/friends">Friends</Link> to add some.
@@ -52,14 +54,17 @@ export function HomePage() {
             ) : activeFriends.length === 0 ? (
               <div className={styles.empty}>Nobody's actively coding right now.</div>
             ) : (
-              activeFriends.map((f) => (
-                <FriendListItem
-                  key={f.user.id}
-                  user={f.user}
-                  daysAsFriends={f.daysAsFriends}
-                  presence={presences.get(f.user.username)}
-                />
-              ))
+              <div className="stagger">
+                {activeFriends.map((f, i) => (
+                  <div key={f.user.id} style={{ "--i": i } as CSSProperties}>
+                    <FriendListItem
+                      user={f.user}
+                      daysAsFriends={f.daysAsFriends}
+                      presence={presences.get(f.user.username)}
+                    />
+                  </div>
+                ))}
+              </div>
             )}
           </Card>
         </section>
@@ -88,7 +93,13 @@ export function HomePage() {
           <section>
             <h2 className={styles.sectionTitle}>All friends</h2>
             <Card>
-              {friends.length === 0 ? (
+              {loading ? (
+                <>
+                  <Skeleton width="60%" height={13} style={{ marginBottom: 12 }} />
+                  <Skeleton width="45%" height={13} style={{ marginBottom: 12 }} />
+                  <Skeleton width="52%" height={13} />
+                </>
+              ) : friends.length === 0 ? (
                 <span className={styles.empty} style={{ padding: 0 }}>
                   —
                 </span>

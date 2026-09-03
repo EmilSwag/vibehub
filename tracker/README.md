@@ -53,30 +53,32 @@ still fails — so ordering is preserved and nothing is skipped ahead of an
 earlier failure. The queue is capped at 500 entries (oldest dropped first) so
 an extended offline stretch can't grow the file without bound.
 
-## Process detection adapters
+## Detection adapters (`src/adapters/`, merged by `src/detector.ts`)
 
-MVP detection is process-list based, per ARCHITECTURE.md §4.2. The exact
-per-OS mechanism (a builder-agent decision the spec explicitly defers):
+Three sources feed one decision per tick. Log adapters win because they know
+*what* happened; the process adapter only knows something is *open*.
 
-| OS | Process list | Working-directory lookup |
+| Adapter | Source | Gives |
 |---|---|---|
-| Linux | `ps -axo pid=,comm=` | `readlink /proc/<pid>/cwd` |
-| macOS | `ps -axo pid=,comm=` | `lsof -a -p <pid> -d cwd -Fn` |
-| Windows | `tasklist /fo csv /nh` | not available without extra tooling — degrades to `projectAlias: "unknown"` |
+| `claudeCode` | `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`) | project (from `cwd`), model, **real token counts** (input + cache read/creation, output), precise timestamps |
+| `codex` | `~/.codex/sessions/**/*.jsonl` (or `CODEX_HOME`) | project, model, token deltas from running `token_count` totals |
+| `processes` | Windows `tasklist /v` window titles; macOS/Linux `ps` + `lsof` on the editor's integrated-terminal shell | tool is open (Cursor, VS Code, Windsurf, Zed, Quadcode AI, ChatGPT), project from `"file - project - Cursor"` titles |
 
-`toolProcessNames` defaults to `["claude", "cursor", "code"]` and is matched
-case-insensitively as a substring (so `Code.exe` matches `code`); override via
-`toolProcessNames` in `config.json`. When multiple configured tools are
-running at once, the first match from the OS's process list wins — the spec's
-"most recently active" ordering isn't derivable from a plain process list
-without extra OS-specific instrumentation, so this is a known MVP limitation.
+Rules:
+- Log files are tailed incrementally from the byte offset where they were first
+  seen, so restarting the tracker never re-counts old sessions. Claude Code writes
+  one line per streamed content block with the same `message.id`; those are
+  de-duplicated before counting.
+- "Active" requires timestamped evidence inside `idleThresholdMs` (default 5 min):
+  a log line, or a window title that changed. An editor left open with a static
+  title decays to idle; `claude`/`codex` processes alone never count as active
+  (their logs do).
+- Token deltas from *every* observed session are summed into the next heartbeat,
+  even if a different tool is the "current" activity.
+- After `idleThresholdMs` without activity the daemon sends `session_end`, so
+  server-side active time stops accruing.
 
-Model name detection (tool-specific log/session-file adapters, ARCHITECTURE.md
-§4.2) is not implemented in this scaffold — `model` is always reported as
-`"unknown"`, which is an explicitly allowed value in the wire format. Token
-counts (`tokensInputDelta`/`tokensOutputDelta`) are likewise always `0` until a
-real adapter exists; wiring one up is a natural follow-up once a specific
-tool's local log format is chosen to parse.
+`model` is `"unknown"` only for tools without a log adapter (e.g. Cursor).
 
 `git_commit` events (`ActivityEventType.GIT_COMMIT`) are part of the server's
 data model but are not emitted by this scaffold — BUILD_PLAN.md's tracker

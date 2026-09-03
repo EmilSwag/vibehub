@@ -1,5 +1,5 @@
 import { heartbeatIntervalMs, idleThresholdMs } from "./config";
-import { DEFAULT_TOOL_PROCESS_NAMES, detectActiveTool } from "./processDetector";
+import { Detector } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
 import { enqueue, flushQueue } from "./queue";
 import { writeOfflineStatus, writeStatus } from "./statusFile";
@@ -17,10 +17,20 @@ interface ActiveSession {
 export interface LoopState {
   activeSession: ActiveSession | null;
   lastActivityAt: number | null;
+  detector: Detector;
+  /** Tokens seen while no session was open — attached to the next heartbeat. */
+  pendingTokensIn: number;
+  pendingTokensOut: number;
 }
 
-export function createLoopState(): LoopState {
-  return { activeSession: null, lastActivityAt: null };
+export function createLoopState(config?: TrackerConfig): LoopState {
+  return {
+    activeSession: null,
+    lastActivityAt: null,
+    detector: new Detector(config ? idleThresholdMs(config) : 5 * 60 * 1000),
+    pendingTokensIn: 0,
+    pendingTokensOut: 0,
+  };
 }
 
 /**
@@ -90,19 +100,25 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
 
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
-  const detection = detectActiveTool(
-    config.toolProcessNames ?? DEFAULT_TOOL_PROCESS_NAMES
-  );
-  const alias = detection ? resolveProjectAlias(detection.cwd, config) : null;
+  const detection = await state.detector.detect(now);
 
-  if (detection && alias !== null) {
+  // Token deltas are real spend regardless of whether we consider the user "active".
+  if (detection) {
+    state.pendingTokensIn += detection.tokensInputDelta;
+    state.pendingTokensOut += detection.tokensOutputDelta;
+  }
+
+  const alias = detection ? resolveProjectAlias(detection.cwd, config, detection.projectHint) : null;
+
+  if (detection && detection.active && alias !== null) {
     const tool = detection.tool;
-    const model = UNKNOWN_MODEL; // no tool-log adapters wired in this scaffold — see README
+    const model = detection.model ?? state.activeSession?.model ?? UNKNOWN_MODEL;
     const changed =
       !state.activeSession ||
       state.activeSession.projectAlias !== alias ||
       state.activeSession.tool !== tool ||
-      state.activeSession.model !== model;
+      // model unknown → known is a refinement, not a new session
+      (state.activeSession.model !== model && state.activeSession.model !== UNKNOWN_MODEL);
 
     if (changed) {
       if (state.activeSession) {
@@ -116,23 +132,22 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
         model,
         occurredAt: nowIso,
       });
+    } else if (state.activeSession) {
+      state.activeSession.model = model;
     }
-    const session: ActiveSession = state.activeSession ?? {
-      projectAlias: alias,
-      tool,
-      model,
-      startedAt: nowIso,
-    };
+    const session = state.activeSession!;
 
     await sendOrQueue(config, {
       eventType: "heartbeat",
       projectAlias: alias,
       tool,
       model,
-      tokensInputDelta: 0,
-      tokensOutputDelta: 0,
+      tokensInputDelta: state.pendingTokensIn,
+      tokensOutputDelta: state.pendingTokensOut,
       occurredAt: nowIso,
     });
+    state.pendingTokensIn = 0;
+    state.pendingTokensOut = 0;
 
     state.lastActivityAt = now;
     writeStatus({
@@ -146,16 +161,21 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     return;
   }
 
-  // No configured tool running (or the active project is hidden) — evaluate idle.
+  // Nothing active (tool closed, logs quiet, or project hidden) — evaluate idle.
   if (!state.activeSession) return; // nothing has ever been detected; stay offline
   const idleAfter = idleThresholdMs(config);
   if (state.lastActivityAt !== null && now - state.lastActivityAt >= idleAfter) {
+    // Close the session server-side so active-time stats stop accruing; the
+    // status file keeps the last project so the menu-bar app can show "idle in X".
+    const ended = state.activeSession;
+    await endActiveSession(config, ended, nowIso);
+    state.activeSession = null;
     writeStatus({
       status: "idle",
-      projectAlias: state.activeSession.projectAlias,
-      tool: state.activeSession.tool,
-      model: state.activeSession.model,
-      sessionStartedAt: state.activeSession.startedAt,
+      projectAlias: ended.projectAlias,
+      tool: ended.tool,
+      model: ended.model,
+      sessionStartedAt: ended.startedAt,
       updatedAt: nowIso,
     });
   }
@@ -166,12 +186,15 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
  * daemon process (see daemon.ts's hidden `run-loop` command).
  */
 export function runLoop(config: TrackerConfig): { stop: () => Promise<void> } {
-  const state = createLoopState();
-  const interval = setInterval(() => {
+  const state = createLoopState(config);
+  const safeTick = () =>
     tick(config, state).catch((err) => {
       console.error("tracker: heartbeat tick failed:", err);
     });
-  }, heartbeatIntervalMs(config));
+  // First tick immediately: primes the log tailers so the *next* tick can
+  // report deltas, and gets presence up within seconds of `vibehub start`.
+  void safeTick();
+  const interval = setInterval(safeTick, heartbeatIntervalMs(config));
 
   const stop = async (): Promise<void> => {
     clearInterval(interval);

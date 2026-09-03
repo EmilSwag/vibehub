@@ -10,6 +10,8 @@ interface AuthContextValue {
   completeOAuth: (ticket: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** Replace the cached user after a PATCH /users/me or onboarding step. */
+  setUser: (user: User | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -55,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, devLogin, completeOAuth, logout, refresh }),
+    () => ({ user, loading, devLogin, completeOAuth, logout, refresh, setUser }),
     [user, loading, devLogin, completeOAuth, logout, refresh]
   );
 

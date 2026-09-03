@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import { projectsApi } from "../lib/api";
 import type { Project } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { FieldLabel, Input, Textarea } from "../components/ui/Input";
+import { Skeleton } from "../components/ui/Skeleton";
 import { ProjectCard } from "../components/ProjectCard";
 import styles from "./ProjectsPage.module.css";
 
@@ -131,15 +132,20 @@ export function ProjectsPage() {
       )}
 
       {loading ? (
-        <p className={styles.empty}>Loading…</p>
+        <div className={styles.grid}>
+          {Array.from({ length: 3 }, (_, i) => (
+            <Skeleton key={i} variant="block" height={140} style={{ "--i": i } as CSSProperties} />
+          ))}
+        </div>
       ) : projects.length === 0 ? (
         <p className={styles.empty}>No projects yet — create your first one above.</p>
       ) : (
-        <div className={styles.grid}>
-          {projects.map((project) => (
+        <div className={[styles.grid, "stagger"].join(" ")}>
+          {projects.map((project, i) => (
             <ProjectCard
               key={project.id}
               project={project}
+              style={{ "--i": i } as CSSProperties}
               actions={
                 <div className={styles.rowActions}>
                   <button type="button" className={styles.iconBtn} onClick={() => startEdit(project)}>

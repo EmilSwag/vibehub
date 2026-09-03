@@ -7,8 +7,14 @@ import { prisma } from "../db";
 import { env } from "../env";
 import { generateRawToken, hashToken } from "../lib/crypto";
 import { asyncHandler, HttpError } from "../lib/http-error";
+import { computeLevel, computeLevels } from "../lib/level";
 import { detectIcon, detectLabel } from "../lib/links";
-import { createTrackerTokenSchema, patchMeSchema, putLinksSchema } from "../lib/schemas";
+import {
+  createTrackerTokenSchema,
+  patchMeSchema,
+  putLinksSchema,
+  suggestedUsersQuerySchema,
+} from "../lib/schemas";
 import { toMeUser, toPublicLink, toPublicUser } from "../lib/serializers";
 import { requireAuth } from "../middleware/auth";
 
@@ -56,6 +62,63 @@ const avatarUpload = multer({
   },
 });
 
+/**
+ * People you might know — onboarding step 3 and the Friends page search.
+ * Everyone except me, my friends, and anyone with a pending request either way.
+ * `q` filters by username/displayName (case-insensitive contains); default order is
+ * newest accounts first so a fresh friend group sees each other immediately.
+ * Must be registered before `/users/:username` or "suggested" is treated as a username.
+ */
+router.get(
+  "/users/suggested",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { q, limit } = suggestedUsersQuerySchema.parse(req.query);
+    const me = req.user!.id;
+
+    const [friendships, pending] = await Promise.all([
+      prisma.friendship.findMany({
+        where: { OR: [{ userAId: me }, { userBId: me }] },
+        select: { userAId: true, userBId: true },
+      }),
+      prisma.friendRequest.findMany({
+        where: { status: "PENDING", OR: [{ senderId: me }, { receiverId: me }] },
+        select: { senderId: true, receiverId: true },
+      }),
+    ]);
+    const exclude = new Set<string>([me]);
+    for (const f of friendships) exclude.add(f.userAId === me ? f.userBId : f.userAId);
+    const invited = new Set<string>();
+    for (const r of pending) {
+      const other = r.senderId === me ? r.receiverId : r.senderId;
+      exclude.add(other);
+      if (r.senderId === me) invited.add(other);
+    }
+
+    // SQLite (dev) has no `mode: "insensitive"`; usernames are lowercase anyway and
+    // displayName matching is a nicety, so filter in memory on a bounded candidate set.
+    const candidates = await prisma.user.findMany({
+      where: { id: { notIn: [...exclude] } },
+      orderBy: { createdAt: "desc" },
+      take: q ? 200 : limit,
+    });
+    const needle = q?.toLowerCase();
+    const users = (needle
+      ? candidates.filter(
+          (u) =>
+            u.username.includes(needle) || u.displayName.toLowerCase().includes(needle)
+        )
+      : candidates
+    ).slice(0, limit);
+
+    const levels = await computeLevels(users.map((u) => u.id));
+    res.json({
+      users: users.map((u) => ({ ...toPublicUser(u), level: levels.get(u.id) ?? 1 })),
+      invitedIds: [...invited],
+    });
+  })
+);
+
 router.get(
   "/users/:username",
   asyncHandler(async (req, res) => {
@@ -65,16 +128,34 @@ router.get(
     });
     if (!user) throw new HttpError(404, "User not found");
 
-    const friendCount = await prisma.friendship.count({
-      where: { OR: [{ userAId: user.id }, { userBId: user.id }] },
-    });
+    const [friendCount, level] = await Promise.all([
+      prisma.friendship.count({
+        where: { OR: [{ userAId: user.id }, { userBId: user.id }] },
+      }),
+      computeLevel(user.id),
+    ]);
 
     res.json({
       user: toPublicUser(user),
       links: user.externalLinks.map(toPublicLink),
       archetype: user.archetype,
       friendCount,
+      level: level.level,
+      levelBreakdown: level,
     });
+  })
+);
+
+/** Marks onboarding as finished; idempotent. */
+router.post(
+  "/users/me/onboarding/complete",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { onboardedAt: req.user!.onboardedAt ?? new Date() },
+    });
+    res.json({ user: toMeUser(user) });
   })
 );
 
@@ -83,6 +164,10 @@ router.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const data = patchMeSchema.parse(req.body);
+    if (data.username && data.username !== req.user!.username) {
+      const taken = await prisma.user.findUnique({ where: { username: data.username } });
+      if (taken) throw new HttpError(409, "That nickname is taken");
+    }
     const user = await prisma.user.update({ where: { id: req.user!.id }, data });
     res.json({ user: toMeUser(user) });
   })

@@ -10,6 +10,7 @@ export function toPublicUser(user: User) {
     avatarUrl: user.avatarUrl,
     bio: user.bio,
     archetype: user.archetype,
+    role: user.role,
     isDevAccount: user.isDevAccount,
     createdAt: user.createdAt,
   };
@@ -20,6 +21,8 @@ export function toMeUser(user: User) {
     ...toPublicUser(user),
     email: user.email,
     githubUsername: user.githubUsername,
+    // null until POST /users/me/onboarding/complete — the web gates on this.
+    onboardedAt: user.onboardedAt,
   };
 }
 

@@ -9,11 +9,22 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { FriendsPage } from "./pages/FriendsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { OnboardingPage } from "./pages/onboarding/OnboardingPage";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+
+      {/* First-run wizard: signed-in, but rendered without the app nav. */}
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute bare>
+            <OnboardingPage />
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/"

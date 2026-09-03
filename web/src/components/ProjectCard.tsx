@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { Project } from "../types";
 import styles from "./ProjectCard.module.css";
 
@@ -7,14 +7,17 @@ export function ProjectCard({
   liked,
   onToggleLike,
   actions,
+  style,
 }: {
   project: Project;
   liked?: boolean;
   onToggleLike?: (project: Project) => void;
   actions?: ReactNode;
+  /** Lets a `.stagger` parent pass `--i` for the entrance delay. */
+  style?: CSSProperties;
 }) {
   return (
-    <div className={styles.card}>
+    <div className={styles.card} style={style}>
       {project.coverImageUrl && <img className={styles.cover} src={project.coverImageUrl} alt="" />}
       <div className={styles.body}>
         <h3 className={styles.name}>{project.name}</h3>

@@ -11,11 +11,14 @@ export const UNKNOWN_PROJECT_ALIAS = "unknown";
  */
 export function resolveProjectAlias(
   cwd: string | null,
-  config: TrackerConfig
+  config: TrackerConfig,
+  /** Project label parsed from a window title when the tool exposes no cwd. */
+  hint: string | null = null
 ): string | null {
-  if (!cwd) return UNKNOWN_PROJECT_ALIAS;
-  const folderName = path.basename(cwd);
+  const folderName = cwd ? path.basename(cwd) : hint?.trim() || null;
+  if (!folderName) return UNKNOWN_PROJECT_ALIAS;
   const override = config.projectAliases?.[folderName];
   if (override === HIDDEN) return null;
-  return override ?? folderName;
+  // Server schema caps aliases at 64 chars.
+  return (override ?? folderName).slice(0, 64);
 }

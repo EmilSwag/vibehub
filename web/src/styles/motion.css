@@ -1,0 +1,105 @@
+/*
+ * VibeHub motion system — see skills/emil_design_eng (§4 Motion).
+ * Only opacity/transform are ever animated. Everything collapses to instant under
+ * prefers-reduced-motion. Import once from main.tsx after tokens.css.
+ */
+
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --dur-press: 120ms;
+  --dur-state: 200ms;
+  --dur-enter: 320ms;
+  --dur-reveal: 560ms;
+
+  --stagger: 36ms;
+}
+
+/* ---- Keyframes ---- */
+
+@keyframes vh-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes vh-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes vh-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes vh-pop {
+  0%   { transform: scale(0.9); }
+  60%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+@keyframes vh-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+@keyframes vh-slide-step {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ---- Utilities ---- */
+
+/* Block/page enter: fade + rise. */
+.reveal {
+  animation: vh-fade-up var(--dur-reveal) var(--ease-out) both;
+}
+
+/* Children enter one after another. Set `--i` on each child (0-based). */
+.stagger > * {
+  animation: vh-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 10) * var(--stagger));
+}
+
+.scale-in {
+  animation: vh-scale-in var(--dur-enter) var(--ease-out) both;
+}
+
+/* Small satisfying "pop" for selections, checkmarks, badges. */
+.pop {
+  animation: vh-pop var(--dur-enter) var(--ease-spring) both;
+}
+
+.fade-in {
+  animation: vh-fade-in var(--dur-enter) var(--ease-out) both;
+}
+
+/* Wizard step transition (the one place horizontal motion is allowed). */
+.step-enter {
+  animation: vh-slide-step var(--dur-enter) var(--ease-out) both;
+}
+
+/* Universal pressed feedback for anything button-like. */
+button:active:not(:disabled),
+[role="button"]:active {
+  transform: scale(0.98);
+  transition-duration: var(--dur-press);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-press: 0ms;
+    --dur-state: 0ms;
+    --dur-enter: 0ms;
+    --dur-reveal: 0ms;
+    --stagger: 0ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

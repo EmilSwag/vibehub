@@ -28,6 +28,8 @@ model User {
   passwordHash        String?
   archetype           String? // Archetype: CODER | ARTIST | DIRECTOR | GENERALIST
   archetypeComputedAt DateTime?
+  role                String? // designer | developer | gamedev | creator | founder (onboarding)
+  onboardedAt         DateTime?
   isDevAccount        Boolean   @default(false)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt

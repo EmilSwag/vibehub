@@ -55,6 +55,10 @@ model User {
   passwordHash       String?
   archetype          Archetype?
   archetypeComputedAt DateTime?
+  // Self-selected in onboarding: designer | developer | gamedev | creator | founder.
+  // Plain String (not enum) so the SQLite mirror stays identical; validated by zod.
+  role               String?
+  onboardedAt        DateTime?
   isDevAccount       Boolean   @default(false)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
