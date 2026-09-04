@@ -1,4 +1,16 @@
-/* Frosted, 56px, three-column: logo | centered segmented tabs | avatar menu. */
+/*
+ * Top bar — frosted, 56px, three columns: logo | centered segmented tabs | theme + avatar.
+ *
+ * The menu keyframe is declared locally on purpose: CSS Modules hash animation
+ * names, so `animation: vh-scale-in` here would point at a keyframe that does
+ * not exist (motion.css's global one keeps its unhashed name).
+ */
+
+@keyframes vh-menu-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
 .bar {
   position: sticky;
   top: 0;
@@ -20,10 +32,9 @@
   gap: var(--vh-space-4);
 }
 
-/* The mark is token-driven: it paints with `currentColor`, which resolves to the
- * ink/paper accent here. Never recolour it outside the --vh-* palette. */
+/* The mark paints with `currentColor` — ink in light, paper in dark. Never
+ * recolour it outside the --vh-* palette. */
 .logo {
-  color: var(--vh-accent);
   display: inline-flex;
   align-items: center;
   gap: var(--vh-space-2);
@@ -35,7 +46,8 @@
   text-decoration: none;
 }
 
-/* Segmented control — the native way to say "these are peers". */
+/* ---- Segmented control — the native way to say "these are peers" ---- */
+
 .nav {
   display: inline-flex;
   align-items: center;
@@ -50,27 +62,46 @@
 .navLink {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 12px;
   border-radius: var(--vh-radius-pill);
   color: var(--vh-text-dim);
   text-decoration: none;
   font-weight: 500;
+  white-space: nowrap;
   transition:
     color var(--dur-state) var(--ease-out),
     background-color var(--dur-state) var(--ease-out),
-    box-shadow var(--dur-state) var(--ease-out);
+    box-shadow var(--dur-state) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 
 .navLink:hover {
   color: var(--vh-text);
 }
 
+/* Links are not buttons, so motion.css's universal press rule skips them. */
+.navLink:active {
+  transform: scale(0.98);
+}
+
 .navLinkActive {
   color: var(--vh-text);
   background: var(--vh-surface);
   box-shadow: var(--vh-shadow-card);
+}
+
+/* 2px/24 strokes sit a touch heavier than 13.5px/500 text; back the inactive
+ * glyph off slightly so label and icon read as one weight. */
+.navIcon {
+  opacity: 0.9;
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+
+.navLinkActive .navIcon {
+  opacity: 1;
 }
 
 .badgeDot {
@@ -87,74 +118,97 @@
   justify-content: center;
 }
 
+/* ---- Right cluster: theme switch + avatar, both 36px hit areas ---- */
+
 .right {
   position: relative;
   justify-self: end;
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .avatarButton {
-  display: inline-flex;
-  padding: 2px;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
+  color: inherit;
   cursor: pointer;
-  transition: box-shadow var(--dur-state) var(--ease-out), transform var(--dur-press) var(--ease-out);
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-state) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
+
 .avatarButton:hover,
 .avatarButton[aria-expanded="true"] {
-  box-shadow: 0 0 0 2px var(--vh-border);
+  background: var(--vh-surface-2);
 }
+
+/* Beats motion.css's generic `button:active` (0,2,1) so this one presses at 0.97. */
+.avatarButton:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.avatarButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+}
+
+/* ---- Account menu ---- */
 
 .menu {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 10px);
   right: 0;
-  min-width: 200px;
+  z-index: 1;
+  width: 220px;
   padding: 6px;
   background: var(--vh-surface);
   border: 1px solid var(--vh-border);
   border-radius: var(--vh-radius-md);
-  box-shadow: var(--vh-shadow-card), 0 12px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--vh-shadow-pop);
   transform-origin: top right;
   display: flex;
   flex-direction: column;
+  animation: vh-menu-in var(--dur-state) var(--ease-out) both;
 }
 
 .menuHeader {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+  min-width: 0;
   padding: 8px 10px 10px;
   border-bottom: 1px solid var(--vh-border);
   margin-bottom: 4px;
 }
 
+/* Two text sizes per block: 14 for the name, 13 for handle + presence. */
 .menuName {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--vh-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menuHandle {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--vh-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.menuIcon {
-  flex: none;
-  color: var(--vh-text-muted);
-  transition: color var(--dur-press) var(--ease-out);
-}
-.menuItem:hover .menuIcon {
-  color: var(--vh-text);
-}
-.menuDivider {
-  height: 1px;
-  margin: 4px 6px;
-  background: var(--vh-border);
+.menuPresence {
+  margin-top: 4px;
 }
 
 .menuItem {
@@ -162,21 +216,50 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  text-align: left;
-  padding: 8px 10px;
+  height: 34px;
+  padding: 0 10px;
   border: 0;
   border-radius: var(--vh-radius-sm);
   background: transparent;
   color: var(--vh-text);
   font: inherit;
   font-size: 13.5px;
+  text-align: left;
   text-decoration: none;
   cursor: pointer;
-  transition: background-color var(--dur-press) var(--ease-out);
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
-.menuItem:hover {
+
+/* Hover and roving keyboard focus share one highlight, like a native menu. */
+.menuItem:hover,
+.menuItem:focus-visible {
+  outline: none;
   background: var(--vh-surface-2);
 }
+
+.menuItem:active {
+  transform: scale(0.98);
+}
+
+.menuIcon {
+  color: var(--vh-text-muted);
+  transition: color var(--dur-press) var(--ease-out);
+}
+
+.menuItem:hover .menuIcon,
+.menuItem:focus-visible .menuIcon {
+  color: var(--vh-text);
+}
+
+.menuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--vh-border);
+}
+
+/* ---- ≤ 640px: icon-only tabs with 40×40 hit areas ---- */
 
 @media (max-width: 640px) {
   .logoText {
@@ -184,8 +267,24 @@
   }
   .inner {
     grid-template-columns: auto 1fr auto;
+    gap: var(--vh-space-3);
+    padding: 0 var(--vh-space-3);
   }
   .nav {
     justify-self: center;
+  }
+  .navLabel {
+    display: none;
+  }
+  .navLink {
+    height: 40px;
+    min-width: 40px;
+    padding: 0 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
   }
 }

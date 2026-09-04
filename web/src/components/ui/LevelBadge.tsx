@@ -183,8 +183,14 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
   if (!interactive) {
     return (
       <div className={cx(styles[`wrap-${size}`], className)} role="img" aria-label={`Level ${level}`}>
-        {ring}
-        {size === "md" && <span className={styles.caption}>Lvl</span>}
+        {size === "md" ? (
+          <span className={styles.static}>
+            {ring}
+            <span className={styles.caption}>Lvl</span>
+          </span>
+        ) : (
+          ring
+        )}
       </div>
     );
   }

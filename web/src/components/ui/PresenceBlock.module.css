@@ -1,0 +1,168 @@
+/*
+ * PresenceBlock — the one presence layout. Two text sizes max per block (house
+ * rule): row is 13px throughout; hero is 14px with a 15px status word. Only
+ * opacity/color ever animate here.
+ *
+ * The keyframe is declared locally on purpose: CSS Modules hash animation names,
+ * so `animation: vh-fade-in` in a module would point at a keyframe that doesn't
+ * exist (motion.css's global one keeps its unhashed name).
+ */
+
+@keyframes vh-presence-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--vh-text-dim);
+}
+
+.hero {
+  font-size: 14px;
+}
+
+.hero .word {
+  font-size: 15px;
+}
+
+/* ---- line 1: dot + status word ---- */
+
+.statusLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  animation: vh-presence-fade var(--dur-state) var(--ease-out) both;
+}
+
+.word {
+  font-weight: 500;
+  color: var(--vh-text-faint);
+  transition: color var(--dur-state) var(--ease-out), opacity var(--dur-state) var(--ease-out);
+}
+
+/* The single deliberate hue in the product: live = green. Fallback keeps the
+   state legible before the theme tokens land. */
+.active .word {
+  font-weight: 600;
+  color: var(--vh-live, #16a34a);
+}
+
+.idle .word {
+  color: var(--vh-text-dim);
+}
+
+.offline .word {
+  color: var(--vh-text-faint);
+}
+
+/* ---- lines 2–4 ---- */
+
+.details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  animation: vh-presence-fade var(--dur-state) var(--ease-out) both;
+}
+
+.project {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--vh-text-dim);
+}
+
+.in {
+  flex-shrink: 0;
+}
+
+.projectName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--vh-text);
+}
+
+.tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  color: var(--vh-text-dim);
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.glyph {
+  flex-shrink: 0;
+}
+
+.sep {
+  flex-shrink: 0;
+  padding: 0 2px;
+  color: var(--vh-text-faint);
+}
+
+.elapsed {
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- compact: one ellipsized line ---- */
+
+.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--vh-text-dim);
+}
+
+.compactText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.compact .word {
+  animation: vh-presence-fade var(--dur-state) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusLine,
+  .details,
+  .compact .word {
+    animation: none;
+  }
+  .word {
+    transition: none;
+  }
+}

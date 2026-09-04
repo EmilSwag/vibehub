@@ -7,30 +7,17 @@ import { stagger } from "../lib/motion";
 import type { Friend } from "../types";
 import { Card } from "../components/ui/Card";
 import { Avatar } from "../components/ui/Avatar";
+import { PresenceBlock } from "../components/ui/PresenceBlock";
 import { StatusDot } from "../components/ui/StatusDot";
 import buttonStyles from "../components/ui/Button.module.css";
 import { ConnectTools } from "../components/ConnectTools";
-import { FriendListItem } from "../components/FriendListItem";
-import { Skeleton, SkeletonRow } from "../components/ui/Skeleton";
+import { FriendListItem, FriendListItemSkeleton } from "../components/FriendListItem";
+import { Skeleton } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
-import { elapsedShort, toolLabel } from "../lib/format";
-import type { Presence } from "../types";
 import styles from "./HomePage.module.css";
 
-/** "vibehub · Claude Code · 12m" (active), "Idle · vibehub · Claude Code" (idle,
- * no duration — an idle session's elapsed time isn't the useful number), or a
- * bare "Not tracking" once the tracker itself is known to have nothing to say. */
-function youLine(me: Presence | undefined): string {
-  if (me?.status === "active") {
-    return me.activity
-      ? `${me.activity.projectAlias} · ${toolLabel(me.activity.tool)} · ${elapsedShort(me.activity.startedAt)}`
-      : "Active";
-  }
-  if (me?.status === "idle") {
-    return me.activity ? `Idle · ${me.activity.projectAlias} · ${toolLabel(me.activity.tool)}` : "Idle";
-  }
-  return "Not tracking";
-}
+/** Rows shown under "All friends" before the "All N friends" link takes over. */
+const ALL_FRIENDS_MAX = 5;
 
 export function HomePage() {
   const { user } = useAuth();
@@ -54,7 +41,6 @@ export function HomePage() {
   }, []);
 
   const activeFriends = friends.filter((f) => presences.get(f.user.username)?.status === "active");
-  const me = user ? presences.get(user.username) : undefined;
 
   return (
     <div>
@@ -67,13 +53,13 @@ export function HomePage() {
       <ConnectTools variant="banner" />
 
       <div className={styles.grid}>
-        <section>
+        <section className={styles.section}>
           <SectionTitle icon="sparkles" count={activeFriends.length}>
             Live now
           </SectionTitle>
-          <Card className={styles.card}>
+          <Card className={styles.listCard}>
             {loading ? (
-              <SkeletonRow count={4} />
+              <FriendListItemSkeleton count={3} live />
             ) : friends.length === 0 ? (
               <div className={styles.empty}>
                 No friends yet — head to <Link to="/friends">Friends</Link> to add some.
@@ -83,13 +69,13 @@ export function HomePage() {
             ) : (
               <div className="stagger">
                 {activeFriends.map((f, i) => (
-                  <div key={f.user.id} style={stagger(i)}>
-                    <FriendListItem
-                      user={f.user}
-                      daysAsFriends={f.daysAsFriends}
-                      presence={presences.get(f.user.username)}
-                    />
-                  </div>
+                  <FriendListItem
+                    key={f.user.id}
+                    index={i}
+                    user={f.user}
+                    daysAsFriends={f.daysAsFriends}
+                    presence={presences.get(f.user.username)}
+                  />
                 ))}
               </div>
             )}
@@ -97,40 +83,13 @@ export function HomePage() {
         </section>
 
         <aside className={styles.side}>
-          {user && (
-            <section>
-              <SectionTitle icon="user">You</SectionTitle>
-              <Card className={styles.youCard}>
-                {loading ? (
-                  <>
-                    <Skeleton variant="circle" width={40} />
-                    <div className={styles.youText}>
-                      <Skeleton width="50%" height={13} style={{ marginBottom: 6 }} />
-                      <Skeleton width="65%" height={12} />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Avatar src={user.avatarUrl} name={user.displayName} size={40} />
-                    <div className={styles.youText}>
-                      <span className={styles.youName}>{user.displayName}</span>
-                      <StatusDot status={me?.status ?? "offline"} label={youLine(me)} pulse={me?.status === "active"} />
-                    </div>
-                  </>
-                )}
-              </Card>
-            </section>
-          )}
-
-          <section>
+          <section className={styles.section}>
             <SectionTitle icon="inbox" count={incomingRequests.length} tone="hot">
               Friend requests
             </SectionTitle>
             <Card>
               {incomingRequests.length === 0 ? (
-                <span className={styles.empty} style={{ padding: 0 }}>
-                  No pending requests.
-                </span>
+                <span className={styles.emptyInline}>No pending requests.</span>
               ) : (
                 <>
                   <div className="stagger">
@@ -160,29 +119,54 @@ export function HomePage() {
             </Card>
           </section>
 
-          <section>
+          <section className={styles.section}>
             <SectionTitle icon="users" count={friends.length}>
               All friends
             </SectionTitle>
-            <Card>
+            <Card className={styles.listCard}>
               {loading ? (
-                <>
-                  <Skeleton width="60%" height={13} style={{ marginBottom: 12 }} />
-                  <Skeleton width="45%" height={13} style={{ marginBottom: 12 }} />
-                  <Skeleton width="52%" height={13} />
-                </>
+                <div className="stagger" aria-hidden="true">
+                  {Array.from({ length: 3 }, (_, i) => (
+                    <div key={i} className={styles.friendRow} style={stagger(i)}>
+                      <Skeleton variant="circle" width={32} />
+                      <Skeleton width="46%" height={13} />
+                      <Skeleton variant="circle" width={8} className={styles.friendDot} />
+                    </div>
+                  ))}
+                </div>
               ) : friends.length === 0 ? (
-                <span className={styles.empty} style={{ padding: 0 }}>
-                  No friends yet.
-                </span>
+                <div className={styles.empty}>No friends yet.</div>
               ) : (
-                friends.slice(0, 5).map((f) => (
-                  <div key={f.user.id} style={{ marginBottom: 8 }}>
-                    <Link to={`/u/${f.user.username}`} style={{ color: "var(--vh-text)", textDecoration: "none" }}>
-                      {f.user.displayName}
+                <>
+                  {friends.slice(0, ALL_FRIENDS_MAX).map((f) => {
+                    const presence = presences.get(f.user.username);
+                    const live = presence !== undefined && presence.status !== "offline";
+                    return (
+                      <Link key={f.user.id} to={`/u/${f.user.username}`} className={styles.friendRow}>
+                        <Avatar src={f.user.avatarUrl} name={f.user.displayName} size={32} />
+                        <span className={styles.friendName}>
+                          {f.user.displayName}
+                          <span className={styles.friendHandle}> @{f.user.username}</span>
+                        </span>
+                        {live ? (
+                          <PresenceBlock
+                            presence={presence}
+                            variant="compact"
+                            showElapsed={false}
+                            className={styles.friendPresence}
+                          />
+                        ) : (
+                          <StatusDot status="offline" className={styles.friendDot} />
+                        )}
+                      </Link>
+                    );
+                  })}
+                  {friends.length > ALL_FRIENDS_MAX && (
+                    <Link to="/friends" className={styles.moreLink}>
+                      All {friends.length} friends
                     </Link>
-                  </div>
-                ))
+                  )}
+                </>
               )}
             </Card>
           </section>

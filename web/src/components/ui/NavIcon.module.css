@@ -1,0 +1,13 @@
+/*
+ * Raster nav icon painted with currentColor: the PNG (black strokes on alpha)
+ * is used only as a mask, the visible colour is background-color. Width and
+ * height are set inline by the component from its `size` prop.
+ */
+.icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+  background-color: currentColor;
+  -webkit-mask: var(--icon-url) center / contain no-repeat;
+  mask: var(--icon-url) center / contain no-repeat;
+}

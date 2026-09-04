@@ -1,3 +1,6 @@
+/* Hero: avatar | identity | level+action column. The three columns share the
+ * page's left/right edges, so the ring, the Edit-profile button and every card
+ * below line up on the same right edge. */
 .hero {
   display: flex;
   gap: var(--vh-space-4);
@@ -10,10 +13,13 @@
   min-width: 0;
 }
 
+/* Name, @handle and badges sit on one baseline — centring them makes the small
+ * chips float against the 32px serif. */
 .nameRow {
   display: flex;
-  align-items: center;
-  gap: var(--vh-space-3);
+  align-items: baseline;
+  column-gap: var(--vh-space-3);
+  row-gap: var(--vh-space-2);
   flex-wrap: wrap;
 }
 
@@ -21,6 +27,7 @@
   font-family: var(--vh-font-serif);
   font-weight: 500;
   font-size: 32px;
+  line-height: 1.15;
   color: var(--vh-text);
   margin: 0;
 }
@@ -31,17 +38,23 @@
   color: var(--vh-text-faint);
 }
 
+/* Hero presence: one size up from the row variant, under the name row. */
+.presence {
+  margin-top: var(--vh-space-2);
+}
+
 .bio {
   font-family: var(--vh-font-sans);
   font-size: 14px;
+  line-height: 1.45;
   color: var(--vh-text-dim);
   max-width: 60ch;
-  margin: var(--vh-space-2) 0;
+  margin: var(--vh-space-2) 0 0;
 }
 
 .links {
   display: flex;
-  gap: var(--vh-space-3);
+  gap: var(--vh-space-2);
   flex-wrap: wrap;
   margin-top: var(--vh-space-2);
 }
@@ -50,32 +63,58 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 28px;
   color: var(--vh-text-dim);
   text-decoration: none;
   font-family: var(--vh-font-sans);
   font-size: 13px;
   background: var(--vh-surface-2);
-  padding: 6px 12px;
+  padding: 0 12px;
   border-radius: var(--vh-radius-pill);
+  transition: color var(--dur-press) var(--ease-out);
 }
 
 .linkChip:hover {
-  color: var(--vh-accent-hover);
+  color: var(--vh-text);
+}
+
+/* Touch: the chips are the only sub-40px targets in the hero. */
+@media (pointer: coarse) {
+  .linkChip {
+    min-height: 40px;
+    padding: 0 16px;
+  }
 }
 
 .friendCount {
   font-family: var(--vh-font-sans);
   font-size: 13px;
   color: var(--vh-text-faint);
-  margin-top: var(--vh-space-2);
+  margin: var(--vh-space-2) 0 0;
 }
 
+/* Stretch, not centre: the ring and Edit-profile share one column width, so both
+ * end on the page's right edge and the level panel opens flush with it. */
 .heroActions {
-  flex-shrink: 0;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--vh-space-3);
+}
+
+.levelSkeleton {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--vh-space-3);
+  gap: 3px;
+}
+
+.heroSkeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--vh-space-2);
 }
 
 /* Desktop-only Edit-profile button, paired with the level badge in .heroActions. */
@@ -84,38 +123,40 @@
 }
 
 @media (max-width: 560px) {
+  /* Below content width the hero stacks: avatar and ring share the first row,
+   * the identity block takes the full width under them, and Edit-profile becomes
+   * its own full-width row — nothing crowds the 96px avatar. */
   .hero {
     flex-wrap: wrap;
+    column-gap: var(--vh-space-4);
+    row-gap: var(--vh-space-3);
+    align-items: center;
+  }
+  .heroInfo {
+    flex: 0 0 100%;
+    order: 3;
   }
   .heroActions {
-    margin-left: calc(96px + var(--vh-space-4));
+    margin-left: auto;
+    order: 2;
   }
-  /* Below content width the level badge and Edit-profile stop pairing up —
-   * Edit-profile becomes its own full-width row under the whole identity
-   * block instead (design QA round 5). */
+  .displayName {
+    font-size: 26px;
+  }
   .editProfileDesktop {
     display: none;
   }
   .editProfileMobile {
     display: flex;
     width: 100%;
-    height: 40px;
-    margin: var(--vh-space-3) 0 var(--vh-space-4);
+    min-height: 40px;
+    margin: 0 0 var(--vh-space-4);
   }
 }
 
+/* 40px between sections; titles come from SectionTitle (same as Home). */
 .section {
   margin-bottom: var(--vh-space-5);
-}
-
-.sectionTitle {
-  font-family: var(--vh-font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--vh-text-faint);
-  margin: 0 0 var(--vh-space-3);
 }
 
 .projectGrid {
@@ -124,11 +165,26 @@
   gap: var(--vh-space-3);
 }
 
+.projectSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+}
+
+/* Empty state: one sentence, one action. */
+.emptyBlock {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--vh-space-3);
+}
+
 .emptyAction {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 16px;
+  min-height: 36px;
+  padding: 0 16px;
   border-radius: var(--vh-radius-pill);
   border: 1px solid var(--vh-border);
   color: var(--vh-text-dim);
@@ -150,19 +206,80 @@
   margin-bottom: var(--vh-space-3);
 }
 
+/* Same silhouette as WallComment: avatar column, then the bubble. */
+.wallSkeletonRow {
+  display: flex;
+  gap: var(--vh-space-3);
+  align-items: flex-start;
+}
+.wallSkeletonRow > :last-child {
+  flex: 1;
+}
+
+/* Composer: the Card is the only border; the field is bare inside it and the
+ * Post button sits on the field's baseline, not floating in a corner. */
+.composer {
+  margin-bottom: var(--vh-space-3);
+}
+
 .postForm {
   display: flex;
   flex-direction: column;
   gap: var(--vh-space-2);
 }
 
-.postActions {
+.postRow {
   display: flex;
-  justify-content: flex-end;
+  align-items: flex-end;
+  gap: var(--vh-space-3);
+}
+
+.postField {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  line-height: 1.45;
+  resize: none;
+}
+.postField:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.postBtn {
+  flex: none;
+}
+
+.wallError {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+@media (max-width: 480px) {
+  .postRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .postBtn {
+    width: 100%;
+  }
 }
 
 .empty {
   color: var(--vh-text-faint);
   font-family: var(--vh-font-sans);
   font-size: 14px;
+  margin: 0;
+}
+
+.notFound {
+  color: var(--vh-text-dim);
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  margin: var(--vh-space-5) 0;
 }

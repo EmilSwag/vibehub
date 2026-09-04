@@ -1,18 +1,32 @@
 /*
- * VibeHub design tokens — strict monochrome (zero hue). Grayscale surfaces,
+ * VibeHub design tokens — strict monochrome (zero hue) with exactly ONE
+ * deliberate exception: live-presence green (`--vh-live`). Grayscale surfaces,
  * ink-black accent, serif display headings + grotesque UI sans, unchanged.
- * No gradients. No color-coded UI — status/archetype are conveyed by shape,
- * label, and lightness only. Contract for the web workstream:
+ * No gradients. No color-coded UI — status/archetype/roles/levels are conveyed
+ * by shape, label, and lightness only. Contract for the web workstream:
  * docs/BUILD_PLAN.md §5 + docs/DESIGN.md ("no hue is ever introduced by any
  * component — enforce this in review, not just at token-definition time").
  *
- * Light is the DEFAULT. Dark applies two ways, both kept in lockstep:
- * automatically via `prefers-color-scheme: dark` (unless explicitly opted
- * out with `[data-theme="light"]`), or explicitly via `[data-theme="dark"]`
- * regardless of system preference.
+ * The one exception: `--vh-live` / `--vh-live-soft` / `--vh-on-live` paint the
+ * live/online presence state (the green dot, its pulse ring, a "live" pill) and
+ * nothing else. Idle and offline stay grayscale. Never reuse the live tokens
+ * for success, links, charts, or any other meaning.
+ *
+ * Theme: light is the DEFAULT. Dark applies two ways, kept in lockstep — edit
+ * all three blocks (:root, the media block, [data-theme="dark"]) together:
+ *   - automatically via `prefers-color-scheme: dark` when the user has not
+ *     chosen (no `data-theme` on <html>), unless explicitly opted out with
+ *     `[data-theme="light"]`;
+ *   - explicitly via `[data-theme="dark"]` regardless of system preference.
+ * `data-theme` is owned by web/src/lib/theme.ts (persisted in localStorage
+ * "vh-theme") and pre-applied by the inline script in web/index.html so the
+ * first paint already has the right theme. `color-scheme` follows so native
+ * form controls and scrollbars match.
  */
 
 :root {
+  color-scheme: light;
+
   /* Surfaces */
   --vh-bg: #F5F5F5;           /* app background */
   --vh-surface: #FFFFFF;      /* cards */
@@ -39,8 +53,13 @@
 
   --vh-focus-ring: rgba(0, 0, 0, 0.35);
 
-  /* Presence — conveyed by lightness, never hue */
-  --vh-status-active: #111111;
+  /* Live presence — the ONE hue in the product. Only for "online right now". */
+  --vh-live: #16A34A;
+  --vh-live-soft: rgba(22, 163, 74, 0.12); /* translucent tint behind a live dot/pill */
+  --vh-on-live: #FFFFFF;
+
+  /* Presence — active is the live green; idle/offline stay lightness-only */
+  --vh-status-active: var(--vh-live);
   --vh-status-idle: #8A8A8A;
   --vh-status-offline: #C8C8C8;
 
@@ -72,6 +91,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
     --vh-bg: #0F0F0F;
     --vh-surface: #171717;
     --vh-surface-2: #232323;
@@ -89,7 +110,11 @@
 
     --vh-focus-ring: rgba(255, 255, 255, 0.35);
 
-    --vh-status-active: #F2F2F2;
+    --vh-live: #22C55E;
+    --vh-live-soft: rgba(34, 197, 94, 0.16);
+    --vh-on-live: #FFFFFF;
+
+    --vh-status-active: var(--vh-live);
     --vh-status-idle: #8A8A8A;
     --vh-status-offline: #4A4A4A;
 
@@ -99,6 +124,8 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
+
   --vh-bg: #0F0F0F;
   --vh-surface: #171717;
   --vh-surface-2: #232323;
@@ -116,7 +143,11 @@
 
   --vh-focus-ring: rgba(255, 255, 255, 0.35);
 
-  --vh-status-active: #F2F2F2;
+  --vh-live: #22C55E;
+  --vh-live-soft: rgba(34, 197, 94, 0.16);
+  --vh-on-live: #FFFFFF;
+
+  --vh-status-active: var(--vh-live);
   --vh-status-idle: #8A8A8A;
   --vh-status-offline: #4A4A4A;
 

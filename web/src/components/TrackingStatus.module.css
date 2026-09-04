@@ -1,0 +1,205 @@
+/*
+ * TrackingStatus — the connected half of ConnectTools: what is connected and
+ * whether it is tracking. One ui/Card, hairline dividers between sections, no
+ * boxes inside boxes. Two text sizes: 15px title, 13px everything else. The live
+ * green (--vh-live) paints the dot (StatusDot) and the "Tracking works" title,
+ * nothing else. Enter/leave motion is the global .reveal/.leave utility applied
+ * by the wrapper — nothing here names a motion.css keyframe (CSS Modules would
+ * hash the reference and the animation would never play).
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+/* ---- header ---- */
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 16px;
+}
+
+.headDot {
+  margin-top: 5px;
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--vh-text);
+  transition: color var(--dur-state) var(--ease-out);
+}
+
+.titleLive {
+  color: var(--vh-live);
+}
+
+.meta {
+  font-size: 13px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- sections ---- */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--vh-border);
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vh-text-faint);
+}
+
+.dim {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--vh-text-faint);
+}
+
+/* ---- rows (sources, devices) ---- */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: 13px;
+}
+
+.rowMain {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--vh-text);
+}
+
+.rowGlyph {
+  flex: none;
+  color: var(--vh-text-dim);
+}
+
+.rowTool {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.rowModel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vh-text-dim);
+}
+
+.sep {
+  flex: none;
+  color: var(--vh-text-faint);
+}
+
+.rowRight {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.rowTokens {
+  font-weight: 500;
+  color: var(--vh-text-dim);
+}
+
+/* ---- footer ---- */
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--vh-border);
+}
+
+.privacy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-faint);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.link {
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+.link:hover {
+  color: var(--vh-text);
+}
+
+.error {
+  margin: 0;
+  padding-top: 10px;
+  font-size: 13px;
+  color: var(--vh-text);
+}
+
+@media (max-width: 480px) {
+  /* Source rows: tokens/last-seen drop under the tool line so the model name
+     keeps its full text instead of ellipsizing next to a wide right column. */
+  .rowSource {
+    flex-wrap: wrap;
+    row-gap: 0;
+    padding: 4px 0;
+  }
+  .rowSource .rowRight {
+    flex-basis: 100%;
+    padding-left: 20px;
+  }
+  .actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .primary {
+    width: 100%;
+  }
+  .link {
+    text-align: center;
+  }
+}

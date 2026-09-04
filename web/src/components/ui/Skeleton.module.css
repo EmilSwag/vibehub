@@ -1,3 +1,16 @@
+/* Keyframes are declared locally: CSS Modules hash animation names, so a module
+ * can't reach motion.css's global @keyframes (see motion.css header). Copies of
+ * vh-fade-in / vh-shimmer, kept in sync by hand. */
+@keyframes vh-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes vh-shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
 .skeleton {
   position: relative;
   display: block;

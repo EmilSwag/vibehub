@@ -4,12 +4,12 @@ import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { projectsApi, usersApi, wallApi } from "../lib/api";
-import { presenceLine, safeHostname } from "../lib/format";
+import { safeHostname } from "../lib/format";
 import type { ExternalLink, LevelBreakdown, Project, User, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { ArchetypeGlyph, archetypeLabel } from "../components/ui/ArchetypeGlyph";
-import { StatusDot } from "../components/ui/StatusDot";
+import { PresenceBlock } from "../components/ui/PresenceBlock";
 import { Icon } from "../components/ui/Icon";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -19,6 +19,7 @@ import { LinkIcon } from "../components/LinkIcon";
 import { ProjectCard } from "../components/ProjectCard";
 import { WallComment } from "../components/WallComment";
 import { StatsPanel } from "../components/StatsPanel";
+import { SectionTitle } from "../components/ui/SectionTitle";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
 import { LevelBadge } from "../components/ui/LevelBadge";
 import { roleTitle } from "../components/ui/RoleGlyph";
@@ -32,6 +33,19 @@ interface ProfileData {
   levelBreakdown: LevelBreakdown;
 }
 
+/** Identity block placeholder — same four bands the loaded hero occupies, so the
+ *  page below it doesn't jump when the profile lands. */
+function HeroSkeleton() {
+  return (
+    <div className={styles.heroSkeleton}>
+      <Skeleton width={220} height={32} />
+      <Skeleton width={150} height={16} />
+      <SkeletonText lines={2} />
+      <Skeleton variant="pill" width={132} height={28} />
+    </div>
+  );
+}
+
 export function ProfilePage() {
   const { username = "" } = useParams();
   const { user: me } = useAuth();
@@ -40,8 +54,10 @@ export function ProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<WallCommentType[]>([]);
+  const [wallLoading, setWallLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [newComment, setNewComment] = useState("");
   const [wallError, setWallError] = useState<string | null>(null);
@@ -50,19 +66,43 @@ export function ProfilePage() {
   const isSelf = me?.username === username;
 
   useEffect(() => {
+    let active = true;
     setProfile(null);
     setNotFound(false);
+    setProjects([]);
+    setProjectsLoading(true);
+    setComments([]);
+    setNextCursor(null);
+    setWallLoading(true);
+
     usersApi
       .get(username)
-      .then((data) => setProfile(data))
-      .catch(() => setNotFound(true));
+      .then((data) => active && setProfile(data))
+      .catch(() => active && setNotFound(true));
 
-    projectsApi.list(username).then(({ projects }) => setProjects(projects));
+    projectsApi
+      .list(username)
+      .then(({ projects, likedIds }) => {
+        if (!active) return;
+        setProjects(projects);
+        setLikedIds(new Set(likedIds));
+      })
+      .catch(() => undefined)
+      .finally(() => active && setProjectsLoading(false));
 
-    wallApi.list(username).then(({ comments, nextCursor }) => {
-      setComments(comments);
-      setNextCursor(nextCursor);
-    });
+    wallApi
+      .list(username)
+      .then(({ comments, nextCursor }) => {
+        if (!active) return;
+        setComments(comments);
+        setNextCursor(nextCursor);
+      })
+      .catch(() => undefined)
+      .finally(() => active && setWallLoading(false));
+
+    return () => {
+      active = false;
+    };
   }, [username]);
 
   useEffect(() => {
@@ -113,77 +153,71 @@ export function ProfilePage() {
   }
 
   if (notFound) {
-    return <p className={styles.empty}>No one at @{username} — this profile doesn't exist.</p>;
+    return <p className={styles.notFound}>No profile at @{username}.</p>;
   }
 
-  if (!profile) {
-    // Same silhouette as the hero below so nothing jumps when data lands.
-    return (
-      <div>
-        <div className={styles.hero} aria-busy="true">
-          <Skeleton variant="circle" width={96} />
-          <div className={styles.heroInfo}>
-            <Skeleton width={220} height={26} style={{ marginBottom: 10 }} />
-            <Skeleton width={140} height={13} style={{ marginBottom: 14 }} />
-            <SkeletonText lines={2} />
-          </div>
-        </div>
-        <section className={styles.section}>
-          <Skeleton width={60} height={12} style={{ marginBottom: 12 }} />
-          <Card>
-            <SkeletonText lines={3} />
-          </Card>
-        </section>
-      </div>
-    );
-  }
-
-  const { user, links, friendCount, levelBreakdown } = profile;
   const presence = presences.get(username);
 
+  // The page keeps one shape from the first frame — only the identity block swaps
+  // skeleton for content, so nothing below it moves when the profile lands.
   return (
     <div>
-      <div className={styles.hero}>
-        <Avatar src={user.avatarUrl} name={user.displayName} size={96} />
+      <div className={styles.hero} aria-busy={profile ? undefined : true}>
+        {profile ? (
+          <Avatar src={profile.user.avatarUrl} name={profile.user.displayName} size={96} />
+        ) : (
+          <Skeleton variant="circle" width={96} />
+        )}
+
         <div className={styles.heroInfo}>
-          <div className={styles.nameRow}>
-            <h1 className={styles.displayName}>{user.displayName}</h1>
-            <span className={styles.username}>@{user.username}</span>
-            {user.roles.map((r) => (
-              <Badge key={r}>{roleTitle(r)}</Badge>
-            ))}
-            {user.archetype && (
-              <Badge active>
-                <ArchetypeGlyph archetype={user.archetype} /> {archetypeLabel(user.archetype)}
-              </Badge>
-            )}
-          </div>
+          {profile ? (
+            <>
+              <div className={styles.nameRow}>
+                <h1 className={styles.displayName}>{profile.user.displayName}</h1>
+                <span className={styles.username}>@{profile.user.username}</span>
+                {profile.user.roles.map((r) => (
+                  <Badge key={r}>{roleTitle(r)}</Badge>
+                ))}
+                {profile.user.archetype && (
+                  <Badge active>
+                    <ArchetypeGlyph archetype={profile.user.archetype} /> {archetypeLabel(profile.user.archetype)}
+                  </Badge>
+                )}
+              </div>
 
-          {presence && (
-            <StatusDot
-              status={presence.status}
-              label={presence.activity ? presenceLine(presence.activity) : presence.status}
-            />
+              {/* Only friends' presence is known to the client; anyone else gets no
+                  status rather than a misleading "Offline". */}
+              {presence && <PresenceBlock presence={presence} variant="hero" className={styles.presence} />}
+
+              {profile.user.bio && <p className={styles.bio}>{profile.user.bio}</p>}
+
+              {profile.links.length > 0 && (
+                <div className={styles.links}>
+                  {profile.links.map((link) => (
+                    <a key={link.id} className={styles.linkChip} href={link.url} target="_blank" rel="noreferrer">
+                      <LinkIcon icon={link.icon} />
+                      {link.label ?? safeHostname(link.url)}
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              <p className={styles.friendCount}>{profile.friendCount} friends</p>
+            </>
+          ) : (
+            <HeroSkeleton />
           )}
-
-          {user.bio && <p className={styles.bio}>{user.bio}</p>}
-
-          {links.length > 0 && (
-            <div className={styles.links}>
-              {links.map((link) => (
-                <a key={link.id} className={styles.linkChip} href={link.url} target="_blank" rel="noreferrer">
-                  <LinkIcon icon={link.icon} />
-                  {link.label ?? safeHostname(link.url)}
-                </a>
-              ))}
-            </div>
-          )}
-
-          <p className={styles.friendCount}>{friendCount} friends</p>
         </div>
 
         <div className={styles.heroActions}>
-          <LevelBadge level={levelBreakdown.level} breakdown={levelBreakdown} />
+          {profile ? (
+            <LevelBadge level={profile.levelBreakdown.level} breakdown={profile.levelBreakdown} />
+          ) : (
+            <span className={styles.levelSkeleton}>
+              <Skeleton variant="circle" width={76} />
+              <Skeleton width={24} height={14} />
+            </span>
+          )}
           {isSelf && (
             <Link
               to="/settings"
@@ -205,23 +239,36 @@ export function ProfilePage() {
       )}
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Stats</h2>
+        <SectionTitle icon="commit">Stats</SectionTitle>
         <Card>
           <StatsPanel username={username} />
         </Card>
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Projects</h2>
-        {projects.length === 0 ? (
-          isSelf ? (
-            <Link to="/projects" className={styles.emptyAction}>
-              <Icon name="plus" size={14} />
-              New project
-            </Link>
-          ) : (
-            <p className={styles.empty}>No public projects yet.</p>
-          )
+        <SectionTitle icon="image" count={projects.length}>
+          Projects
+        </SectionTitle>
+        {projectsLoading ? (
+          <div className={styles.projectGrid} aria-busy="true">
+            {[0, 1].map((i) => (
+              <Card key={i} className={styles.projectSkeleton}>
+                <Skeleton width="62%" height={20} />
+                <SkeletonText lines={2} />
+                <Skeleton width="46%" height={13} />
+              </Card>
+            ))}
+          </div>
+        ) : projects.length === 0 ? (
+          <div className={styles.emptyBlock}>
+            <p className={styles.empty}>{isSelf ? "No projects yet." : "No public projects yet."}</p>
+            {isSelf && (
+              <Link to="/projects" className={styles.emptyAction}>
+                <Icon name="plus" size={14} />
+                New project
+              </Link>
+            )}
+          </div>
         ) : (
           <div className={styles.projectGrid}>
             {projects.map((project) => (
@@ -237,30 +284,47 @@ export function ProfilePage() {
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Wall</h2>
+        {/* The count is the full wall, so it only shows once every page is loaded. */}
+        <SectionTitle icon="text" count={nextCursor ? undefined : comments.length}>
+          Wall
+        </SectionTitle>
 
         {me && (
-          <Card style={{ marginBottom: 16 }}>
+          <Card className={styles.composer}>
             <form className={styles.postForm} onSubmit={handlePostComment}>
-              <Textarea
-                placeholder={isSelf ? "Say something to visitors…" : `Write on ${user.displayName}'s wall…`}
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                maxLength={1000}
-                rows={2}
-              />
-              {wallError && <span style={{ color: "var(--vh-accent-hover)", fontSize: 13 }}>{wallError}</span>}
-              <div className={styles.postActions}>
-                <Button type="submit" disabled={posting || !newComment.trim()}>
+              <div className={styles.postRow}>
+                <Textarea
+                  className={styles.postField}
+                  placeholder="Write something…"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  maxLength={1000}
+                  rows={2}
+                />
+                <Button type="submit" className={styles.postBtn} disabled={posting || !newComment.trim()}>
                   {posting ? "Posting…" : "Post"}
                 </Button>
               </div>
+              {wallError && (
+                <span className={styles.wallError} role="alert">
+                  {wallError}
+                </span>
+              )}
             </form>
           </Card>
         )}
 
-        {comments.length === 0 ? (
-          <p className={styles.empty}>No wall posts yet.</p>
+        {wallLoading ? (
+          <div className={styles.wallList} aria-busy="true">
+            {[0, 1].map((i) => (
+              <div className={styles.wallSkeletonRow} key={i}>
+                <Skeleton variant="circle" width={36} />
+                <Skeleton variant="block" height={73} />
+              </div>
+            ))}
+          </div>
+        ) : comments.length === 0 ? (
+          <p className={styles.empty}>No posts yet.</p>
         ) : (
           <div className={styles.wallList}>
             {comments.map((comment) => (

@@ -14,7 +14,8 @@ interface Props {
   aside?: ReactNode;
 }
 
-/** Uppercase eyebrow header used above cards on Home / Friends. */
+/** Uppercase eyebrow header used above cards on Home / Friends / Profile. The
+ * count sits on the right edge so numbers line up across a column of cards. */
 export function SectionTitle({ icon, children, count, tone = "default", aside }: Props) {
   return (
     <h2 className={styles.title}>

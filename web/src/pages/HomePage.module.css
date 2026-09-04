@@ -13,6 +13,8 @@
   margin: 0 0 var(--vh-space-5);
 }
 
+/* Two columns, one 24px gap everywhere — between columns, between stacked
+ * sections in the aside, and between rows when it collapses to one column. */
 .grid {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -26,17 +28,19 @@
   }
 }
 
-.sectionTitle {
-  font-family: var(--vh-font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--vh-text-faint);
-  margin: 0 0 var(--vh-space-2);
+.section {
+  min-width: 0;
 }
 
-.card {
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-4);
+  min-width: 0;
+}
+
+/* Cards that hold divided rows: rows own their padding, corners clip hovers. */
+.listCard {
   padding: 0;
   overflow: hidden;
 }
@@ -48,54 +52,13 @@
   color: var(--vh-text-faint);
 }
 
-.side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vh-space-4);
-}
-
-.requestRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--vh-space-2) 0;
-}
-
-/* ---- round 3 ---- */
-.youCard {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.youText {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-.youName {
+.emptyInline {
+  font-family: var(--vh-font-sans);
   font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  color: var(--vh-text-faint);
 }
 
-.pill {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  margin-left: 6px;
-  border-radius: var(--vh-radius-pill);
-  background: var(--vh-text);
-  color: var(--vh-bg);
-  font-size: 11px;
-  font-weight: 600;
-  vertical-align: middle;
-  font-variant-numeric: tabular-nums;
-}
-
+/* ---- Friend requests ---- */
 .requestRow {
   display: flex;
   align-items: center;
@@ -124,4 +87,58 @@
 .reviewBtn {
   margin-top: 8px;
   width: 100%;
+}
+
+/* ---- All friends: one line each — avatar · name @nick · presence ---- */
+.friendRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px var(--vh-space-3);
+  border-bottom: 1px solid var(--vh-border);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-press) var(--ease-out);
+}
+.friendRow:last-child {
+  border-bottom: none;
+}
+.friendRow:hover {
+  background: var(--vh-surface-2);
+}
+.friendName {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.friendHandle {
+  color: var(--vh-text-faint);
+  font-weight: 400;
+}
+/* Takes what the name leaves, never less than a legible "Online · k…". */
+.friendPresence {
+  flex: 1 1 0;
+  min-width: 88px;
+  justify-content: flex-end;
+}
+.friendDot {
+  margin-left: auto;
+}
+.moreLink {
+  display: block;
+  padding: 10px var(--vh-space-3);
+  border-top: 1px solid var(--vh-border);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+  text-decoration: none;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.moreLink:hover {
+  color: var(--vh-text);
 }

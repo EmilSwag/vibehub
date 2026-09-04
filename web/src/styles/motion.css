@@ -2,6 +2,18 @@
  * VibeHub motion system — see skills/emil_design_eng (§4 Motion).
  * Only opacity/transform are ever animated. Everything collapses to instant under
  * prefers-reduced-motion. Import once from main.tsx after tokens.css.
+ *
+ * SCOPING RULE — read before writing `animation:` anywhere.
+ * The @keyframes below are global and only reachable from global classes (the
+ * utilities in this file, applied from TSX: .reveal / .stagger / .scale-in /
+ * .pop / .fade-in / .leave / .step-enter). Vite CSS Modules hash every
+ * animation name inside a *.module.css, so `animation: vh-fade-up …` there
+ * compiles to `_vh-fade-up_<hash>_1` and silently never plays. A module that
+ * needs its own animation must declare the @keyframes in the same file (copy
+ * the block from here, keep the vh- prefix; the module hashes both sides
+ * consistently). `:global(...)` around keyframe names is not supported.
+ * The reduced-motion block at the bottom targets elements, not names, so it
+ * also covers module-local keyframes.
  */
 
 :root {
@@ -13,8 +25,10 @@
   --dur-state: 200ms;
   --dur-enter: 320ms;
   --dur-reveal: 560ms;
-  /* Alias some component CSS reaches for on hover/state transitions. */
+  /* Aliases some component CSS reaches for on hover/state transitions and the
+   * small selection "pop" (ConnectTools .dotLive/.token). */
   --dur-fade: var(--dur-state);
+  --dur-pop: var(--dur-enter);
 
   --stagger: 36ms;
 }
@@ -55,6 +69,17 @@
 @keyframes vh-fade-down {
   from { opacity: 1; transform: translateY(0); }
   to   { opacity: 0; transform: translateY(8px); }
+}
+
+/* Live-presence ring: a soft halo that leaves the green dot and dissolves.
+ * Shared so every "online right now" dot (Home YOU card, top bar, friend rows)
+ * pulses identically. Put it on an absolutely-positioned circle behind the dot,
+ * painted with var(--vh-live): `animation: vh-live-pulse 1800ms var(--ease-out) infinite`.
+ * Opacity + transform only; collapses to a single frame under reduced motion. */
+@keyframes vh-live-pulse {
+  0%   { opacity: 0.45; transform: scale(0.7); }
+  70%  { opacity: 0;    transform: scale(1.9); }
+  100% { opacity: 0;    transform: scale(1.9); }
 }
 
 /* ---- Utilities ---- */

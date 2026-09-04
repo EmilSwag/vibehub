@@ -1,11 +1,27 @@
+/* The keyframe is declared here on purpose: CSS Modules hash animation names, so
+ * `animation: vh-fade-up` inside a module points at a keyframe that does not
+ * exist (motion.css keeps its global names unhashed). */
+@keyframes vh-section-pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .title {
   display: flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   margin: 0 0 var(--vh-space-2);
   font-family: var(--vh-font-sans);
   font-size: 13px;
   font-weight: 600;
+  line-height: 20px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--vh-text-faint);
@@ -16,21 +32,28 @@
 }
 .label {
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+/* Counts sit on the right edge, so every card's number lines up with the next. */
 .pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   min-width: 20px;
   height: 20px;
+  margin-left: auto;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--vh-radius-pill);
   border: 1px solid var(--vh-border);
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
   color: var(--vh-text-dim);
-  animation: vh-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation: vh-section-pill-in var(--dur-enter) var(--ease-out) both;
 }
 .pillHot {
   background: var(--vh-text);
@@ -38,8 +61,18 @@
   color: var(--vh-bg);
 }
 .aside {
+  flex: none;
   margin-left: auto;
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
+}
+.pill + .aside {
+  margin-left: var(--vh-space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill {
+    animation: none;
+  }
 }

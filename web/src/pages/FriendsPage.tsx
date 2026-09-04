@@ -7,12 +7,13 @@ import type { Friend, FriendRequest, SuggestedUser } from "../types";
 import { Card } from "../components/ui/Card";
 import { Avatar } from "../components/ui/Avatar";
 import { Button } from "../components/ui/Button";
+import { Icon } from "../components/ui/Icon";
 import { Input } from "../components/ui/Input";
 import { LevelBadge } from "../components/ui/LevelBadge";
 import { SkeletonRow } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { rolesLabel } from "../components/ui/RoleGlyph";
-import { FriendListItem } from "../components/FriendListItem";
+import { FriendListItem, FriendListItemSkeleton } from "../components/FriendListItem";
 import styles from "./FriendsPage.module.css";
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
@@ -127,7 +128,7 @@ export function FriendsPage() {
       </div>
 
       {incomingRequests.length > 0 && (
-        <section className={cx(styles.section, "reveal")}>
+        <section className={cx(styles.section, styles.requests, "reveal")}>
           <SectionTitle icon="inbox" count={incomingRequests.length} tone="hot">
             Requests
           </SectionTitle>
@@ -165,9 +166,9 @@ export function FriendsPage() {
           <SectionTitle icon="users" count={friends.length}>
             Your people
           </SectionTitle>
-          <Card className={styles.card}>
+          <Card className={cx(styles.card, styles.listCard)}>
             {loading ? (
-              <SkeletonRow count={5} />
+              <FriendListItemSkeleton count={3} withAction />
             ) : friends.length === 0 ? (
               <button
                 type="button"
@@ -179,25 +180,25 @@ export function FriendsPage() {
             ) : (
               <div className="stagger">
                 {friends.map((f, i) => (
-                  <div key={f.user.id} style={stagger(i)}>
-                    <FriendListItem
-                      user={f.user}
-                      daysAsFriends={f.daysAsFriends}
-                      presence={presences.get(f.user.username)}
-                      action={
-                        <button
-                          type="button"
-                          className={styles.unfriendBtn}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            void unfriend(f.user.username);
-                          }}
-                        >
-                          Unfriend
-                        </button>
-                      }
-                    />
-                  </div>
+                  <FriendListItem
+                    key={f.user.id}
+                    index={i}
+                    user={f.user}
+                    daysAsFriends={f.daysAsFriends}
+                    presence={presences.get(f.user.username)}
+                    action={
+                      <button
+                        type="button"
+                        className={styles.unfriendBtn}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void unfriend(f.user.username);
+                        }}
+                      >
+                        Unfriend
+                      </button>
+                    }
+                  />
                 ))}
               </div>
             )}
@@ -209,20 +210,7 @@ export function FriendsPage() {
             <SectionTitle icon="search">Find people</SectionTitle>
             <Card className={styles.card}>
               <div className={styles.search}>
-                <svg
-                  className={styles.searchIcon}
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden="true"
-                >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="M20 20l-3.5-3.5" />
-                </svg>
+                <Icon name="search" size={16} className={styles.searchIcon} />
                 <Input
                   ref={searchRef}
                   className={styles.searchInput}

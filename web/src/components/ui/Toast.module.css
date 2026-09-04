@@ -1,3 +1,10 @@
+/* Local copy of motion.css's vh-fade-up: CSS Modules hash animation names, so a
+ * module can't reach the global keyframe (see motion.css header). */
+@keyframes vh-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .stack {
   position: fixed;
   right: 16px;

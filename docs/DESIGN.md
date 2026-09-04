@@ -1,9 +1,9 @@
 # VibeHub Design Spec — Strict Monochrome
 
-Steam-like layout structure, zero-hue skin. Single source of truth for colors/type/shape: `web/src/styles/tokens.css`. **Never hardcode colors — use `--vh-*` vars only. No hue is ever introduced by any component (`BUILD_PLAN.md §5`) — enforce this in review, not just at token-definition time.**
+Steam-like layout structure, zero-hue skin — with exactly **one** deliberate exception, live-presence green (below). Single source of truth for colors/type/shape: `web/src/styles/tokens.css`. **Never hardcode colors — use `--vh-*` vars only. No hue is ever introduced by any component (`BUILD_PLAN.md §5`) beyond `--vh-live` — enforce this in review, not just at token-definition time.**
 
 ## Mood
-Calm, editorial, high-contrast, "ink on paper". Pale gray background, white cards, ink-black accent, serif display headings. Absolutely NO gradients, NO hue of any kind (no warm tints, no cool grays, no neon) — every value is a shade of gray, black, or white.
+Calm, editorial, high-contrast, "ink on paper". Pale gray background, white cards, ink-black accent, serif display headings. Absolutely NO gradients, NO hue of any kind (no warm tints, no cool grays, no neon) — every value is a shade of gray, black, or white. The single exception is `--vh-live`: the green that means "online right now", and nothing else.
 
 ## Palette (light = default)
 | Role | Value |
@@ -16,11 +16,23 @@ Calm, editorial, high-contrast, "ink on paper". Pale gray background, white card
 | Text secondary | `#555555` |
 | Text faint | `#8A8A8A` |
 | **Accent (ink)** | `#111111`, hover `#333333`, soft bg `#E6E6E6`, on-accent `#FFFFFF` |
-| Status: active / idle / offline | `#111111` / `#8A8A8A` / `#C8C8C8` |
+| **Live presence — the one hue** | `--vh-live` `#16A34A` (dark `#22C55E`), `--vh-live-soft` `rgba(22,163,74,.12)` (dark `rgba(34,197,94,.16)`), `--vh-on-live` `#FFFFFF` |
+| Status: active / idle / offline | `--vh-live` / `#8A8A8A` / `#C8C8C8` — active is the green; idle and offline stay lightness-only |
 
-Dark mode: bg `#0F0F0F`, surface `#171717`, text `#F2F2F2`, accent `#F2F2F2` (on-accent `#111111`) —
-applied both automatically via `prefers-color-scheme: dark` and explicitly via `[data-theme="dark"]`,
-kept in lockstep in `tokens.css`.
+`--vh-live` / `--vh-live-soft` / `--vh-on-live` paint the live/online presence state only: the
+green dot, its pulse ring, a "live" pill. Never reuse them for success, links, charts, errors or
+any other meaning — errors read as ink (`--vh-danger` = `--vh-text`).
+
+Dark mode: bg `#0F0F0F`, surface `#171717`, text `#F2F2F2`, accent `#F2F2F2` (on-accent `#111111`),
+live `#22C55E` — applied both automatically via `prefers-color-scheme: dark` and explicitly via
+`[data-theme="dark"]`, kept in lockstep in `tokens.css` (three blocks — `:root`, the media query,
+`[data-theme="dark"]` — edit all three together).
+
+**Theme is user-selectable.** `web/src/lib/theme.ts` is the only owner of `<html data-theme>`:
+preference `system` (default — no attribute, follows the OS), `light` or `dark` (explicit
+attribute, wins over the OS). Persisted in `localStorage["vh-theme"]` (absent = system) and
+pre-applied by the inline script in `web/index.html` so the first paint is already right.
+`ThemeToggle` is the only writer; components never read the theme — they read tokens.
 
 ## Typography
 - **Display / h1–h3 / greeting**: serif — Tiempos Text stack (`--vh-font-serif`), weight 500, tight leading. Like Claude's "Back at it" greeting.
@@ -40,7 +52,7 @@ kept in lockstep in `tokens.css`.
 - **Card**: surface, border, radius-lg, shadow-card, padding 24.
 - **Inputs**: surface, border, radius-md; focus = 2px `--vh-focus-ring` ring, accent border.
 - **Badges (archetype, model tags)**: pill, `--vh-surface-2` bg or `--vh-accent-soft` for active; small sans caps.
-- **Status dot**: 8px circle + label ("in neon-app · Claude Code · 1h 42m"); status conveyed by lightness only (`--vh-status-*`), never hue.
+- **Status dot**: 8px circle + label ("in neon-app · Claude Code · 1h 42m"); active = `--vh-live` green (the one hue; optional pulse ring in `--vh-live-soft`), idle/offline conveyed by lightness only (`--vh-status-*`).
 - **Avatar**: circle, 1px border; fallback = `--vh-surface-2` bg + serif initial.
 - **Stat tiles**: surface card, big mono number, small dim label; accent used for highlight number only.
 - **Wall comment**: `--vh-surface-2` bubble, radius-lg, author avatar left.
@@ -94,6 +106,10 @@ light page under a dark OS. Only the favicon should be auto.
 The SPA ships one Lottie colourway and overrides its baked fill with `currentColor` in
 `LogoLottie.module.css`, so a single file follows the theme. The two baked colourways exist for
 players that cannot be themed.
+
+## Product rules
+- **Tokens are fuel, not rank.** Token counts are a personal gauge ("burning tokens in neon-app"), never a score. Never rank, sort, badge or order people by tokens — no leaderboards, no "top burner", no friends list sorted by usage. Compare views put two people side by side on equal footing and never declare a winner.
+- Presence is the only live signal and the only hue. Everything else is quiet chrome.
 
 ## Voice
 Short, warm, lowercase-friendly microcopy ("friends for 214 days", "burning tokens in neon-app").

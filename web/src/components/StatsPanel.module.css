@@ -1,57 +1,108 @@
+/* Equal rows: a wrapping model name must not make one tile taller than the rest. */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--vh-space-3);
   margin-bottom: var(--vh-space-4);
 }
 
 @media (max-width: 640px) {
   .tiles {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.barList {
+.modelList {
   display: flex;
   flex-direction: column;
-  gap: var(--vh-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.barRow {
+/* Fixed numeric columns so every row's hours and tokens sit in the same place. */
+.modelRow {
   display: grid;
-  grid-template-columns: 120px 1fr 70px;
+  grid-template-columns: minmax(0, 1fr) 72px 60px;
+  align-items: center;
+  column-gap: var(--vh-space-3);
+  min-height: 40px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--vh-border);
+}
+.modelRow:last-child {
+  border-bottom: none;
+}
+
+.modelLeft {
+  display: flex;
   align-items: center;
   gap: var(--vh-space-2);
+  min-width: 0;
   font-family: var(--vh-font-sans);
-  font-size: 13px;
+  font-size: 13.5px;
+  line-height: 20px;
+  color: var(--vh-text);
 }
 
-.barLabel {
-  color: var(--vh-text-dim);
+.modelIcon {
+  flex: none;
+  color: var(--vh-text-faint);
+}
+
+.modelName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.barTrack {
-  background: var(--vh-surface-2);
-  border-radius: var(--vh-radius-sm);
-  height: 10px;
-  overflow: hidden;
-}
-
-.barFill {
-  height: 100%;
-  background: var(--vh-accent);
-  border-radius: var(--vh-radius-sm);
-}
-
-.barFillAlt {
-  background: var(--vh-status-idle);
-}
-
-.barValue {
-  font-family: var(--vh-font-mono);
+.sep,
+.modelTool {
   color: var(--vh-text-faint);
+}
+
+.time,
+.tokens {
+  font-family: var(--vh-font-mono);
+  font-size: 12.5px;
+  line-height: 20px;
   text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.time {
+  color: var(--vh-text-dim);
+}
+.tokens {
+  color: var(--vh-text-faint);
+}
+
+.numSkeleton {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.empty {
+  color: var(--vh-text-faint);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-3);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+@media (max-width: 480px) {
+  /* Give the model name back the width the two number columns don't need. */
+  .modelRow {
+    grid-template-columns: minmax(0, 1fr) 60px 52px;
+    column-gap: var(--vh-space-2);
+  }
 }

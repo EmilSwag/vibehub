@@ -1,19 +1,29 @@
+/* Avatar pinned to the top: the presence block under the name is one line
+ * offline and four live, and a centered avatar would drift as it grows. */
 .row {
-  display: flex;
-  align-items: center;
-  gap: var(--vh-space-3);
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: flex-start;
+  column-gap: var(--vh-space-3);
   padding: var(--vh-space-3);
   border-bottom: 1px solid var(--vh-border);
   text-decoration: none;
   color: inherit;
+  transition: background-color var(--dur-press) var(--ease-out);
 }
 
 .row:last-child {
   border-bottom: none;
 }
 
+.row:hover {
+  background: var(--vh-surface-2);
+}
+
 .info {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -21,11 +31,47 @@
   font-family: var(--vh-font-sans);
   font-weight: 600;
   font-size: 14px;
+  line-height: 18px;
+  letter-spacing: -0.01em;
   color: var(--vh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding-top: 2px;
 }
 
 .meta {
   font-family: var(--vh-font-sans);
   font-size: 12px;
+  line-height: 14px;
   color: var(--vh-text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Skeleton line boxes — 18px each, the same as a PresenceBlock row line. */
+.skelLine {
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+
+@media (max-width: 560px) {
+  .row {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .side {
+    grid-column: 2;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--vh-space-3);
+    padding-top: 6px;
+  }
 }

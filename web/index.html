@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <!-- Theme pre-apply: runs before any stylesheet paints so a saved "dark"
+         or "light" choice never flashes the other theme. Mirrors
+         src/lib/theme.ts (localStorage key "vh-theme"; absent/other = system).
+         Storage can throw (private mode, sandboxed frames) — swallow it. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("vh-theme");
+          var root = document.documentElement;
+          if (t === "dark" || t === "light") root.setAttribute("data-theme", t);
+          else root.removeAttribute("data-theme");
+        } catch (e) {}
+      })();
+    </script>
     <!-- SVG first: the mark carries its own ink/paper switch, so the tab icon
          follows the OS theme. The PNG stays for browsers without SVG icons. -->
     <link rel="icon" type="image/svg+xml" href="/brand/mark.svg" />

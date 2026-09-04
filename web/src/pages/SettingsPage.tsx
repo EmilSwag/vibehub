@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { usersApi } from "../lib/api";
+import { useTheme } from "../lib/theme";
+import type { ThemePreference } from "../lib/theme";
 import type { ChangeEvent } from "react";
 import type { ExternalLink, UserRole } from "../types";
 import { Card } from "../components/ui/Card";
@@ -231,7 +234,95 @@ function RolesSection() {
   );
 }
 
+const THEME_OPTIONS: { id: ThemePreference; label: string }[] = [
+  { id: "system", label: "System" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
+
+/** Theme is a per-device preference (localStorage), not a profile field: no save
+ * button, each click applies and persists at once. Radio-group semantics with
+ * roving tabindex — arrows move the choice, Home/End jump to the ends. */
+function AppearanceSection() {
+  const { preference, setPreference } = useTheme();
+  const groupRef = useRef<HTMLDivElement>(null);
+  const index = Math.max(0, THEME_OPTIONS.findIndex((o) => o.id === preference));
+
+  function choose(next: number, focus: boolean) {
+    const option = THEME_OPTIONS[next];
+    if (!option) return;
+    setPreference(option.id);
+    if (focus) {
+      const radios = groupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
+      radios?.[next]?.focus();
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const n = THEME_OPTIONS.length;
+    let next: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % n;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + n) % n;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = n - 1;
+    if (next === null) return;
+    event.preventDefault();
+    choose(next, true);
+  }
+
+  return (
+    <Card>
+      <div
+        ref={groupRef}
+        className={styles.seg}
+        role="radiogroup"
+        aria-label="Theme"
+        onKeyDown={handleKeyDown}
+        style={{ "--seg-index": index } as CSSProperties}
+      >
+        <span className={styles.segThumb} aria-hidden="true" />
+        {THEME_OPTIONS.map((option, i) => {
+          const on = option.id === preference;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={on ? 0 : -1}
+              className={[styles.segBtn, on && styles.segBtnOn].filter(Boolean).join(" ")}
+              onClick={() => choose(i, false)}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className={styles.hint}>System follows your device.</p>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
+  // "/settings#tracker" (the Home tracking panel links here): the SPA router
+  // doesn't scroll to hashes on its own. The sections above load async and grow
+  // out of their skeletons, so keep re-anchoring while the layout settles.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== "#tracker") return;
+    const target = document.getElementById("tracker");
+    if (!target) return;
+    const jump = () => target.scrollIntoView({ block: "start" });
+    jump();
+    const observer = new ResizeObserver(jump);
+    observer.observe(document.body);
+    const stop = window.setTimeout(() => observer.disconnect(), 1200);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(stop);
+    };
+  }, [hash]);
+
   return (
     <div>
       <h1 className={styles.title}>Settings</h1>
@@ -251,9 +342,14 @@ export function SettingsPage() {
         <LinksSection />
       </section>
 
-      <section className={styles.section}>
+      <section id="tracker" className={[styles.section, styles.tracker].join(" ")}>
         <h2 className={styles.sectionTitle}>Tracker</h2>
         <ConnectTools variant="full" />
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>Appearance</h2>
+        <AppearanceSection />
       </section>
     </div>
   );

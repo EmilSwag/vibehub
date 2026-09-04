@@ -1,400 +1,471 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, usersApi } from "../lib/api";
-import { buildConnectPrompt } from "../lib/connectPrompt";
-import { elapsedShort, formatDateTime, formatShortDate, toolLabel } from "../lib/format";
+import { buildConnectPrompt, buildInstallCommand } from "../lib/connectPrompt";
+import type { ConnectPromptTarget, InstallOs } from "../lib/connectPrompt";
+import {
+  clearStoredConnectToken,
+  dropForeignConnectTokens,
+  ensureConnectToken,
+  hasSeenTracking,
+  markTrackingSeen,
+  readStoredConnectToken,
+} from "../lib/connectToken";
+import type { StoredConnectToken } from "../lib/connectToken";
+import { formatShortDate, presenceLine } from "../lib/format";
 import { useExitTransition } from "../lib/motion";
-import type { ConnectPromptTarget } from "../lib/connectPrompt";
-import type { TrackerStatus, TrackerToken } from "../types";
+import type { TrackerStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
 import { Skeleton } from "./ui/Skeleton";
 import { ConnectSuccessModal } from "./ui/ConnectSuccessModal";
+import { DeviceList, TrackingStatus } from "./TrackingStatus";
+import { useNow } from "./ui/PresenceBlock";
 import styles from "./ConnectTools.module.css";
-
-type Os = "mac" | "windows";
 
 const WEB_URL = window.location.origin;
 
-/** Tools the tracker understands today, with what it can see for each. */
-const SUPPORTED = [
-  { id: "claude_code", name: "Claude Code", sees: "tokens · model · project · time" },
-  { id: "codex", name: "Codex CLI", sees: "tokens · project · time" },
-  { id: "cursor", name: "Cursor", sees: "project · time" },
-  { id: "vscode", name: "VS Code", sees: "project · time" },
-  { id: "quadcode", name: "Quadcode", sees: "project · time" },
-];
-
 // Shown once per browser session, on either surface (Home banner or Settings) —
-// whichever notices the connection first. Also covers landing on an already-
-// connected account (no live "flip" to catch), since the check is level- not
-// edge-triggered: "is connected, haven't celebrated yet" rather than "just changed".
+// whichever notices the connection first. Level-triggered ("is connected and
+// hasn't been celebrated yet") so a connection made on another page still gets
+// its moment here; gated below so a returning, already-explained account isn't
+// congratulated again every new tab.
 const CELEBRATED_KEY = "vh-connect-celebrated";
 
-/** The three targets `buildConnectPrompt` knows how to write for (round 5: Home flow). */
+const POLL_WAITING_MS = 5_000;
+const POLL_CONNECTED_MS = 10_000;
+const EXIT_MS = 260;
+
+/** The three targets `buildConnectPrompt` knows how to write for. */
 const TARGETS: { id: ConnectPromptTarget; label: string }[] = [
   { id: "claude-code", label: "Claude Code" },
   { id: "cursor", label: "Cursor" },
   { id: "chatgpt", label: "ChatGPT" },
 ];
 
-function detectOs(): Os {
+const OSES: { id: InstallOs; label: string }[] = [
+  { id: "mac", label: "macOS / Linux" },
+  { id: "windows", label: "Windows" },
+];
+
+type Copyable = "prompt" | "command" | "token";
+type Phase = "loading" | "waiting" | "connected";
+
+function detectOs(): InstallOs {
   return /Win/i.test(navigator.platform) || /Windows/i.test(navigator.userAgent) ? "windows" : "mac";
 }
 
-function installCommand(os: Os, token: string): string {
-  return os === "windows"
-    ? `$env:VIBEHUB_TOKEN="${token}"; irm ${WEB_URL}/tracker/install.ps1 | iex`
-    : `curl -fsSL ${WEB_URL}/tracker/install.sh | bash -s -- ${token}`;
+function deviceLabel(os: InstallOs): string {
+  return `${os === "windows" ? "Windows" : "Mac"} · ${formatShortDate(new Date().toISOString())}`;
 }
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
+/* ---- Segmented control (target / OS) ---- */
+
+function Segment<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className={styles.seg} role="tablist" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="tab"
+          aria-selected={value === o.id}
+          className={cx(styles.segBtn, value === o.id && styles.segBtnOn)}
+          onClick={() => onChange(o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ---- Manual install: token + OS-segmented one-liner ---- */
+
+function ManualInstall({
+  token,
+  os,
+  onOs,
+  copied,
+  onCopy,
+}: {
+  token: string;
+  os: InstallOs;
+  onOs: (os: InstallOs) => void;
+  copied: Copyable | null;
+  onCopy: (what: Copyable, text: string) => void;
+}) {
+  const command = buildInstallCommand(os, token, API_BASE, WEB_URL);
+  return (
+    <div className={cx(styles.manual, "fade-in")}>
+      <div className={styles.osRow}>
+        <span className={styles.manualLabel}>Run in your terminal</span>
+        <Segment label="Operating system" options={OSES} value={os} onChange={onOs} />
+      </div>
+      <div className={styles.cmdRow}>
+        <code className={styles.cmd}>{command}</code>
+        <Button size="sm" variant="secondary" onClick={() => onCopy("command", command)}>
+          {copied === "command" ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <div className={styles.tokenRow}>
+        <code className={styles.token}>{token}</code>
+        <button type="button" className={styles.link} onClick={() => onCopy("token", token)}>
+          {copied === "token" ? "Copied" : "Copy token"}
+        </button>
+      </div>
+      <span className={styles.hint}>Needs Node.js 18+.</span>
+    </div>
+  );
+}
+
+/* ---- ConnectTools ---- */
+
 interface Props {
   /** compact = onboarding (always visible); banner = Home (hides itself once
-   * connected, with an exit transition); full = Settings (shows device list).
-   * compact and banner render identically otherwise. */
+   * connected and explained, with exit transitions); full = Settings (lists
+   * devices in both states). */
   variant?: "compact" | "banner" | "full";
   /** Fires the first time we observe a live heartbeat. */
   onConnected?: () => void;
 }
 
 /**
- * The one place that explains *how* VibeHub learns what you're doing:
- * a tiny local tracker reads your AI tools' logs, sends heartbeats, and this
- * card flips to "Connected" on the first one. Polls every 5s while waiting.
+ * One component, two states. Not connected → the connect card (one primary
+ * path: pick a tool, copy the prompt, wait for the first heartbeat). Connected →
+ * TrackingStatus (what got connected, is it tracking). This wrapper owns the
+ * status poll (5s while waiting, 10s while the connected panel is on screen),
+ * reacts instantly to the viewer's own presence pushes, mints the device token
+ * exactly once per browser (lib/connectToken), and fires the one-time success
+ * modal.
  */
 export function ConnectTools({ variant = "compact", onConnected }: Props) {
   const { user } = useAuth();
   const { presences } = useRealtime();
+  const userId = user?.id ?? null;
+  const isBanner = variant === "banner";
+
   const [status, setStatus] = useState<TrackerStatus | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [tokens, setTokens] = useState<TrackerToken[]>([]);
-  const [os, setOs] = useState<Os>(detectOs);
+  const [connectToken, setConnectToken] = useState<StoredConnectToken | null>(null);
+  const [deviceToken, setDeviceToken] = useState<string | null>(null);
+  const [addingDevice, setAddingDevice] = useState(false);
+  const [os, setOs] = useState<InstallOs>(detectOs);
   const [target, setTarget] = useState<ConnectPromptTarget>("claude-code");
-  const [creating, setCreating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [manual, setManual] = useState(false);
+  const [copied, setCopied] = useState<Copyable | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [celebrating, setCelebrating] = useState(false);
+  const [seen, setSeen] = useState(() => (userId ? hasSeenTracking(userId) : false));
+
+  const phase: Phase = status ? (status.connected ? "connected" : "waiting") : "loading";
+  const connected = phase === "connected";
 
   const refresh = useCallback(async () => {
     try {
-      const s = await usersApi.trackerStatus();
-      setStatus((prev) => {
-        if (!prev?.connected && s.connected) onConnected?.();
-        return s;
-      });
+      setStatus(await usersApi.trackerStatus());
     } catch {
       /* transient — keep the last known state */
     }
-  }, [onConnected]);
+  }, []);
 
   useEffect(() => {
+    if (userId) dropForeignConnectTokens(userId);
     void refresh();
-    if (variant === "full") {
-      usersApi.listTrackerTokens().then((r) => setTokens(r.tokens)).catch(() => undefined);
-    }
-  }, [refresh, variant]);
+  }, [userId, refresh]);
 
-  // Poll only while disconnected: the user is watching this card, waiting.
+  // onConnected: the first time a connection is observed (a live flip, or an
+  // account that was already connected when this mounted).
+  const firedRef = useRef(false);
   useEffect(() => {
-    if (status?.connected) return;
-    const id = window.setInterval(refresh, 5000);
+    if (!connected || firedRef.current) return;
+    firedRef.current = true;
+    onConnected?.();
+  }, [connected, onConnected]);
+
+  // Track whether this mount saw the flip itself (for the celebration gate below).
+  const sawFlipRef = useRef(false);
+  const prevPhaseRef = useRef<Phase>("loading");
+  useEffect(() => {
+    if (prevPhaseRef.current === "waiting" && phase === "connected") sawFlipRef.current = true;
+    prevPhaseRef.current = phase;
+  }, [phase]);
+
+  // Poll every 5s while waiting: the user is watching this card.
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    const id = window.setInterval(() => void refresh(), POLL_WAITING_MS);
     return () => window.clearInterval(id);
-  }, [status?.connected, refresh]);
+  }, [phase, refresh]);
 
-  // Level-triggered on purpose (see CELEBRATED_KEY comment above) — fires once
-  // per session the moment `connected` is true and hasn't been shown yet.
+  // Poll every 10s while connected and the panel is actually on screen (tab
+  // visible, not dismissed). A dismissed Home banner relies on realtime alone.
+  const panelVisible = connected && !(isBanner && seen);
   useEffect(() => {
-    if (!status?.connected) return;
-    if (sessionStorage.getItem(CELEBRATED_KEY)) return;
-    sessionStorage.setItem(CELEBRATED_KEY, "1");
-    setCelebrating(true);
-  }, [status?.connected]);
+    if (!panelVisible) return;
+    let id: number | undefined;
+    const stop = () => {
+      if (id !== undefined) window.clearInterval(id);
+      id = undefined;
+    };
+    const sync = () => {
+      stop();
+      if (document.visibilityState === "visible") id = window.setInterval(() => void refresh(), POLL_CONNECTED_MS);
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [panelVisible, refresh]);
 
+  // Realtime: the server pushes the viewer's own presence too. Merge it at once
+  // (status word / activity), then pull the full status for sources and devices.
   const me = user ? presences.get(user.username) : undefined;
-  const celebrateBody =
-    me?.status === "active" && me.activity
-      ? `${me.activity.projectAlias} · ${toolLabel(me.activity.tool)} · ${elapsedShort(me.activity.startedAt)}`
-      : "Waiting for the first heartbeat.";
-
-  const createToken = useCallback(async () => {
-    setCreating(true);
-    setError(null);
-    try {
-      const label = `${os === "windows" ? "Windows" : "Mac"} · ${formatShortDate(new Date().toISOString())}`;
-      const res = await usersApi.createTrackerToken(label);
-      setToken(res.token);
-      if (variant === "full") {
-        const list = await usersApi.listTrackerTokens();
-        setTokens(list.tokens);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create a token");
-    } finally {
-      setCreating(false);
-    }
-  }, [os, variant]);
-
-  // compact/banner: skip the button — mint the token the moment we know the
-  // tracker isn't connected, so step 2's prompt is ready to copy immediately.
   useEffect(() => {
-    if (variant === "full" || !status || status.connected || token || creating) return;
-    void createToken();
-  }, [variant, status, token, creating, createToken]);
+    if (!me) return;
+    setStatus((prev) =>
+      prev
+        ? { ...prev, connected: me.status !== "offline", presence: { status: me.status, activity: me.activity } }
+        : prev
+    );
+    void refresh();
+  }, [me, refresh]);
 
-  // Home only: hide once connected, with an exit transition instead of vanishing.
-  const showCard = variant !== "banner" || !status?.connected;
-  const { render: renderCard, closing: cardClosing } = useExitTransition(showCard, 260);
+  // Success modal — once per session, on the flip (or on first landing while
+  // the explainer hasn't been seen yet).
+  useEffect(() => {
+    if (!connected) return;
+    if (!sawFlipRef.current && userId && hasSeenTracking(userId)) return;
+    try {
+      if (sessionStorage.getItem(CELEBRATED_KEY)) return;
+      sessionStorage.setItem(CELEBRATED_KEY, "1");
+    } catch {
+      /* private mode — still celebrate this once */
+    }
+    setCelebrating(true);
+  }, [connected, userId]);
 
-  const command = useMemo(() => (token ? installCommand(os, token) : null), [os, token]);
+  // Token minted once: reuse the stored one when the server still lists it as
+  // never used, otherwise mint (revoking the user's other never-used tokens).
+  // ensureConnectToken dedupes in-flight calls, so StrictMode's double effect
+  // and a Home → Settings hop share one mint.
+  useEffect(() => {
+    if (!userId || phase !== "waiting" || connectToken) return;
+    let cancelled = false;
+    ensureConnectToken(userId, deviceLabel(detectOs()))
+      .then((t) => {
+        if (!cancelled) setConnectToken(t);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not create a token");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, phase, connectToken]);
+
+  // Once the tracker has used the stored token, forget it — the next connect
+  // card (if ever) starts from a fresh one instead of a token already in use.
+  useEffect(() => {
+    if (!userId || !status) return;
+    const stored = readStoredConnectToken(userId);
+    if (!stored) return;
+    const device = status.devices.find((d) => d.id === stored.tokenId);
+    if (device?.lastUsedAt) clearStoredConnectToken(userId);
+  }, [userId, status]);
+
+  useEffect(() => {
+    if (connected) {
+      setConnectToken(null);
+      setManual(false);
+    }
+  }, [connected]);
+
   const prompt = useMemo(
-    () => (token ? buildConnectPrompt(target, token, API_BASE, WEB_URL) : null),
-    [token, target]
+    () => (connectToken ? buildConnectPrompt(target, connectToken.token, API_BASE, WEB_URL) : null),
+    [connectToken, target]
   );
 
-  const copy = async (text: string) => {
+  const copy = async (what: Copyable, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
+      setCopied(what);
+      window.setTimeout(() => setCopied(null), 1600);
     } catch {
       setError("Copy failed — select the text and copy it manually.");
     }
   };
 
   const revoke = async (id: string) => {
-    await usersApi.revokeTrackerToken(id);
-    setTokens((prev) => prev.filter((t) => t.id !== id));
+    setError(null);
+    try {
+      await usersApi.revokeTrackerToken(id);
+      if (userId && readStoredConnectToken(userId)?.tokenId === id) {
+        clearStoredConnectToken(userId);
+        setConnectToken(null);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not revoke that device");
+    }
   };
 
-  if (!status) {
+  // "Add another device" — a genuinely new token; never replaces anything.
+  const addDevice = async () => {
+    setAddingDevice(true);
+    setError(null);
+    try {
+      const res = await usersApi.createTrackerToken(deviceLabel(os));
+      setDeviceToken(res.token);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create a token");
+    } finally {
+      setAddingDevice(false);
+    }
+  };
+
+  const dismiss = () => {
+    if (userId) markTrackingSeen(userId);
+    setSeen(true);
+  };
+
+  // Exit transitions: the card leaves first, then the panel reveals in its place.
+  const showCard = phase === "waiting";
+  const { render: renderCard, closing: cardClosing } = useExitTransition(showCard, EXIT_MS);
+  const showPanel = connected && !(isBanner && seen) && !renderCard;
+  const { render: renderPanel, closing: panelClosing } = useExitTransition(showPanel, EXIT_MS);
+
+  const now = useNow(variant === "full" && phase === "waiting", 5000);
+
+  const celebrateBody =
+    status?.presence.status === "active" && status.presence.activity
+      ? presenceLine(status.presence.activity)
+      : me?.status === "active" && me.activity
+        ? presenceLine(me.activity)
+        : "Waiting for the first heartbeat.";
+
+  const modal = <ConnectSuccessModal open={celebrating} body={celebrateBody} onClose={() => setCelebrating(false)} />;
+
+  if (phase === "loading") {
+    if (isBanner && seen) return modal;
     return (
-      <div
-        className={cx(styles.card, styles.cardLoading, variant === "banner" && styles.bannerSpacing)}
-        aria-busy="true"
-      >
-        <Skeleton width="40%" height={14} />
-        <Skeleton width="90%" height={12} />
-        <Skeleton width="70%" height={12} />
-      </div>
+      <>
+        <TrackingStatus
+          variant={variant === "full" ? "settings" : "home"}
+          status={null}
+          className={cx(isBanner && styles.bannerSpacing)}
+        />
+        {modal}
+      </>
     );
   }
 
-  const osSegment = (
-    <div className={styles.seg} role="tablist" aria-label="Operating system">
-      {(["mac", "windows"] as Os[]).map((o) => (
-        <button
-          key={o}
-          type="button"
-          role="tab"
-          aria-selected={os === o}
-          className={cx(styles.segBtn, os === o && styles.segBtnOn)}
-          onClick={() => setOs(o)}
-        >
-          {o === "mac" ? "macOS / Linux" : "Windows"}
-        </button>
-      ))}
-    </div>
-  );
-
-  const commandBlock = (
-    <div className={styles.cmdRow}>
-      <code className={styles.cmd}>{command ?? installCommand(os, "<your-token>")}</code>
-      <Button size="sm" variant="secondary" onClick={() => command && copy(command)} disabled={!command}>
-        {copied ? "Copied" : "Copy"}
-      </Button>
-    </div>
-  );
-
-  if (!renderCard) {
-    return (
-      <ConnectSuccessModal open={celebrating} body={celebrateBody} onClose={() => setCelebrating(false)} />
-    );
-  }
+  const targetLabel = TARGETS.find((t) => t.id === target)?.label ?? "your tool";
 
   return (
     <>
-    <div
-      className={cx(
-        styles.card,
-        status.connected && styles.cardConnected,
-        variant === "banner" && styles.bannerSpacing,
-        variant === "banner" && (cardClosing ? "leave" : "reveal")
-      )}
-    >
-      <div className={styles.head}>
-        <span className={cx(styles.dot, status.connected && styles.dotLive)} aria-hidden="true" />
-        <div className={styles.headText}>
-          <strong className={styles.headTitle}>
-            {status.connected ? "Tracker connected" : "Connect your tools"}
-          </strong>
-          <span className={styles.headSub}>
-            {status.connected
-              ? status.tools.length
-                ? `Seeing ${status.tools.map(toolLabel).join(", ")}`
-                : "Waiting for your first session…"
-              : variant !== "full"
-                ? "Paste a prompt into your AI tool — no terminal needed."
-                : "A tiny local tracker turns your AI sessions into status, time and token stats."}
-          </span>
-        </div>
-      </div>
-
-      {!status.connected && variant !== "full" && (
-        <>
-          <ol className={styles.steps}>
-            <li>
-              <span className={styles.stepNo}>1</span>
-              <div className={styles.stepBody}>
-                <span>Where are you working?</span>
-                <div className={styles.seg} role="tablist" aria-label="AI tool">
-                  {TARGETS.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={target === t.id}
-                      className={cx(styles.segBtn, target === t.id && styles.segBtnOn)}
-                      onClick={() => setTarget(t.id)}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </li>
-            <li className={cx(!prompt && styles.stepMuted)}>
-              <span className={styles.stepNo}>2</span>
-              <div className={styles.stepBody}>
-                <span>Paste this into {TARGETS.find((t) => t.id === target)?.label}</span>
-                {prompt ? (
-                  <div className={styles.promptWrap}>
-                    <pre className={styles.prompt}>{prompt}</pre>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className={styles.copyPrompt}
-                      onClick={() => copy(prompt)}
-                    >
-                      <Icon name={copied ? "check" : "copy"} size={13} />
-                      {copied ? "Copied" : "Copy"}
-                    </Button>
-                  </div>
-                ) : (
-                  <Skeleton height={54} width="100%" />
-                )}
-              </div>
-            </li>
-            <li className={cx(!prompt && styles.stepMuted)}>
-              <span className={styles.stepNo}>3</span>
-              <div className={styles.stepBody}>
-                <span>Keep working — this flips to Connected on the first heartbeat.</span>
-                {prompt && (
-                  <span className={styles.waiting}>
-                    <span className={styles.pulse} aria-hidden="true" /> Listening…
-                  </span>
-                )}
-              </div>
-            </li>
-          </ol>
-        </>
-      )}
-
-      {!status.connected && variant === "full" && (
-        <>
-          <ol className={styles.steps}>
-            <li>
-              <span className={styles.stepNo}>1</span>
-              <div className={styles.stepBody}>
-                <span>Create a device token</span>
-                {token ? (
-                  <code className={styles.token}>{token}</code>
-                ) : (
-                  <div>
-                    <Button size="sm" onClick={createToken} disabled={creating}>
-                      {creating ? "Creating…" : "Create token"}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </li>
-            <li className={cx(!token && styles.stepMuted)}>
-              <span className={styles.stepNo}>2</span>
-              <div className={styles.stepBody}>
-                <div className={styles.osRow}>
-                  <span>Run this in your terminal</span>
-                  {osSegment}
-                </div>
-                {commandBlock}
-                <span className={styles.hint}>Needs Node.js 18+. Nothing else to install.</span>
-              </div>
-            </li>
-            <li className={cx(!token && styles.stepMuted)}>
-              <span className={styles.stepNo}>3</span>
-              <div className={styles.stepBody}>
-                <span>Keep working — this card flips to Connected on the first heartbeat.</span>
-                {token && (
-                  <span className={styles.waiting}>
-                    <span className={styles.pulse} aria-hidden="true" /> Listening…
-                  </span>
-                )}
-              </div>
-            </li>
-          </ol>
-
-          <div className={styles.tools}>
-            {SUPPORTED.map((t) => (
-              <div key={t.id} className={styles.tool}>
-                <span className={styles.toolName}>{t.name}</span>
-                <span className={styles.toolSees}>{t.sees}</span>
-              </div>
-            ))}
+      {renderCard && (
+        <Card
+          className={cx(styles.card, isBanner && styles.bannerSpacing, cardClosing ? "leave" : "reveal")}
+          aria-busy={!connectToken}
+        >
+          <div className={styles.head}>
+            <span className={cx(styles.dot, cardClosing && styles.dotLive)} aria-hidden="true" />
+            <div className={styles.headText}>
+              <strong className={styles.title}>Connect your tools</strong>
+              <span className={styles.sub}>Paste one prompt into your AI tool. No terminal needed.</span>
+            </div>
           </div>
-          <p className={styles.privacy}>
-            Only metadata leaves your machine: tool, model, project name, timestamps, token counts.
-            Never code, prompts or diffs.
-          </p>
-        </>
-      )}
 
-      {status.connected && variant === "full" && (
-        <div className={styles.tokens}>
-          <span className={styles.tokensTitle}>Devices</span>
-          {tokens.length === 0 ? (
-            <span className={styles.hint}>No active tokens.</span>
-          ) : (
-            tokens.map((t) => (
-              <div key={t.id} className={styles.tokenRow}>
-                <span>{t.label}</span>
-                <span className={styles.hint}>
-                  {t.lastUsedAt ? `seen ${formatDateTime(t.lastUsedAt)}` : "never used"}
-                </span>
-                <button type="button" className={styles.revoke} onClick={() => revoke(t.id)}>
-                  Revoke
-                </button>
-              </div>
-            ))
+          <Segment label="AI tool" options={TARGETS} value={target} onChange={setTarget} />
+
+          <div className={styles.promptBlock}>
+            <div className={styles.promptHead}>
+              <span className={styles.promptLabel}>Paste into {targetLabel}</span>
+              <Button size="sm" onClick={() => prompt && copy("prompt", prompt)} disabled={!prompt}>
+                <Icon name={copied === "prompt" ? "check" : "copy"} size={13} />
+                {copied === "prompt" ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            {prompt ? (
+              <pre className={styles.prompt}>{prompt}</pre>
+            ) : (
+              <Skeleton variant="block" height={168} width="100%" />
+            )}
+          </div>
+
+          <div className={styles.foot}>
+            <span className={cx(styles.waiting, !prompt && styles.waitingMuted)}>
+              <span className={styles.pulse} aria-hidden="true" /> Listening…
+            </span>
+            <button
+              type="button"
+              className={styles.link}
+              aria-expanded={manual}
+              disabled={!connectToken}
+              onClick={() => setManual((v) => !v)}
+            >
+              {manual ? "Hide manual setup" : "Do it manually"}
+            </button>
+          </div>
+
+          {manual && connectToken && (
+            <ManualInstall token={connectToken.token} os={os} onOs={setOs} copied={copied} onCopy={copy} />
           )}
-          <div className={styles.addRow}>
-            <Button size="sm" variant="secondary" onClick={createToken} disabled={creating}>
-              Add another device
-            </Button>
-            {token && osSegment}
-          </div>
-          {token && <code className={styles.token}>{token}</code>}
-          {token && commandBlock}
-        </div>
+
+          {variant === "full" && status && (
+            <>
+              <p className={styles.privacy}>
+                Works with Claude Code, Codex CLI, Cursor, VS Code and Quadcode. Leaves your machine: tool, model,
+                project name, timestamps, token counts. Never code, prompts or diffs.
+              </p>
+              <div className={styles.devices}>
+                <span className={styles.label}>Devices</span>
+                <DeviceList devices={status.devices} now={now} onRevoke={revoke} />
+              </div>
+            </>
+          )}
+
+          {error && <p className={styles.error}>{error}</p>}
+        </Card>
       )}
 
-      {error && <p className={styles.error}>{error}</p>}
-    </div>
-    <ConnectSuccessModal
-      open={celebrating}
-      body={celebrateBody}
-      onClose={() => setCelebrating(false)}
-    />
+      {renderPanel && status && (
+        <TrackingStatus
+          variant={variant === "full" ? "settings" : "home"}
+          status={status}
+          className={cx(isBanner && styles.bannerSpacing, panelClosing ? "leave" : "reveal")}
+          onDismiss={isBanner ? dismiss : undefined}
+          settingsHref={isBanner ? "/settings#tracker" : undefined}
+          onRevoke={revoke}
+          onAddDevice={variant === "full" ? addDevice : undefined}
+          addingDevice={addingDevice}
+          addDeviceBlock={
+            deviceToken ? (
+              <ManualInstall token={deviceToken} os={os} onOs={setOs} copied={copied} onCopy={copy} />
+            ) : undefined
+          }
+          error={error}
+        />
+      )}
+
+      {modal}
     </>
   );
 }

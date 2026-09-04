@@ -3,9 +3,24 @@
   font-weight: 500;
   font-size: 28px;
   color: var(--vh-text);
-  margin: 0 0 var(--vh-space-5);
+  margin: 0;
 }
 
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: var(--vh-space-5);
+}
+.count {
+  font-size: 13px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One 24px gap everywhere: requests → grid, between columns, between stacked
+ * aside sections. Sections carry no margins of their own. */
 .grid {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -19,18 +34,29 @@
   }
 }
 
-.sectionTitle {
-  font-family: var(--vh-font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--vh-text-faint);
-  margin: 0 0 var(--vh-space-2);
+.section {
+  min-width: 0;
+}
+.requests {
+  margin-bottom: var(--vh-space-4);
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-4);
+  min-width: 0;
 }
 
 .card {
   padding: 0;
+}
+/* Divided friend rows: they own their padding; corners clip the hover tint. */
+.listCard {
+  overflow: hidden;
+}
+.cardHot {
+  border-color: var(--vh-text-muted);
 }
 
 .empty {
@@ -53,100 +79,23 @@
   color: var(--vh-text-dim);
 }
 
-.requestRow {
-  display: flex;
-  align-items: center;
-  gap: var(--vh-space-3);
-  padding: var(--vh-space-3);
-  border-bottom: 1px solid var(--vh-border);
-}
-
-.requestRow:last-child {
-  border-bottom: none;
-}
-
-.requestName {
-  flex: 1;
-  font-family: var(--vh-font-sans);
-  font-size: 14px;
-  color: var(--vh-text);
-}
-
-.requestActions {
-  display: flex;
-  gap: var(--vh-space-2);
-}
-
-.addForm {
-  display: flex;
-  gap: var(--vh-space-2);
-  margin-bottom: var(--vh-space-4);
-}
-
-.side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vh-space-4);
-}
-
-.formMessage {
-  font-family: var(--vh-font-sans);
-  font-size: 13px;
-}
-
 .unfriendBtn {
+  padding: 0;
   background: none;
   border: none;
   color: var(--vh-text-faint);
   cursor: pointer;
+  font-family: var(--vh-font-sans);
   font-size: 12px;
+  line-height: 16px;
+  transition: color var(--dur-press) var(--ease-out);
 }
 
 .unfriendBtn:hover {
-  color: var(--vh-accent-hover);
+  color: var(--vh-text);
 }
 
-/* ---- round 3: people finder + request rows ---- */
-.head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.head .title {
-  margin: 0;
-}
-.count {
-  font-size: 13px;
-  color: var(--vh-text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.section + .section {
-  margin-top: 20px;
-}
-.section {
-  margin-bottom: 20px;
-}
-.pill {
-  display: inline-grid;
-  place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  margin-left: 6px;
-  border-radius: var(--vh-radius-pill);
-  background: var(--vh-text);
-  color: var(--vh-bg);
-  font-size: 11.5px;
-  font-weight: 600;
-  vertical-align: middle;
-  font-variant-numeric: tabular-nums;
-}
-.cardHot {
-  border-color: var(--vh-text-muted);
-}
-
+/* ---- People finder + request rows (unchanged shape) ---- */
 .row {
   display: flex;
   align-items: center;
@@ -185,6 +134,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Role suffix ellipsizes before the buttons do — the 96px is their reserve. */
 .rowMeta {
   display: block;
   max-width: calc(100% - 96px);

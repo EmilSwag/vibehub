@@ -1,6 +1,10 @@
+/* The md wrap is a full-width cell in the hero's action column (it shares its
+ * width with the Edit-profile button), so the ring is centred inside it while the
+ * breakdown panel hangs off the column's right edge. */
 .wrap-md {
   position: relative;
   display: flex;
+  justify-content: center;
   flex: none;
 }
 
@@ -26,7 +30,15 @@
 }
 .trigger:focus-visible {
   outline: 2px solid var(--vh-focus-ring);
-  outline-offset: 2px;
+  outline-offset: 4px;
+}
+
+/* Non-interactive md badge (level known, xp not): same stack, no button. */
+.static {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
 }
 
 .ring-md {
@@ -56,23 +68,26 @@
 
 .panel {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + var(--vh-space-2));
   right: 0;
   z-index: 20;
   width: 176px;
-  padding: 10px 12px;
+  padding: var(--vh-space-2) var(--vh-space-3);
   border: 1px solid var(--vh-border);
   border-radius: var(--vh-radius-md);
   background: var(--vh-surface);
-  box-shadow: var(--vh-shadow-card);
+  box-shadow: var(--vh-shadow-pop);
 }
 
 .row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  padding: 5px 0;
+  gap: var(--vh-space-3);
+  padding: 6px 0;
+  font-family: var(--vh-font-sans);
   font-size: 12.5px;
+  line-height: 16px;
 }
 .row + .row {
   border-top: 1px solid var(--vh-border);

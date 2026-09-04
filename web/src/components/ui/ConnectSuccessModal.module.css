@@ -1,3 +1,26 @@
+/*
+ * Keyframes are declared locally on purpose: CSS Modules hash animation names,
+ * so `animation: vh-fade-up` in a module would point at a keyframe that doesn't
+ * exist (motion.css's global ones keep their unhashed names) and never play.
+ * Same shapes as motion.css — fade, fade-up, pop — at the modal's own durations.
+ */
+
+@keyframes csm-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes csm-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes csm-pop {
+  0% { transform: scale(0.9); }
+  60% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
 .overlay {
   position: fixed;
   inset: 0;
@@ -6,7 +29,7 @@
   place-items: center;
   background: rgba(0, 0, 0, 0.45);
   padding: var(--vh-space-4);
-  animation: vh-fade-in var(--dur-enter) var(--ease-out) both;
+  animation: csm-fade-in var(--dur-enter) var(--ease-out) both;
 }
 
 .dialog {
@@ -17,9 +40,8 @@
   box-shadow: var(--vh-shadow-pop);
   padding: var(--vh-space-4);
   text-align: center;
-  /* Reuses the shared fade-up keyframe (styles/motion.css) at the spec'd 320ms —
-   * the shared `.reveal` utility is 560ms (page-reveal), too slow for a modal. */
-  animation: vh-fade-up var(--dur-enter) var(--ease-out) both;
+  /* 320ms enter — the shared `.reveal` utility is 560ms (page-reveal), too slow for a modal. */
+  animation: csm-fade-up var(--dur-enter) var(--ease-out) both;
 }
 
 .check {
@@ -31,8 +53,7 @@
   border-radius: 50%;
   background: var(--vh-accent);
   color: var(--vh-on-accent);
-  /* Reuses the shared pop keyframe at 200ms (spec) — `.pop` utility is 320ms. */
-  animation: vh-pop var(--dur-state) var(--ease-spring) both;
+  animation: csm-pop var(--dur-state) var(--ease-spring) both;
 }
 
 .title {

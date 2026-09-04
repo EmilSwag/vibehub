@@ -1,10 +1,20 @@
+/* The shell paints the tokenized ground itself so a theme switch repaints in one
+ * frame with body (tokens.css) — no white flash between the two. */
 .page {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--vh-bg);
+  color: var(--vh-text);
 }
 
 .content {
   max-width: 1100px;
   margin: 0 auto;
   padding: var(--vh-space-5) var(--vh-space-4);
+}
+
+@media (max-width: 640px) {
+  .content {
+    padding: var(--vh-space-4) var(--vh-space-3);
+  }
 }

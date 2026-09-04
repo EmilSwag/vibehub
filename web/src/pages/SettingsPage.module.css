@@ -10,6 +10,11 @@
   margin-bottom: var(--vh-space-5);
 }
 
+/* Anchor target for /settings#tracker — keeps the heading off the top edge. */
+.tracker {
+  scroll-margin-top: var(--vh-space-4);
+}
+
 .sectionTitle {
   font-family: var(--vh-font-sans);
   font-size: 13px;
@@ -134,4 +139,68 @@
   background: var(--vh-text);
   border-color: var(--vh-text);
   color: var(--vh-bg);
+}
+
+/* appearance — 3-way segmented control. Same look as ConnectTools .seg, 36px
+ * tall (30px buttons + 2px padding + 1px border), ink thumb slides between
+ * equal columns (transform only). */
+.seg {
+  --seg-index: 0;
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(88px, 1fr);
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+}
+.segThumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 3);
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-text);
+  transform: translateX(calc(var(--seg-index) * 100%));
+  transition: transform var(--dur-state) var(--ease-out);
+  pointer-events: none;
+}
+.segBtn {
+  position: relative;
+  z-index: 1;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--vh-radius-pill);
+  background: transparent;
+  color: var(--vh-text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur-state) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+.segBtn:hover {
+  color: var(--vh-text);
+}
+.segBtn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.segBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+}
+.segBtnOn,
+.segBtnOn:hover {
+  color: var(--vh-bg);
+}
+.hint {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--vh-text-faint);
 }
