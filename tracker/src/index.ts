@@ -13,6 +13,7 @@ import { DEFAULT_API_URL, deleteConfig, readConfig, requireConfig, writeConfig }
 import { daemonStatus, runForeground, startDaemon, stopDaemon } from "./daemon";
 import { HIDDEN } from "./projectAlias";
 import { readStatus, writeOfflineStatus } from "./statusFile";
+import { describeSources } from "./toolLabels";
 import type { TrackerConfig } from "./types";
 
 const CONFIG_PATH_LABEL = "~/.vibehub/config.json";
@@ -125,6 +126,17 @@ program
     }
     console.log(`Updated: ${status.updatedAt}`);
 
+    // What the daemon has actually observed in the last 10 minutes — every tool
+    // and every raw model id — so "the profile shows the wrong model" can be
+    // checked against the source instead of guessed at.
+    const seeingCutoff = Date.now() - 10 * 60 * 1000;
+    const seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
+    if (seeing.length > 0) {
+      console.log(`Seeing:  ${describeSources(seeing)}`);
+    } else if (running) {
+      console.log("Seeing:  nothing in the last 10 min (no AI tool open, no Claude Code / Codex log activity)");
+    }
+
     // Round 5: a rejected or never-yet-successful token used to fail completely
     // silently — the daemon "ran," the card just never flipped, with nothing
     // anywhere saying why. `authRejected` is set/cleared on every send attempt
@@ -145,16 +157,17 @@ program
 
 program
   .command("stop")
-  .description("stop the running tracker daemon")
-  .action(() => {
-    stopDaemon();
+  .description("stop the running tracker daemon (waits for it to end the session cleanly)")
+  .action(async () => {
+    await stopDaemon();
   });
 
 program
   .command("logout")
   .description(`stop the daemon and remove ${CONFIG_PATH_LABEL}`)
-  .action(() => {
-    stopDaemon();
+  .action(async () => {
+    // Stop first: its fallback session_end needs config.json to still exist.
+    await stopDaemon();
     deleteConfig();
     writeOfflineStatus();
     console.log(`Logged out. Removed ${CONFIG_PATH_LABEL}.`);
@@ -168,4 +181,7 @@ program
     runForeground(config);
   });
 
-program.parse();
+program.parseAsync().catch((err) => {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+});

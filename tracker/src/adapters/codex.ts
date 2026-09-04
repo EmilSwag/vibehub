@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { JsonlTailer } from "./jsonlTail";
 import type { Adapter, Observation } from "./types";
+import { UsageAccumulator, asCount, normalizeModel } from "./usage";
 
 /**
  * OpenAI Codex CLI rollouts: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
@@ -12,6 +13,8 @@ import type { Adapter, Observation } from "./types";
  *       "total_token_usage":{"input_tokens","cached_input_tokens","output_tokens"},
  *       "last_token_usage":{...}}}}
  * token_count carries running totals, so we diff against the last total per file.
+ * Each delta is attributed to the model named by the latest `turn_context`
+ * (null until one has been seen), so a mid-session model switch is booked correctly.
  */
 interface CodexLine {
   type?: string;
@@ -43,8 +46,7 @@ export class CodexAdapter implements Adapter {
 
     for (const file of this.tailer.recentFiles(this.root, this.recentWindowMs)) {
       const meta = this.fileMeta.get(file) ?? { cwd: null, model: null, totalIn: -1, totalOut: -1 };
-      let input = 0;
-      let output = 0;
+      const usage = new UsageAccumulator();
       let lastTs = 0;
 
       for (const raw of this.tailer.readNewLines(file)) {
@@ -54,21 +56,24 @@ export class CodexAdapter implements Adapter {
         const p = line.payload;
         if (!p) continue;
         if (p.cwd) meta.cwd = p.cwd;
-        if (p.model) meta.model = p.model;
+        const model = normalizeModel(p.model);
+        if (model !== null) meta.model = model;
 
         if (line.type === "event_msg" && p.type === "token_count" && p.info) {
           const total = p.info.total_token_usage;
           if (total) {
-            const tin = (total.input_tokens ?? 0) + (total.cached_input_tokens ?? 0);
-            const tout = total.output_tokens ?? 0;
+            const tin = asCount(total.input_tokens) + asCount(total.cached_input_tokens);
+            const tout = asCount(total.output_tokens);
             if (meta.totalIn >= 0) {
-              input += Math.max(0, tin - meta.totalIn);
-              output += Math.max(0, tout - meta.totalOut);
+              usage.add(meta.model, Math.max(0, tin - meta.totalIn), Math.max(0, tout - meta.totalOut));
             } else if (p.info.last_token_usage) {
               // First total we see for this file: count only the latest turn.
               const last = p.info.last_token_usage;
-              input += (last.input_tokens ?? 0) + (last.cached_input_tokens ?? 0);
-              output += last.output_tokens ?? 0;
+              usage.add(
+                meta.model,
+                asCount(last.input_tokens) + asCount(last.cached_input_tokens),
+                asCount(last.output_tokens)
+              );
             }
             meta.totalIn = tin;
             meta.totalOut = tout;
@@ -83,8 +88,9 @@ export class CodexAdapter implements Adapter {
         projectHint: null,
         model: meta.model,
         lastActivityAt: Math.max(this.tailer.mtime(file), lastTs),
-        tokensInputDelta: input,
-        tokensOutputDelta: output,
+        tokensInputDelta: usage.totalInput,
+        tokensOutputDelta: usage.totalOutput,
+        usage: usage.toList(),
         confidence: "activity",
       });
     }

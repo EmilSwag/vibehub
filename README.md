@@ -30,9 +30,11 @@ your live status shows up on their home screen.
 ## Status
 
 Server, web and tracker are feature-complete against
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and deployed. `scripts/smoke.js` runs 73
-end-to-end checks over the whole REST surface. The macOS menu-bar companion (`macos/`)
-is scaffolded but not yet built.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and deployed. `scripts/smoke.js` runs 123
+end-to-end assertions (53 invariant checks + 70 status checks) over the whole REST
+surface, including heartbeat v2 `usage[]`, null→known model refinement and the
+minted-once tracker-token flow. The macOS menu-bar companion (`macos/`) is scaffolded
+but not yet built.
 
 ## Monorepo layout
 
@@ -71,9 +73,15 @@ cp web/.env.example web/.env                  # VITE_API_URL=http://localhost:40
 npm run dev:web                               # http://localhost:5173  → "Dev sign in" as ada
 
 # end-to-end API check against a running server
-node scripts/smoke.js http://localhost:4000   # 73 checks, exits non-zero on failure
+node scripts/smoke.js http://localhost:4000   # exits non-zero on failure
 node scripts/fake-heartbeat.js linus my-proj  # make a seeded friend look "coding right now"
 ```
+
+> **After pulling schema changes** (anything under `server/prisma/`), re-run
+> `npm run db:generate --workspace server` **and** `npm run db:dev --workspace server`
+> before starting the server (Postgres: `npm run db:migrate --workspace server`).
+> A `dev.db` or generated client that lags the schema does not fail at boot — health
+> stays green — it fails at query time as HTTP 500s (`no such column …`).
 
 ### Tracker (your machine → your friends' home screen)
 

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { friendsApi, presenceApi } from "../lib/api";
+import { friendsApi, presenceApi, usersApi } from "../lib/api";
 import { VibeHubSocket } from "../lib/ws";
 import { ToastStack } from "../components/ui/Toast";
 import { useAuth } from "./AuthContext";

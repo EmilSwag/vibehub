@@ -2,7 +2,7 @@ import type { User } from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../db";
 import { asyncHandler, HttpError } from "../lib/http-error";
-import { utcDay } from "../lib/sessions";
+import { LEGACY_UNKNOWN_MODEL, normalizeModel, utcDay } from "../lib/sessions";
 
 // Per-user stats rollup + friend compare — ARCHITECTURE.md §5.6. Closed sessions live
 // in DailyStat (§2.10); sessions still open are added on top so the numbers move while
@@ -49,12 +49,19 @@ export async function computeStats(user: User, rangeDays: number) {
     buckets.set(key, bucket);
   };
 
-  for (const row of dailyStats) add(row.model, row.tool, row.tokensInput, row.tokensOutput, row.activeSeconds);
+  // Both loops route the model through normalizeModel() ?? "unknown": DailyStat rows
+  // written before ingestion-time normalization may still hold a sentinel such as
+  // "<synthetic>", and those must aggregate into the per-tool "unknown" bucket rather
+  // than surface as a model of their own. Shape is unchanged — byModel keeps the
+  // "unknown" literal, which the web maps to "no model".
+  for (const row of dailyStats) {
+    add(normalizeModel(row.model) ?? LEGACY_UNKNOWN_MODEL, row.tool, row.tokensInput, row.tokensOutput, row.activeSeconds);
+  }
   for (const session of openSessions) {
     const elapsed = Math.max(0, Math.round((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 1000));
     // Match the DailyStat "unknown" bucket (foldIntoDailyStat) so an open no-model
     // session and its later-folded self aggregate into the same row.
-    add(session.model ?? "unknown", session.tool, session.tokensInput, session.tokensOutput, elapsed);
+    add(normalizeModel(session.model) ?? LEGACY_UNKNOWN_MODEL, session.tool, session.tokensInput, session.tokensOutput, elapsed);
   }
 
   const byModel = [...buckets.values()].sort(

@@ -27,13 +27,47 @@ export interface SuggestedUser extends User {
   level: number;
 }
 
-/** GET /users/me/tracker — is the local tracker reporting for this account? */
+/** One (tool, model) pair the tracker has reported in the last 7 days. */
+export interface TrackerSource {
+  /** Tool id as the tracker sends it, e.g. "claude-code". */
+  tool: string;
+  /** Raw model id ("claude-fable-5-1"); null for presence-only tools — the server
+   * folds "<synthetic>"/""/"unknown" to null. Render via humanizeModel(). */
+  model: string | null;
+  lastSeenAt: string;
+  tokensToday: number;
+  tokens7d: number;
+  activeSecondsToday: number;
+}
+
+/** A non-revoked tracker token, i.e. one machine the tracker is installed on. */
+export interface TrackerDevice {
+  id: string;
+  label: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+/** GET /users/me/tracker (v2) — is the local tracker reporting for this account,
+ * and from where? v1 fields are kept verbatim; the v2 additions are what the
+ * Settings/Home connect blocks render. usersApi.trackerStatus fills v2 defaults
+ * when an older server omits them, so every field is safe to read. */
 export interface TrackerStatus {
+  /** Heartbeat within SESSION_IDLE_TIMEOUT (presence.status !== "offline"). */
   connected: boolean;
+  /** Last heartbeat of any kind. */
   lastSeenAt: string | null;
   activeTokens: number;
-  /** Tool ids seen in the last 30 days, most recent first (e.g. "claude_code"). */
+  /** Compat: tool ids seen recently, most recent first (e.g. "claude-code"). */
   tools: string[];
+  tokenLastUsedAt: string | null;
+  /** How often the tracker is expected to report; the UI can size its own polling on it. */
+  heartbeatIntervalMs: number;
+  /** The viewer's own presence, same shape PresenceBlock takes. */
+  presence: { status: PresenceStatus; activity: Activity | null };
+  /** Every (tool, model) pair seen in the last 7 days, most recently seen first. */
+  sources: TrackerSource[];
+  devices: TrackerDevice[];
 }
 
 export interface LevelBreakdown {
@@ -191,6 +225,7 @@ export interface TrackerToken {
   label: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  createdAt: string;
 }
 
 // ---- WebSocket contract (ARCHITECTURE.md §5.9) ----

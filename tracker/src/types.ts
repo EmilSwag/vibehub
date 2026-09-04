@@ -13,6 +13,13 @@ export interface TrackerConfig {
 
 export type PresenceStatus = "active" | "idle" | "offline";
 
+/** One (tool, model) pair the daemon has seen recently — see `StatusFile.sources`. */
+export interface StatusSource {
+  tool: string;
+  model: string | null;
+  lastSeenAt: string;
+}
+
 export interface StatusFile {
   status: PresenceStatus;
   projectAlias: string | null;
@@ -27,6 +34,13 @@ export interface StatusFile {
    * the daemon queuing rejected heartbeats forever with no visible symptom.
    */
   authRejected?: boolean;
+  /**
+   * Every tool/model the daemon has seen in the last 10 minutes (open editors,
+   * log files with recent lines), most recent first — the "Seeing:" line of
+   * `vibehub-tracker status`, so a wrong model in the profile can be traced to
+   * what the tracker actually observed. Additive; older readers ignore it.
+   */
+  sources?: StatusSource[];
 }
 
 export type HeartbeatEventType =
@@ -34,6 +48,15 @@ export type HeartbeatEventType =
   | "session_start"
   | "session_end"
   | "git_commit";
+
+/** Per-source token attribution carried by heartbeat v2 (see tracker/README.md). */
+export interface HeartbeatUsage {
+  tool: string;
+  /** null = tokens whose model is unknowable ("<synthetic>" lines, presence-only tools). */
+  model: string | null;
+  tokensInputDelta: number;
+  tokensOutputDelta: number;
+}
 
 export interface HeartbeatPayload {
   eventType: HeartbeatEventType;
@@ -45,8 +68,15 @@ export interface HeartbeatPayload {
    * tool is always sent; only the model degrades to null.
    */
   model: string | null;
+  /** Legacy sums over `usage` — still sent so servers without v2 keep counting. */
   tokensInputDelta?: number;
   tokensOutputDelta?: number;
+  /**
+   * Heartbeat v2: precise per-(tool, model) deltas since the previous heartbeat,
+   * nonzero entries only. When present the server books stats from this and
+   * ignores the top-level sums (no double count). Only on `"heartbeat"` events.
+   */
+  usage?: HeartbeatUsage[];
   occurredAt: string;
 }
 
@@ -55,10 +85,4 @@ export interface QueuedEvent {
   payload: HeartbeatPayload;
   apiUrl: string;
   deviceToken: string;
-}
-
-export interface DetectedActivity {
-  tool: string;
-  pid: number;
-  cwd: string | null;
 }

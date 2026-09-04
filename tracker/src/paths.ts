@@ -8,6 +8,8 @@ export const STATUS_PATH = path.join(CONFIG_DIR, "status.json");
 export const QUEUE_PATH = path.join(CONFIG_DIR, "queue.json");
 export const PID_PATH = path.join(CONFIG_DIR, "tracker.pid");
 export const LOG_PATH = path.join(CONFIG_DIR, "daemon.log");
+/** Written by `stop`, watched by the daemon — see stopRequest.ts. */
+export const STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request");
 
 /**
  * Ensures ~/.vibehub exists with 0700 permissions. chmod is a no-op on Windows

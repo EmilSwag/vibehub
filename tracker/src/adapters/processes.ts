@@ -6,11 +6,12 @@ const exec = promisify(execFile);
 
 /**
  * Process-list adapter — knows an AI tool is *open*, and (on Windows) which
- * project from the main window title. Verified on this PC (2026-09):
- *   Cursor.exe   "Экраны … - deephold - Cursor"      → project "deephold"
- *   Code.exe     "● file.ts - myrepo - Visual Studio Code"
- *   genui.exe    "Quadcode AI"                        (Quadcode desktop)
- *   claude.exe   (no window; the Claude Code log adapter carries the detail)
+ * project from the main window title. Verified on this PC (2026-09, via
+ * `Get-Process`; the same names came out of the old `tasklist /v`):
+ *   Cursor       "Экраны … - deephold - Cursor"      → project "deephold"
+ *   Code         "● file.ts - myrepo - Visual Studio Code"
+ *   genui        "Quadcode AI"                        (Quadcode desktop)
+ *   claude       (no window; the Claude Code log adapter carries the detail)
  *
  * Activity heuristic: a changing window title counts as activity; an unchanged
  * title for longer than `idleAfterMs` degrades to presence-only, so an editor
@@ -108,8 +109,12 @@ export class ProcessAdapter implements Adapter {
           projectHint: title ? projectFromTitle(title, rule.titleSuffixes) : null,
           model: null,
           lastActivityAt: changedAt,
+          // The process exists right now, whatever its title last did.
+          observedAt: now,
+          // Presence-only tools burn no tokens we can see; log adapters own usage.
           tokensInputDelta: 0,
           tokensOutputDelta: 0,
+          usage: [],
           confidence: rule.logBacked || idle || !title ? "presence" : "activity",
         });
       }
@@ -127,8 +132,59 @@ interface Proc {
   cwd: string | null;
 }
 
-/** Windows: `tasklist /v /fo csv` — Image Name, PID, …, Window Title (last column). */
+/** Every image name the rules watch (lower-case, no `.exe`) — the title-less pass of the PowerShell listing. */
+const WATCHED_NAMES = [...new Set(RULES.flatMap((r) => r.names))];
+
+/** A hung PowerShell must not stall the tick; on timeout we fall back to tasklist. */
+const POWERSHELL_TIMEOUT_MS = 20_000;
+
+/**
+ * Windows. `tasklist /v` resolves every window title synchronously and was measured
+ * at ~54 s per call on a busy machine — longer than the 30 s tick. One `Get-Process`
+ * call takes well under a second (measured ~0.4 s here) and returns, as compact JSON:
+ *  - every process that owns a main window title (editors, desktop apps — the title
+ *    is what the project name is parsed from), and
+ *  - every process whose image name is one we watch even without a window
+ *    (`claude`/`codex` CLIs, Electron helpers), so log-backed tools still register
+ *    as present.
+ * `ProcessName` carries no `.exe`; a single match comes back as an object, not an
+ * array. tasklist remains the fallback if PowerShell is missing, fails or times out.
+ */
 async function listWindows(): Promise<Proc[]> {
+  try {
+    return await listWindowsPowerShell();
+  } catch {
+    return listWindowsTasklist();
+  }
+}
+
+async function listWindowsPowerShell(): Promise<Proc[]> {
+  const names = WATCHED_NAMES.map((n) => `'${n.replace(/'/g, "''")}'`).join(",");
+  const script =
+    `$n=@(${names}); Get-Process | Where-Object { $_.MainWindowTitle -or ($n -contains $_.ProcessName) } | ` +
+    "Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress";
+  const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
+    timeout: POWERSHELL_TIMEOUT_MS,
+  });
+  const text = stdout.trim();
+  if (!text) return []; // nothing matched → ConvertTo-Json prints nothing at all
+  const parsed: unknown = JSON.parse(text);
+  const rows: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+  const out: Proc[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as { ProcessName?: unknown; Id?: unknown; MainWindowTitle?: unknown };
+    if (typeof r.ProcessName !== "string" || typeof r.Id !== "number") continue;
+    const title = typeof r.MainWindowTitle === "string" && r.MainWindowTitle.trim() ? r.MainWindowTitle : null;
+    out.push({ name: r.ProcessName.toLowerCase(), pid: r.Id, title, cwd: null });
+  }
+  return out;
+}
+
+/** Fallback: `tasklist /v /fo csv` — Image Name, PID, …, Window Title (last column). Slow (see above). */
+async function listWindowsTasklist(): Promise<Proc[]> {
   const { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], { maxBuffer: 8 * 1024 * 1024, windowsHide: true });
   const out: Proc[] = [];
   for (const line of stdout.split(/\r?\n/)) {

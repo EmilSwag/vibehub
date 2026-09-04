@@ -176,6 +176,9 @@ reconstructed server-side from heartbeats. This is **not** an auth/login session
 A session closes (`status = ENDED`, `endedAt` set) when no heartbeat arrives for
 **10 minutes** (`SESSION_IDLE_TIMEOUT_MS`, server-configurable), or immediately on a
 `session_end` event. On close, its totals are folded into `DailyStat` (§2.10).
+`model` is nullable (presence-only tools) and may be refined from `null` to a known
+model in place while the session is open (§4.3). Index `(userId, lastHeartbeatAt)` —
+presence and the tracker panel read the freshest session per user on every poll.
 
 ### 2.9 ActivityEvent
 
@@ -192,6 +195,9 @@ logic changes.
 | occurredAt | DateTime | client-supplied timestamp |
 | receivedAt | DateTime | server clock, default now() |
 | payload | Json | raw event body, shape depends on `type` — see §5.3 |
+
+Index `(userId, occurredAt)` — `GET /users/me/tracker` scans a user's newest events
+for `sources` (§5.2).
 
 ### 2.10 DailyStat
 
@@ -245,8 +251,9 @@ Device tokens the tracker CLI authenticates with — separate from user login se
 | userId | String | FK → User |
 | tokenHash | String | SHA-256 of the token; raw token shown once at creation |
 | label | String | user-supplied, e.g. `"MacBook Pro"` |
-| lastUsedAt | DateTime? | |
-| revokedAt | DateTime? | |
+| lastUsedAt | DateTime? | bumped by every authenticated tracker call (`/tracker/verify`, heartbeats); `null` = never used |
+| revokedAt | DateTime? | set by `DELETE /users/me/tracker-tokens/:id` or by `replaceUnused` on mint (§5.2) |
+| createdAt | DateTime | |
 
 ### 2.14 AuthSession (login sessions)
 
@@ -341,6 +348,51 @@ Request body:
 `session_start`/`session_end` omit the token deltas. `git_commit` additionally carries
 `{ "repoAlias": "neon-app" }` only — no commit hash, message, or diff.
 
+**Model normalization.** `model` is `string | null`; `null` means the tool exposes no
+model (presence-only tools). The strings `""`, `"unknown"` and `"<synthetic>"` (Claude
+Code's own placeholder for locally generated turns) are sentinels and are normalized
+to `null` at ingestion (`lib/sessions.ts` `normalizeModel`) — `Session.model` never
+stores one, and presence/stats readers apply the same mapping to rows written before
+this existed. This is what stopped "<synthetic>" from showing up on profiles as if it
+were a model.
+
+**Heartbeat v2 — per-source `usage[]`** (optional, backward compatible). The presence
+tool (top-level `tool`/`model`, what the developer is *in*) is not always the only
+thing producing tokens — a Codex log can grow while the user sits in Claude Code. A
+v2 tracker therefore attaches precise attribution:
+
+```json
+{
+  "eventType": "heartbeat",
+  "projectAlias": "vibehub",
+  "tool": "claude-code",
+  "model": "claude-fable-5-1",
+  "occurredAt": "2026-09-04T14:22:10.000Z",
+  "tokensInputDelta": 812,
+  "tokensOutputDelta": 340,
+  "usage": [
+    { "tool": "claude-code", "model": "claude-fable-5-1", "tokensInputDelta": 700, "tokensOutputDelta": 300 },
+    { "tool": "codex",       "model": "gpt-5-codex",      "tokensInputDelta": 112, "tokensOutputDelta": 40 }
+  ]
+}
+```
+
+`usage` is at most 30 entries of `{ tool (1..60), model? (0..60 | null),
+tokensInputDelta ≥ 0, tokensOutputDelta ≥ 0 }`. The top-level deltas are still sent
+as the sum across all sources so servers that predate `usage` keep working. When
+`usage` is present the server:
+
+- folds each entry with a nonzero delta straight into today's `DailyStat` row for
+  `(userId, day, model ?? "unknown", tool)` — tokens only, `activeSeconds` untouched
+  (`foldUsageIntoDailyStat`), bumping the streak once;
+- extends the open `Session` with **0** tokens and ignores the top-level deltas for
+  token accounting, so nothing is counted twice when the session later folds;
+- still derives presence (the open `Session`) from the top-level
+  `projectAlias`/`tool`/`model`.
+
+Without `usage`, the legacy path is unchanged: the top-level deltas accrue on the
+`Session` and reach `DailyStat` when it closes.
+
 Response `200`:
 
 ```json
@@ -349,11 +401,27 @@ Response `200`:
 
 Server behavior: upsert-extend the open `Session` for `(userId, projectAlias, tool,
 model)` if `lastHeartbeatAt` is within `SESSION_IDLE_TIMEOUT_MS`, else close the stale
-one and open a new one. Every heartbeat also inserts one `ActivityEvent` row (§2.9).
-On session close (timeout or explicit `session_end`), the server folds the session's
-deltas into today's `DailyStat` row for that `(userId, model, tool)` and, if the friend
-graph has active WebSocket subscribers, pushes `presence:update` with `status: "offline"`
-for that activity.
+one and open a new one. Every heartbeat also inserts one `ActivityEvent` row (§2.9)
+whose payload mirrors what was *credited*: `tokensInputDelta`/`tokensOutputDelta` are
+what went onto the Session (0 for v2 bodies) and `usage` (when present, models
+normalized) is what went straight to `DailyStat`. On session close (timeout or explicit
+`session_end`), the server folds the session's deltas into today's `DailyStat` row for
+that `(userId, model, tool)` and, if the friend graph has active WebSocket subscribers,
+pushes `presence:update` with `status: "offline"` for that activity.
+
+**null → known model refinement.** Log-backed tools are usually detected by their
+process before their session log has a model line, so the first heartbeats of a
+session arrive with `model: null` and open a null-model `Session`; a beat or two
+later the same `(projectAlias, tool)` arrives with a real model. If no open session
+matches `(projectAlias, tool, model)` but a *live* one (within
+`SESSION_IDLE_TIMEOUT_MS`) exists for `(projectAlias, tool, null)` and the incoming
+model is non-null, the server sets that session's `model` in place and extends it as
+usual — same `sessionId`, no `session_end`/`session_start` churn, no split in
+`DailyStat`, no presence flicker. Logged once as
+`[tracker] model refined null→<model> session=<id>`. A stale null-model session is
+never refined — it closes under the `"unknown"` bucket it earned. The reverse
+(known → null, e.g. a `"<synthetic>"` turn) is not a refinement: a null-model
+heartbeat opens its own session, as before.
 
 ### 4.4 `~/.vibehub/status.json` (tracker ⇄ macOS contract)
 
@@ -400,9 +468,67 @@ for browser clients, or `Authorization: Bearer` for tracker device tokens on the
 | PATCH | `/api/v1/users/me` | `{ displayName?, bio? }` → `{ user }` |
 | POST | `/api/v1/users/me/avatar` | multipart file → `{ avatarUrl }` |
 | PUT | `/api/v1/users/me/links` | `{ links: [{ url, label? }] }` (replace-all, server assigns `order`/`icon`) → `{ links[] }` |
-| POST | `/api/v1/users/me/tracker-tokens` | `{ label }` → `{ token, tokenId }` — raw token shown once |
-| GET | `/api/v1/users/me/tracker-tokens` | → `{ tokens[] }` (no raw token) |
-| DELETE | `/api/v1/users/me/tracker-tokens/:id` | → `204` |
+| POST | `/api/v1/users/me/tracker-tokens` | `{ label, replaceUnused? }` → `{ token, tokenId }` — raw token shown once; see "minted once" below |
+| GET | `/api/v1/users/me/tracker-tokens` | → `{ tokens: [{ id, label, lastUsedAt, revokedAt, createdAt }] }` — newest first, revoked included, never the raw token |
+| DELETE | `/api/v1/users/me/tracker-tokens/:id` | → `204` (sets `revokedAt`) |
+| GET | `/api/v1/users/me/tracker` | → tracker status v2, below |
+
+**Tracker tokens — minted once.** `POST /users/me/tracker-tokens` with
+`replaceUnused: true` revokes (sets `revokedAt`) every token of the caller's that has
+`lastUsedAt = null` and `revokedAt = null` *before* creating the new one, in one
+transaction. The connect flow sends it, so a user who clicks "New token" three times
+before the tracker ever ran ends up with one live token, not three — and never sees a
+token in the list that the tracker would still accept but that they no longer have.
+Tokens that have authenticated anything (`/tracker/verify` and every heartbeat bump
+`lastUsedAt`) are real devices and are never touched. Without the flag (default
+`false`) the route is purely additive; the response is identical either way.
+`GET /users/me/tracker-tokens` returns every token, revoked ones included —
+`lastUsedAt` (`null` = never used), `revokedAt` (`null` = live), `createdAt` — so the
+web can show "unused / last seen … / revoked" without a second request; only the raw
+token is withheld.
+
+**`GET /users/me/tracker` (v2)** — "is my tracker actually talking to us, and is
+everything I use being counted?" Drives the Connect-your-tools panel and is polled
+every ~5s, so it is a fixed six queries regardless of history size.
+
+```json
+{
+  "connected": true,
+  "lastSeenAt": "2026-09-04T14:22:10.000Z",
+  "activeTokens": 1,
+  "tools": ["claude-code", "codex"],
+  "tokenLastUsedAt": "2026-09-04T14:22:10.000Z",
+  "heartbeatIntervalMs": 30000,
+  "presence": {
+    "status": "active",
+    "activity": { "projectAlias": "vibehub", "tool": "claude-code", "model": "claude-fable-5-1", "startedAt": "…" }
+  },
+  "sources": [
+    { "tool": "claude-code", "model": "claude-fable-5-1", "lastSeenAt": "…", "tokensToday": 12345, "tokens7d": 99999, "activeSecondsToday": 3600 },
+    { "tool": "codex", "model": "gpt-5-codex", "lastSeenAt": "…", "tokensToday": 152, "tokens7d": 152, "activeSecondsToday": 0 }
+  ],
+  "devices": [ { "id": "clv…", "label": "MacBook Pro", "lastUsedAt": "…", "createdAt": "…" } ]
+}
+```
+
+- `connected` — a heartbeat within `SESSION_IDLE_TIMEOUT_MS` (`presence.status !==
+  "offline"`); `lastSeenAt` — last heartbeat of any kind (`Session.lastHeartbeatAt`,
+  not `TrackerToken.lastUsedAt`, which `/tracker/verify` also bumps — see the route
+  comment for the incident behind that). `tokenLastUsedAt` exposes the token signal
+  separately. `tools` — tool ids seen in the last 30 days, most recent first (compat).
+- `presence` — the same snapshot friends get (§5.7), minus `username`.
+- `sources` — every `(tool, model)` pair seen in the last 7 days (today + 6 UTC days),
+  most recently seen first. Totals come from `DailyStat` rows in the window plus open
+  `Session`s (live tokens/elapsed not folded yet — the same "one place at a time"
+  rule as §5.6, so nothing double counts); `lastSeenAt` from the newest 400
+  `HEARTBEAT`/`SESSION_START` `ActivityEvent`s (presence pair and each `usage[]`
+  entry) and recent `Session.lastHeartbeatAt`. `model` is `null` for presence-only
+  tools (the `DailyStat` `"unknown"` bucket maps back to `null` here).
+  `activeSecondsToday` is only ever credited to the presence pair — `usage[]`
+  sources that never owned a Session report tokens but `0` seconds.
+- `devices` — non-revoked tracker tokens, newest first.
+- `heartbeatIntervalMs` — the tracker's cadence (§4.2), so the UI can render "one
+  missed beat" rather than an absolute age.
 
 ### 5.3 Friends
 

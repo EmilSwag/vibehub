@@ -108,7 +108,24 @@ export const usersApi = {
     );
   },
 
-  trackerStatus: () => request<TrackerStatus>("/api/v1/users/me/tracker"),
+  /** v2 tracker status. Fills the v2 fields with empty defaults if an older server
+   * (pre-`presence`/`sources`/`devices`) answers, so callers never guard them. */
+  trackerStatus: async (): Promise<TrackerStatus> => {
+    const raw = await request<Partial<TrackerStatus> & Pick<TrackerStatus, "connected">>(
+      "/api/v1/users/me/tracker"
+    );
+    return {
+      connected: raw.connected ?? false,
+      lastSeenAt: raw.lastSeenAt ?? null,
+      activeTokens: raw.activeTokens ?? 0,
+      tools: raw.tools ?? [],
+      tokenLastUsedAt: raw.tokenLastUsedAt ?? raw.lastSeenAt ?? null,
+      heartbeatIntervalMs: raw.heartbeatIntervalMs ?? 30_000,
+      presence: raw.presence ?? { status: raw.connected ? "active" : "offline", activity: null },
+      sources: raw.sources ?? [],
+      devices: raw.devices ?? [],
+    };
+  },
   updateMe: (body: { username?: string; displayName?: string; bio?: string; roles?: UserRole[] }) =>
     request<{ user: User }>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
 
@@ -130,10 +147,13 @@ export const usersApi = {
       { method: "PUT", body: JSON.stringify({ links }), headers: { "Content-Type": "application/json" } }
     ),
 
-  createTrackerToken: (label: string) =>
+  /** Mints a device token. `replaceUnused` asks the server to revoke this user's
+   * never-used tokens first, so re-minting from a fresh browser never piles up
+   * orphans; older servers ignore the flag. */
+  createTrackerToken: (label: string, opts?: { replaceUnused?: boolean }) =>
     request<{ token: string; tokenId: string }>(
       "/api/v1/users/me/tracker-tokens",
-      json({ label })
+      json(opts?.replaceUnused ? { label, replaceUnused: true } : { label })
     ),
 
   listTrackerTokens: () => request<{ tokens: TrackerToken[] }>("/api/v1/users/me/tracker-tokens"),

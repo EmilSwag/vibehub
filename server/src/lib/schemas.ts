@@ -51,7 +51,14 @@ export const linkInputSchema = z.object({
 });
 export const putLinksSchema = z.object({ links: z.array(linkInputSchema).max(20) });
 
-export const createTrackerTokenSchema = z.object({ label: z.string().min(1).max(60) });
+// `replaceUnused` (connect flow, ARCHITECTURE.md §5.2): revoke every token of mine that
+// never authenticated anything (lastUsedAt null) before minting this one, so a user
+// retrying "New token" ends up with one live token, not a pile. Used tokens (real
+// devices) are never touched.
+export const createTrackerTokenSchema = z.object({
+  label: z.string().min(1).max(60),
+  replaceUnused: z.boolean().optional(),
+});
 
 export const sendFriendRequestSchema = z.object({ targetUsername: usernameSchema });
 
@@ -100,6 +107,28 @@ export const imageUrlsFromJson = (json: string | null | undefined): string[] => 
 
 export const HEARTBEAT_EVENT_TYPES = ["heartbeat", "session_start", "session_end", "git_commit"] as const;
 
+// Model strings travel as 0..60 chars (not min(1)) so the tracker can send "" for
+// "no model" and the server normalizes it — together with the "unknown" and
+// "<synthetic>" sentinels — to null via lib/sessions.ts's normalizeModel(). Rejecting
+// "" with a 400 would drop the whole heartbeat (and presence with it) over a field
+// that only degrades.
+const modelSchema = z.string().max(60).nullable().optional();
+
+// Heartbeat v2 (ARCHITECTURE.md §4.3): precise per-source token attribution. One entry
+// per (tool, model) the tracker read tokens from since its last heartbeat — which may
+// differ from the top-level presence tool (Claude Code open in the terminal while a
+// Codex log also grows). When `usage` is present the server folds these straight into
+// DailyStat and IGNORES the top-level deltas for token accounting; the tracker still
+// sends those as a legacy sum so servers that predate `usage` keep working.
+export const MAX_USAGE_ENTRIES = 30;
+export const usageEntrySchema = z.object({
+  tool: z.string().min(1).max(60),
+  model: modelSchema,
+  tokensInputDelta: z.number().int().nonnegative(),
+  tokensOutputDelta: z.number().int().nonnegative(),
+});
+export type UsageEntryInput = z.infer<typeof usageEntrySchema>;
+
 // ARCHITECTURE.md §4.3: session_start/session_end omit token deltas, git_commit only
 // adds repoAlias — kept loose (optional) here and enforced per-eventType in the route.
 export const heartbeatSchema = z.object({
@@ -107,9 +136,10 @@ export const heartbeatSchema = z.object({
   projectAlias: z.string().min(1).max(200),
   tool: z.string().min(1).max(60).optional(),
   // null for presence-only tools (no model knowable); omitted by older trackers.
-  model: z.string().min(1).max(60).nullable().optional(),
+  model: modelSchema,
   tokensInputDelta: z.number().int().nonnegative().optional(),
   tokensOutputDelta: z.number().int().nonnegative().optional(),
   occurredAt: z.string().datetime(),
   repoAlias: z.string().min(1).max(200).optional(),
+  usage: z.array(usageEntrySchema).max(MAX_USAGE_ENTRIES).optional(),
 });

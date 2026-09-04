@@ -95,6 +95,12 @@ function rng(seed: number) {
 async function main() {
   const now = new Date();
   const today = utcDay(now);
+  // Nothing seeded may sit in the future: a closed session that "ends" three hours from
+  // now reads as a live session in presence and as a stale timestamp in the tracker
+  // panel (seen live: ada at 16:43Z while it was 13:32Z). Every startedAt/endedAt/
+  // lastHeartbeatAt below is clamped to this — one minute in the past, so the sweep
+  // and presence math never see a negative age either.
+  const latest = new Date(now.getTime() - 60_000);
   const random = rng(42);
 
   const created = new Map<string, string>();
@@ -135,10 +141,19 @@ async function main() {
       if (isRestDay) continue;
 
       for (const t of spec.tools) {
-        const minutes = Math.round((30 + random() * 150) * t.weight);
+        let minutes = Math.round((30 + random() * 150) * t.weight);
         if (minutes < 5) continue;
-        const startedAt = new Date(day.getTime() + (9 + random() * 8) * 3_600_000);
-        const endedAt = new Date(startedAt.getTime() + minutes * 60_000);
+        let startedAt = new Date(day.getTime() + (9 + random() * 8) * 3_600_000);
+        let endedAt = new Date(startedAt.getTime() + minutes * 60_000);
+        if (endedAt > latest) {
+          // Today's sessions must already be over. End it a minute ago and keep as much
+          // of its duration as fits between the start of the day and now; drop it if
+          // that leaves nothing worth a row. rng order is unchanged either way.
+          endedAt = latest;
+          startedAt = new Date(Math.max(day.getTime(), latest.getTime() - minutes * 60_000));
+          minutes = Math.round((endedAt.getTime() - startedAt.getTime()) / 60_000);
+          if (minutes < 5) continue;
+        }
         const tokensInput = Math.round(minutes * (400 + random() * 600));
         const tokensOutput = Math.round(tokensInput * (spec.username === "linus" ? 3.5 + random() : 0.8 + random()));
 
@@ -207,7 +222,9 @@ async function main() {
     }
   }
 
-  // Linus is "coding right now" so the friends list shows a live status immediately.
+  // Linus is "coding right now" so the friends list shows a live status immediately
+  // (last beat a minute ago → "active" for another minute, then idle, then offline
+  // per lib/sessions.ts — never a heartbeat from the future).
   await prisma.session.create({
     data: {
       userId: created.get("linus")!,
@@ -215,8 +232,8 @@ async function main() {
       tool: "codex",
       model: "gpt-5-codex",
       status: "ACTIVE",
-      startedAt: new Date(now.getTime() - 47 * 60_000),
-      lastHeartbeatAt: now,
+      startedAt: new Date(latest.getTime() - 47 * 60_000),
+      lastHeartbeatAt: latest,
       tokensInput: 18_400,
       tokensOutput: 61_200,
     },

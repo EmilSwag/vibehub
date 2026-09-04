@@ -200,6 +200,10 @@ model Session {
 
   activityEvents ActivityEvent[]
 
+  // Presence + tracker status read the freshest session per user on every poll
+  // (presenceFor, GET /users/me/tracker, the rollup sweep) — always userId +
+  // lastHeartbeatAt DESC, so this is the index that keeps those reads flat.
+  @@index([userId, lastHeartbeatAt])
   @@map("sessions")
 }
 
@@ -214,6 +218,8 @@ model ActivityEvent {
   receivedAt DateTime          @default(now())
   payload    Json
 
+  // GET /users/me/tracker scans a user's newest events by occurredAt (§5.2 sources).
+  @@index([userId, occurredAt])
   @@map("activity_events")
 }
 

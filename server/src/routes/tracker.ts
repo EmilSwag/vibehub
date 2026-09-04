@@ -5,7 +5,7 @@ import { env } from "../env";
 import { asyncHandler } from "../lib/http-error";
 import { toPayloadValue } from "../lib/json-field";
 import { heartbeatSchema } from "../lib/schemas";
-import { closeSession, presenceFor, utcDay } from "../lib/sessions";
+import { closeSession, foldUsageIntoDailyStat, normalizeModel, presenceFor, utcDay, type UsageEntry } from "../lib/sessions";
 import { requireTrackerToken } from "../middleware/auth";
 import { emitPresenceUpdate } from "../ws/hub";
 
@@ -71,8 +71,10 @@ router.post(
 
     const tool = body.tool ?? UNKNOWN;
     // Model is null when the tool exposes none (presence-only tools) — stored and
-    // surfaced as null. The tool is never dropped; only the model degrades.
-    const model = body.model ?? null;
+    // surfaced as null. The tool is never dropped; only the model degrades. Sentinels
+    // ("unknown", "<synthetic>", "") are normalized to null HERE so Session.model
+    // never stores one and every downstream reader sees a single "no model" case.
+    const model = normalizeModel(body.model);
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { username: true } });
 
     const logEvent = (sessionId: string | null, payload: Record<string, unknown>) =>
@@ -111,13 +113,49 @@ router.post(
     }
 
     // heartbeat | session_start — upsert-extend the open session or open a new one.
-    const tokensInputDelta = body.tokensInputDelta ?? 0;
-    const tokensOutputDelta = body.tokensOutputDelta ?? 0;
+    //
+    // Token accounting has two paths (§4.3):
+    //  - v2 body with `usage[]`: every per-source delta is credited to DailyStat
+    //    directly (foldUsageIntoDailyStat) and the Session is extended with 0 tokens.
+    //    The top-level deltas are a legacy sum of the same numbers, so counting them
+    //    too would double every token the moment the session folds.
+    //  - legacy body without `usage`: the deltas accrue on the Session and reach
+    //    DailyStat when it closes — unchanged.
+    const usage: UsageEntry[] | null = body.usage
+      ? body.usage.map((entry) => ({
+          tool: entry.tool.trim() || UNKNOWN,
+          model: normalizeModel(entry.model),
+          tokensInputDelta: entry.tokensInputDelta,
+          tokensOutputDelta: entry.tokensOutputDelta,
+        }))
+      : null;
+    const tokensInputDelta = usage ? 0 : body.tokensInputDelta ?? 0;
+    const tokensOutputDelta = usage ? 0 : body.tokensOutputDelta ?? 0;
+
+    const isStale = (candidate: Session) =>
+      now.getTime() - candidate.lastHeartbeatAt.getTime() > env.sessionIdleTimeoutMs;
 
     let session: Session | null = await findOpenSession(userId, body.projectAlias, tool, model);
-    if (session && now.getTime() - session.lastHeartbeatAt.getTime() > env.sessionIdleTimeoutMs) {
+    if (session && isStale(session)) {
       await closeSession(session, session.lastHeartbeatAt);
       session = null;
+    }
+
+    // null → known model refinement (§4.3). A log-backed tool (Claude Code, Codex)
+    // is often detected by its process before its session log has a model line, so
+    // the first heartbeats carry model: null and open a null-model Session; the
+    // moment the log catches up the same (projectAlias, tool) arrives with a real
+    // model. That is the same session with better information, not a new one — so
+    // set the model on the open row in place and extend it below, instead of
+    // opening a second Session (session_end/session_start churn, a split in stats
+    // and a presence flicker). Only live sessions qualify: a stale null-model row is
+    // left for closeOtherOpenSessions to fold under the "unknown" bucket it earned.
+    if (!session && model !== null) {
+      const untyped = await findOpenSession(userId, body.projectAlias, tool, null);
+      if (untyped && !isStale(untyped)) {
+        session = await prisma.session.update({ where: { id: untyped.id }, data: { model } });
+        console.log(`[tracker] model refined null→${model} session=${session.id}`);
+      }
     }
 
     if (session) {
@@ -147,12 +185,18 @@ router.post(
       });
     }
 
+    if (usage) await foldUsageIntoDailyStat(userId, utcDay(occurredAt), usage);
+
+    // The event log mirrors what was credited, not what was claimed: the top-level
+    // deltas here are what went onto the Session (0 for v2 bodies) and `usage` is what
+    // went straight to DailyStat — so summing a day's payloads never double counts.
     await logEvent(session.id, {
       projectAlias: body.projectAlias,
       tool,
       model,
       tokensInputDelta,
       tokensOutputDelta,
+      ...(usage ? { usage } : {}),
     });
 
     await emitPresenceUpdate(userId, await presenceFor(userId, user.username));

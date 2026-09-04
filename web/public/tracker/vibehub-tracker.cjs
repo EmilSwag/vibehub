@@ -718,7 +718,7 @@ var require_suggestSimilar = __commonJS({
 // ../node_modules/commander/lib/command.js
 var require_command = __commonJS({
   "../node_modules/commander/lib/command.js"(exports2) {
-    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path7 = require("node:path"), fs4 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
+    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path7 = require("node:path"), fs6 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
       /**
        * Initialize a new `Command`.
        *
@@ -1431,10 +1431,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
         let launchWithNode = !1, sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
           let localBin = path7.resolve(baseDir, baseName);
-          if (fs4.existsSync(localBin)) return localBin;
+          if (fs6.existsSync(localBin)) return localBin;
           if (sourceExt.includes(path7.extname(baseName))) return;
           let foundExt = sourceExt.find(
-            (ext) => fs4.existsSync(`${localBin}${ext}`)
+            (ext) => fs6.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
         }
@@ -1443,7 +1443,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs4.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs6.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
@@ -2277,7 +2277,7 @@ var import_index = __toESM(require_commander(), 1), {
 var path6 = __toESM(require("node:path"));
 
 // src/paths.ts
-var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log");
+var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request");
 function ensureConfigDir() {
   fs.mkdirSync(CONFIG_DIR, { recursive: !0, mode: 448 });
   try {
@@ -2338,10 +2338,10 @@ function idleThresholdMs(config) {
 }
 
 // src/daemon.ts
-var import_node_child_process2 = require("node:child_process"), fs3 = __toESM(require("node:fs"));
+var import_node_child_process2 = require("node:child_process"), fs5 = __toESM(require("node:fs"));
 
 // src/adapters/claudeCode.ts
-var import_node_os = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path"));
+var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path"));
 
 // src/adapters/jsonlTail.ts
 var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(require("node:path")), JsonlTailer = class {
@@ -2431,6 +2431,36 @@ var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(req
   }
 };
 
+// src/adapters/usage.ts
+function normalizeModel(model) {
+  if (typeof model != "string") return null;
+  let m = model.trim();
+  return !m || m === "<synthetic>" || m.toLowerCase() === "unknown" ? null : m;
+}
+var UsageAccumulator = class {
+  buckets = /* @__PURE__ */ new Map();
+  add(model, tokensInputDelta, tokensOutputDelta) {
+    let key = model ?? "", b = this.buckets.get(key) ?? { model, tokensInputDelta: 0, tokensOutputDelta: 0 };
+    b.tokensInputDelta += tokensInputDelta, b.tokensOutputDelta += tokensOutputDelta, this.buckets.set(key, b);
+  }
+  toList() {
+    return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0);
+  }
+  get totalInput() {
+    let n = 0;
+    for (let u of this.buckets.values()) n += u.tokensInputDelta;
+    return n;
+  }
+  get totalOutput() {
+    let n = 0;
+    for (let u of this.buckets.values()) n += u.tokensOutputDelta;
+    return n;
+  }
+};
+function asCount(n) {
+  return typeof n == "number" && Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
 // src/adapters/claudeCode.ts
 var ClaudeCodeAdapter = class {
   constructor(recentWindowMs) {
@@ -2449,15 +2479,20 @@ var ClaudeCodeAdapter = class {
     let byFile = /* @__PURE__ */ new Map();
     for (let root of this.roots)
       for (let file of this.tailer.recentFiles(root, this.recentWindowMs)) {
-        let mtime = this.tailer.mtime(file), meta = this.fileMeta.get(file) ?? { cwd: null, model: null }, input = 0, output = 0, lastTs = 0;
+        let mtime = this.tailer.mtime(file), meta = this.fileMeta.get(file) ?? peekMeta(file), usage = new UsageAccumulator(), lastTs = 0;
         for (let raw of this.tailer.readNewLines(file)) {
           let line = raw;
           line.cwd && (meta.cwd = line.cwd);
           let ts = line.timestamp ? Date.parse(line.timestamp) : NaN;
           if (Number.isNaN(ts) || (lastTs = Math.max(lastTs, ts)), line.type !== "assistant" || !line.message) continue;
-          line.message.model && (meta.model = line.message.model);
-          let id = line.message.id, usage = line.message.usage;
-          !usage || !id || !this.seen.add(id) || (input += (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0), output += usage.output_tokens ?? 0);
+          let id = line.message.id, u = line.message.usage;
+          if (!u || !id) continue;
+          let model = normalizeModel(line.message.model);
+          model !== null && (meta.model = model), this.seen.add(id) && usage.add(
+            model,
+            asCount(u.input_tokens) + asCount(u.cache_read_input_tokens) + asCount(u.cache_creation_input_tokens),
+            asCount(u.output_tokens)
+          );
         }
         this.fileMeta.set(file, meta), byFile.set(file, {
           tool: this.name,
@@ -2466,14 +2501,42 @@ var ClaudeCodeAdapter = class {
           model: meta.model,
           // mtime is the freshest signal (user prompts don't carry usage but do touch the file).
           lastActivityAt: Math.max(mtime, lastTs),
-          tokensInputDelta: input,
-          tokensOutputDelta: output,
+          tokensInputDelta: usage.totalInput,
+          tokensOutputDelta: usage.totalOutput,
+          usage: usage.toList(),
           confidence: "activity"
         });
       }
     return [...byFile.values()];
   }
-};
+}, PEEK_BYTES = 128 * 1024;
+function peekMeta(file) {
+  let meta = { cwd: null, model: null }, fd = null;
+  try {
+    let size = import_node_fs2.default.statSync(file).size, start = Math.max(0, size - PEEK_BYTES), buf = Buffer.alloc(size - start);
+    fd = import_node_fs2.default.openSync(file, "r"), import_node_fs2.default.readSync(fd, buf, 0, buf.length, start);
+    let lines = buf.toString("utf8").split(`
+`);
+    start > 0 && lines.shift();
+    for (let raw of lines) {
+      let trimmed = raw.trim();
+      if (!trimmed) continue;
+      let line;
+      try {
+        line = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (line.cwd && (meta.cwd = line.cwd), line.type !== "assistant" || !line.message?.usage) continue;
+      let model = normalizeModel(line.message.model);
+      model !== null && (meta.model = model);
+    }
+  } catch {
+  } finally {
+    fd !== null && import_node_fs2.default.closeSync(fd);
+  }
+  return meta;
+}
 function projectFromSlug(root, file) {
   let rel = import_node_path2.default.relative(root, file).split(import_node_path2.default.sep)[0];
   if (!rel) return null;
@@ -2497,20 +2560,27 @@ var CodexAdapter = class {
   async poll() {
     let out = [];
     for (let file of this.tailer.recentFiles(this.root, this.recentWindowMs)) {
-      let meta = this.fileMeta.get(file) ?? { cwd: null, model: null, totalIn: -1, totalOut: -1 }, input = 0, output = 0, lastTs = 0;
+      let meta = this.fileMeta.get(file) ?? { cwd: null, model: null, totalIn: -1, totalOut: -1 }, usage = new UsageAccumulator(), lastTs = 0;
       for (let raw of this.tailer.readNewLines(file)) {
         let line = raw, ts = line.timestamp ? Date.parse(line.timestamp) : NaN;
         Number.isNaN(ts) || (lastTs = Math.max(lastTs, ts));
         let p = line.payload;
-        if (p && (p.cwd && (meta.cwd = p.cwd), p.model && (meta.model = p.model), line.type === "event_msg" && p.type === "token_count" && p.info)) {
+        if (!p) continue;
+        p.cwd && (meta.cwd = p.cwd);
+        let model = normalizeModel(p.model);
+        if (model !== null && (meta.model = model), line.type === "event_msg" && p.type === "token_count" && p.info) {
           let total = p.info.total_token_usage;
           if (total) {
-            let tin = (total.input_tokens ?? 0) + (total.cached_input_tokens ?? 0), tout = total.output_tokens ?? 0;
+            let tin = asCount(total.input_tokens) + asCount(total.cached_input_tokens), tout = asCount(total.output_tokens);
             if (meta.totalIn >= 0)
-              input += Math.max(0, tin - meta.totalIn), output += Math.max(0, tout - meta.totalOut);
+              usage.add(meta.model, Math.max(0, tin - meta.totalIn), Math.max(0, tout - meta.totalOut));
             else if (p.info.last_token_usage) {
               let last = p.info.last_token_usage;
-              input += (last.input_tokens ?? 0) + (last.cached_input_tokens ?? 0), output += last.output_tokens ?? 0;
+              usage.add(
+                meta.model,
+                asCount(last.input_tokens) + asCount(last.cached_input_tokens),
+                asCount(last.output_tokens)
+              );
             }
             meta.totalIn = tin, meta.totalOut = tout;
           }
@@ -2522,8 +2592,9 @@ var CodexAdapter = class {
         projectHint: null,
         model: meta.model,
         lastActivityAt: Math.max(this.tailer.mtime(file), lastTs),
-        tokensInputDelta: input,
-        tokensOutputDelta: output,
+        tokensInputDelta: usage.totalInput,
+        tokensOutputDelta: usage.totalOutput,
+        usage: usage.toList(),
         confidence: "activity"
       });
     }
@@ -2585,8 +2656,12 @@ var ProcessAdapter = class {
           projectHint: title ? projectFromTitle(title, rule.titleSuffixes) : null,
           model: null,
           lastActivityAt: changedAt,
+          // The process exists right now, whatever its title last did.
+          observedAt: now,
+          // Presence-only tools burn no tokens we can see; log adapters own usage.
           tokensInputDelta: 0,
           tokensOutputDelta: 0,
+          usage: [],
           confidence: rule.logBacked || idle || !title ? "presence" : "activity"
         });
       }
@@ -2595,8 +2670,32 @@ var ProcessAdapter = class {
       return [];
     }
   }
-};
+}, WATCHED_NAMES = [...new Set(RULES.flatMap((r) => r.names))], POWERSHELL_TIMEOUT_MS = 2e4;
 async function listWindows() {
+  try {
+    return await listWindowsPowerShell();
+  } catch {
+    return listWindowsTasklist();
+  }
+}
+async function listWindowsPowerShell() {
+  let script = `$n=@(${WATCHED_NAMES.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}); Get-Process | Where-Object { $_.MainWindowTitle -or ($n -contains $_.ProcessName) } | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress`, { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: !0,
+    timeout: POWERSHELL_TIMEOUT_MS
+  }), text = stdout.trim();
+  if (!text) return [];
+  let parsed = JSON.parse(text), rows = Array.isArray(parsed) ? parsed : [parsed], out = [];
+  for (let row of rows) {
+    if (!row || typeof row != "object") continue;
+    let r = row;
+    if (typeof r.ProcessName != "string" || typeof r.Id != "number") continue;
+    let title = typeof r.MainWindowTitle == "string" && r.MainWindowTitle.trim() ? r.MainWindowTitle : null;
+    out.push({ name: r.ProcessName.toLowerCase(), pid: r.Id, title, cwd: null });
+  }
+  return out;
+}
+async function listWindowsTasklist() {
   let { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], { maxBuffer: 8388608, windowsHide: !0 }), out = [];
   for (let line of stdout.split(/\r?\n/)) {
     if (!line.startsWith('"')) continue;
@@ -2655,7 +2754,7 @@ function projectFromTitle(title, suffixes) {
 }
 
 // src/detector.ts
-var Detector = class {
+var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex"]), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, isLogBacked = (o) => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool), newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), usageKey = (tool, model) => `${tool}\0${model ?? ""}`, Detector = class {
   constructor(activeWindowMs) {
     this.activeWindowMs = activeWindowMs;
     this.adapters = [
@@ -2667,25 +2766,54 @@ var Detector = class {
   }
   activeWindowMs;
   adapters;
-  async detect(now = Date.now()) {
+  async detect(now = Date.now(), current) {
     let all = (await Promise.all(this.adapters.map((a) => a.poll().catch(() => [])))).flat();
     if (all.length === 0) return null;
-    let tokensIn = 0, tokensOut = 0;
-    for (let o of all)
+    let usage = /* @__PURE__ */ new Map(), tokensIn = 0, tokensOut = 0;
+    for (let o of all) {
       tokensIn += o.tokensInputDelta, tokensOut += o.tokensOutputDelta;
-    let fresh = (o) => now - o.lastActivityAt <= this.activeWindowMs, newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), active = newest(all.filter((o) => o.confidence === "activity" && fresh(o))), pick = active ?? newest(all);
-    return pick ? {
+      for (let u of o.usage) {
+        if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) continue;
+        let key = usageKey(o.tool, u.model), bucket = usage.get(key) ?? { tool: o.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
+        bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, usage.set(key, bucket);
+      }
+    }
+    let seen = /* @__PURE__ */ new Map(), note = (tool, model, at) => {
+      let key = usageKey(tool, model), prev = seen.get(key);
+      (!prev || at > prev.lastSeenAt) && seen.set(key, { tool, model, lastSeenAt: at });
+    };
+    for (let o of all) {
+      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0));
+      for (let u of o.usage) u.model !== o.model && note(o.tool, u.model, now);
+    }
+    let fresh = (o) => now - o.lastActivityAt <= this.activeWindowMs, candidates = all.filter((o) => o.confidence === "activity" && fresh(o)), pick = null;
+    if (current) {
+      let same = candidates.filter((c) => c.tool === current.tool), anotherToolBurned = candidates.some((c) => c.tool !== current.tool && hasTokens(c));
+      same.length > 0 && !anotherToolBurned && (pick = bestForCurrent(same, current));
+    }
+    if (!pick) {
+      let logBacked = candidates.filter(isLogBacked);
+      pick = newest(logBacked.filter(hasTokens)) ?? newest(logBacked) ?? newest(candidates);
+    }
+    let active = pick !== null;
+    return pick || (pick = newest(all)), pick ? {
       tool: pick.tool,
       model: pick.model,
       cwd: pick.cwd,
       projectHint: pick.projectHint,
-      active: active !== null,
+      active,
       lastActivityAt: pick.lastActivityAt,
       tokensInputDelta: tokensIn,
-      tokensOutputDelta: tokensOut
+      tokensOutputDelta: tokensOut,
+      usage: [...usage.values()],
+      seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
     } : null;
   }
 };
+function bestForCurrent(same, current) {
+  let sameProject = (o) => current.cwd !== null ? o.cwd === current.cwd : o.cwd === null && current.projectHint !== null && o.projectHint === current.projectHint, inProject = same.filter(sameProject);
+  return newest(inProject.filter(hasTokens)) ?? newest(same.filter(hasTokens)) ?? newest(inProject) ?? newest(same);
+}
 
 // src/projectAlias.ts
 var path5 = __toESM(require("node:path")), HIDDEN = "hidden", UNKNOWN_PROJECT_ALIAS = "unknown";
@@ -2746,15 +2874,53 @@ function markAuthRejected(rejected) {
   current.authRejected !== rejected && writeStatus({ ...current, authRejected: rejected });
 }
 
+// src/stopRequest.ts
+var fs4 = __toESM(require("node:fs"));
+function requestStop() {
+  writeJsonAtomic(STOP_REQUEST_PATH, { requestedAt: (/* @__PURE__ */ new Date()).toISOString(), byPid: process.pid });
+}
+function isStopRequested() {
+  return fs4.existsSync(STOP_REQUEST_PATH);
+}
+function clearStopRequest() {
+  removeFile(STOP_REQUEST_PATH);
+}
+
 // src/heartbeat.ts
+var SOURCES_WINDOW_MS = 600 * 1e3, MODEL_SWITCH_POLLS = 2, STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3;
 function createLoopState(config) {
+  let activeWindowMs = config ? idleThresholdMs(config) : 3e5;
   return {
     activeSession: null,
     lastActivityAt: null,
-    detector: new Detector(config ? idleThresholdMs(config) : 300 * 1e3),
-    pendingTokensIn: 0,
-    pendingTokensOut: 0
+    detector: new Detector(activeWindowMs),
+    pendingUsage: /* @__PURE__ */ new Map(),
+    sourcesSeen: /* @__PURE__ */ new Map(),
+    modelChallenger: null,
+    activeWindowMs,
+    stopping: !1
   };
+}
+var usageKey2 = (tool, model) => `${tool}\0${model ?? ""}`;
+function addPendingUsage(state, u) {
+  if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) return;
+  let key = usageKey2(u.tool, u.model), bucket = state.pendingUsage.get(key) ?? { tool: u.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
+  bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, state.pendingUsage.set(key, bucket);
+}
+function takePendingUsage(state) {
+  let usage = [], tokensInputDelta = 0, tokensOutputDelta = 0;
+  for (let u of state.pendingUsage.values())
+    u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0 || (usage.push({ ...u }), tokensInputDelta += u.tokensInputDelta, tokensOutputDelta += u.tokensOutputDelta);
+  return state.pendingUsage.clear(), { usage, tokensInputDelta, tokensOutputDelta };
+}
+function noteSources(state, seen, now) {
+  for (let s of seen) {
+    let key = usageKey2(s.tool, s.model), prev = state.sourcesSeen.get(key);
+    (!prev || s.lastSeenAt > prev.lastSeenAt) && state.sourcesSeen.set(key, { ...s });
+  }
+  for (let [key, s] of state.sourcesSeen)
+    now - s.lastSeenAt > SOURCES_WINDOW_MS && state.sourcesSeen.delete(key);
+  return [...state.sourcesSeen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).map((s) => ({ tool: s.tool, model: s.model, lastSeenAt: new Date(s.lastSeenAt).toISOString() }));
 }
 async function postHeartbeat(apiUrl, deviceToken, payload) {
   try {
@@ -2801,42 +2967,72 @@ function endActiveSession(config, session, occurredAt) {
     occurredAt
   });
 }
+function resolvePresenceModel(state, detection, tool, alias, now) {
+  let session = state.activeSession, candidate = detection.model ?? session?.model ?? null;
+  if (!session || session.projectAlias !== alias || session.tool !== tool || session.model === null || candidate === null || candidate === session.model)
+    return state.modelChallenger = null, candidate;
+  let current = session.model, burned = (model) => detection.usage.some((u) => u.tool === tool && u.model === model && (u.tokensInputDelta > 0 || u.tokensOutputDelta > 0)), currentLastSeen = state.sourcesSeen.get(usageKey2(tool, current))?.lastSeenAt ?? 0;
+  if (now - currentLastSeen > state.activeWindowMs)
+    return state.modelChallenger = null, candidate;
+  if (burned(candidate) && !burned(current)) {
+    let polls = state.modelChallenger?.model === candidate ? state.modelChallenger.polls + 1 : 1;
+    if (polls >= MODEL_SWITCH_POLLS)
+      return state.modelChallenger = null, candidate;
+    state.modelChallenger = { model: candidate, polls };
+  } else
+    state.modelChallenger = null;
+  return current;
+}
 async function tick(config, state) {
   await flushOfflineQueue();
-  let now = Date.now(), nowIso = new Date(now).toISOString(), detection = await state.detector.detect(now);
-  detection && (state.pendingTokensIn += detection.tokensInputDelta, state.pendingTokensOut += detection.tokensOutputDelta);
-  let alias = detection ? resolveProjectAlias(detection.cwd, config, detection.projectHint) : null;
+  let current = state.activeSession ? { tool: state.activeSession.tool, cwd: state.activeSession.cwd, projectHint: state.activeSession.projectHint } : void 0, detection = await state.detector.detect(Date.now(), current), now = Date.now(), nowIso = new Date(now).toISOString();
+  if (detection)
+    for (let u of detection.usage) addPendingUsage(state, u);
+  if (state.stopping) return;
+  let sources = noteSources(state, detection?.seen ?? [], now), alias = detection ? resolveProjectAlias(detection.cwd, config, detection.projectHint) : null;
   if (detection && detection.active && alias !== null) {
-    let tool = detection.tool, model = detection.model ?? state.activeSession?.model ?? null;
+    let tool = detection.tool, model = resolvePresenceModel(state, detection, tool, alias, now);
     !state.activeSession || state.activeSession.projectAlias !== alias || state.activeSession.tool !== tool || // model null → known is a refinement, not a new session
-    state.activeSession.model !== model && state.activeSession.model !== null ? (state.activeSession && await endActiveSession(config, state.activeSession, nowIso), state.activeSession = { projectAlias: alias, tool, model, startedAt: nowIso }, await sendOrQueue(config, {
+    state.activeSession.model !== model && state.activeSession.model !== null ? (state.activeSession && await endActiveSession(config, state.activeSession, nowIso), state.activeSession = {
+      projectAlias: alias,
+      tool,
+      model,
+      startedAt: nowIso,
+      cwd: detection.cwd,
+      projectHint: detection.projectHint
+    }, await sendOrQueue(config, {
       eventType: "session_start",
       projectAlias: alias,
       tool,
       model,
       occurredAt: nowIso
-    })) : state.activeSession && (state.activeSession.model = model);
-    let session = state.activeSession;
+    })) : state.activeSession && (state.activeSession.model = model, state.activeSession.cwd = detection.cwd, state.activeSession.projectHint = detection.projectHint);
+    let session = state.activeSession, pending = takePendingUsage(state);
     await sendOrQueue(config, {
       eventType: "heartbeat",
       projectAlias: alias,
       tool,
       model,
-      tokensInputDelta: state.pendingTokensIn,
-      tokensOutputDelta: state.pendingTokensOut,
+      tokensInputDelta: pending.tokensInputDelta,
+      tokensOutputDelta: pending.tokensOutputDelta,
+      usage: pending.usage,
       occurredAt: nowIso
-    }), state.pendingTokensIn = 0, state.pendingTokensOut = 0, state.lastActivityAt = now, writeStatus({
+    }), state.lastActivityAt = now, writeStatus({
       status: "active",
       projectAlias: alias,
       tool,
       model,
       sessionStartedAt: session.startedAt,
       updatedAt: nowIso,
-      authRejected: readStatus().authRejected
+      authRejected: readStatus().authRejected,
+      sources
     });
     return;
   }
-  if (!state.activeSession) return;
+  if (state.modelChallenger = null, !state.activeSession) {
+    writeSourcesIfChanged(sources, nowIso);
+    return;
+  }
   let idleAfter = idleThresholdMs(config);
   if (state.lastActivityAt !== null && now - state.lastActivityAt >= idleAfter) {
     let ended = state.activeSession;
@@ -2847,22 +3043,50 @@ async function tick(config, state) {
       model: ended.model,
       sessionStartedAt: ended.startedAt,
       updatedAt: nowIso,
-      authRejected: readStatus().authRejected
+      authRejected: readStatus().authRejected,
+      sources
     });
+    return;
   }
+  writeSourcesIfChanged(sources, nowIso);
 }
-function runLoop(config) {
-  let state = createLoopState(config), safeTick = () => tick(config, state).catch((err) => {
-    console.error("tracker: heartbeat tick failed:", err);
+function writeSourcesIfChanged(sources, nowIso) {
+  let current = readStatus();
+  (current.sources ?? []).length === sources.length && (current.sources ?? []).every((s, i) => s.tool === sources[i].tool && s.model === sources[i].model) || writeStatus({ ...current, updatedAt: nowIso, sources });
+}
+function settleWithin(p, ms) {
+  return new Promise((resolve2) => {
+    let timer = setTimeout(resolve2, ms), done = () => {
+      clearTimeout(timer), resolve2();
+    };
+    p.then(done, done);
   });
+}
+function runLoop(config, options = {}) {
+  let state = createLoopState(config), intervalMs = heartbeatIntervalMs(config), inFlight = null, stopRequestSeen = !1, checkStopRequest = () => stopRequestSeen ? !0 : isStopRequested() ? (stopRequestSeen = !0, console.log("tracker: stop requested (stop.request found)"), options.onStopRequest?.(), !0) : !1, safeTick = () => {
+    if (state.stopping || checkStopRequest()) return;
+    if (inFlight) {
+      console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
+      return;
+    }
+    let startedAt = Date.now();
+    inFlight = tick(config, state).catch((err) => {
+      console.error("tracker: heartbeat tick failed:", err);
+    }).finally(() => {
+      inFlight = null;
+      let took = Date.now() - startedAt;
+      took > intervalMs && console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
+    });
+  };
   safeTick();
-  let interval = setInterval(safeTick, heartbeatIntervalMs(config));
+  let interval = setInterval(safeTick, intervalMs), stopWatch = setInterval(checkStopRequest, STOP_REQUEST_POLL_MS);
   return { stop: async () => {
-    clearInterval(interval), state.activeSession && (await endActiveSession(config, state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), state.activeSession = null), writeOfflineStatus();
+    clearInterval(interval), clearInterval(stopWatch), state.stopping = !0, inFlight && await settleWithin(inFlight, IN_FLIGHT_GRACE_MS), state.activeSession && (await endActiveSession(config, state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), state.activeSession = null), writeOfflineStatus(), clearStopRequest();
   } };
 }
 
 // src/daemon.ts
+var STOP_WAIT_MS = 8e3, STOP_POLL_MS = 200, sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
 function readPid() {
   return readJson(PID_PATH)?.pid ?? null;
 }
@@ -2883,8 +3107,8 @@ function startDaemon(entryPath) {
     console.log(`Tracker is already running (pid ${existing.pid}).`);
     return;
   }
-  ensureConfigDir();
-  let logFd = fs3.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
+  ensureConfigDir(), clearStopRequest();
+  let logFd = fs5.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
     detached: !0,
     stdio: ["ignore", logFd, logFd]
   });
@@ -2894,26 +3118,73 @@ function startDaemon(entryPath) {
   }
   writeJsonAtomic(PID_PATH, { pid: child.pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() }), console.log(`Tracker started (pid ${child.pid}). Logs: ${LOG_PATH}`);
 }
-function stopDaemon() {
+async function endLingeringSession() {
+  let status = readStatus();
+  if (status.status !== "offline") {
+    if (status.status === "active" && status.projectAlias && status.tool) {
+      let config = readConfig();
+      config && (await sendOrQueue(config, {
+        eventType: "session_end",
+        projectAlias: status.projectAlias,
+        tool: status.tool,
+        model: status.model,
+        occurredAt: (/* @__PURE__ */ new Date()).toISOString()
+      }), console.log(`Sent session_end for the interrupted session (${status.projectAlias} \xB7 ${status.tool}).`));
+    }
+    writeOfflineStatus();
+  }
+}
+async function stopDaemon() {
   let { running, pid } = daemonStatus();
   if (!running || pid === null) {
-    console.log("Tracker is not running."), removeFile(PID_PATH), writeOfflineStatus();
+    console.log("Tracker is not running."), removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
     return;
   }
-  try {
-    process.kill(pid, "SIGTERM"), console.log(`Stop signal sent (pid ${pid}).`);
-  } catch (err) {
-    console.error("Failed to stop tracker:", err);
-  }
-  removeFile(PID_PATH);
+  requestStop();
+  let deadline = Date.now() + STOP_WAIT_MS;
+  for (; isProcessAlive(pid) && Date.now() < deadline; ) await sleep(STOP_POLL_MS);
+  if (isProcessAlive(pid))
+    try {
+      process.kill(pid), console.log(`Tracker did not stop within ${STOP_WAIT_MS / 1e3}s; killed it (pid ${pid}).`);
+    } catch (err) {
+      console.error("Failed to stop tracker:", err);
+    }
+  else
+    console.log(`Tracker stopped (pid ${pid}).`);
+  removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
 }
 function runForeground(config) {
-  let { stop } = runLoop(config), shuttingDown = !1, shutdown = () => {
-    shuttingDown || (shuttingDown = !0, stop().catch((err) => console.error("tracker: error during shutdown:", err)).finally(() => {
-      removeFile(PID_PATH), process.exit(0);
+  clearStopRequest();
+  let shuttingDown = !1, stopLoop = null, shutdown = (reason) => {
+    shuttingDown || (shuttingDown = !0, console.log(`tracker: shutting down (${reason})`), (stopLoop ? stopLoop() : Promise.resolve()).catch((err) => console.error("tracker: error during shutdown:", err)).finally(() => {
+      removeFile(PID_PATH), clearStopRequest(), process.exit(0);
     }));
   };
-  process.on("SIGTERM", shutdown), process.on("SIGINT", shutdown);
+  stopLoop = runLoop(config, { onStopRequest: () => shutdown("stop.request") }).stop, process.on("SIGTERM", () => shutdown("SIGTERM")), process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
+// src/toolLabels.ts
+var TOOL_LABELS = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor",
+  vscode: "VS Code",
+  windsurf: "Windsurf",
+  zed: "Zed",
+  quadcode: "Quadcode AI",
+  chatgpt: "ChatGPT",
+  grok: "Grok"
+};
+function toolLabel(tool) {
+  return TOOL_LABELS[tool] ?? tool;
+}
+function describeSources(sources) {
+  let byTool = /* @__PURE__ */ new Map();
+  for (let s of sources) {
+    let models = byTool.get(s.tool) ?? [];
+    s.model && !models.includes(s.model) && models.push(s.model), byTool.set(s.tool, models);
+  }
+  return [...byTool.entries()].map(([tool, models]) => models.length ? `${toolLabel(tool)} (${models.join(", ")})` : toolLabel(tool)).join(", ");
 }
 
 // src/index.ts
@@ -2961,16 +3232,20 @@ program2.command("status").description(`pretty-print the current ${STATUS_PATH_L
     return;
   }
   let status = readStatus(), { running, pid } = daemonStatus();
-  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status !== "offline" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`), status.authRejected ? (console.log("Connected: no \u2014 token rejected by the server."), console.log("  Create a new token in VibeHub \u2192 Settings \u2192 Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.authRejected === !1 ? console.log("Connected: yes") : console.log("Connected: not yet \u2014 waiting for the first heartbeat. Open an AI tool session and check again in ~30s.") : console.log("Connected: no \u2014 daemon isn't running. Run `vibehub-tracker start`.");
+  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status !== "offline" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
+  let seeingCutoff = Date.now() - 600 * 1e3, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
+  seeing.length > 0 ? console.log(`Seeing:  ${describeSources(seeing)}`) : running && console.log("Seeing:  nothing in the last 10 min (no AI tool open, no Claude Code / Codex log activity)"), status.authRejected ? (console.log("Connected: no \u2014 token rejected by the server."), console.log("  Create a new token in VibeHub \u2192 Settings \u2192 Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.authRejected === !1 ? console.log("Connected: yes") : console.log("Connected: not yet \u2014 waiting for the first heartbeat. Open an AI tool session and check again in ~30s.") : console.log("Connected: no \u2014 daemon isn't running. Run `vibehub-tracker start`.");
 });
-program2.command("stop").description("stop the running tracker daemon").action(() => {
-  stopDaemon();
+program2.command("stop").description("stop the running tracker daemon (waits for it to end the session cleanly)").action(async () => {
+  await stopDaemon();
 });
-program2.command("logout").description(`stop the daemon and remove ${CONFIG_PATH_LABEL}`).action(() => {
-  stopDaemon(), deleteConfig(), writeOfflineStatus(), console.log(`Logged out. Removed ${CONFIG_PATH_LABEL}.`);
+program2.command("logout").description(`stop the daemon and remove ${CONFIG_PATH_LABEL}`).action(async () => {
+  await stopDaemon(), deleteConfig(), writeOfflineStatus(), console.log(`Logged out. Removed ${CONFIG_PATH_LABEL}.`);
 });
 program2.command("run-loop", { hidden: !0 }).description("internal: runs the heartbeat loop in the foreground (spawned by `start`)").action(() => {
   let config = requireConfig();
   runForeground(config);
 });
-program2.parse();
+program2.parseAsync().catch((err) => {
+  console.error(err instanceof Error ? err.message : err), process.exit(1);
+});

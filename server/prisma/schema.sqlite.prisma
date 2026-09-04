@@ -158,6 +158,7 @@ model Session {
 
   activityEvents ActivityEvent[]
 
+  @@index([userId, lastHeartbeatAt]) // mirror of schema.prisma — presence/tracker reads
   @@map("sessions")
 }
 
@@ -172,6 +173,7 @@ model ActivityEvent {
   receivedAt DateTime @default(now())
   payload    String // JSON-encoded — SQLite has no native Json type
 
+  @@index([userId, occurredAt]) // mirror of schema.prisma — tracker sources scan
   @@map("activity_events")
 }
 

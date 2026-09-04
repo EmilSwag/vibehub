@@ -98,6 +98,20 @@ tradeoff, not a hidden footgun (documented here so no builder agent "fixes" it i
 single dynamic schema, which Prisma does not support cleanly for SQLite/Postgres type
 differences like native enums).
 
+**Schema drift (dev) — re-generate after every pull.** After pulling or editing anything
+under `server/prisma/`, run `npm run db:generate --workspace server` *and*
+`npm run db:dev --workspace server` before starting the server (Postgres:
+`db:migrate`). A `dev.db` or generated client that lags the schema does not fail at
+boot — `/api/v1/health` stays green — it fails at query time as HTTP 500s
+(`no such column` / unknown field), which is exactly how the nullable-`model` change
+surfaced. Additive Postgres migrations that can't be generated here (no Postgres in
+dev) are hand-written under `server/prisma/migrations/<timestamp>_<name>/migration.sql`
+using Prisma's own index/constraint names (e.g. `sessions_userId_lastHeartbeatAt_idx`)
+so `prisma migrate diff` stays clean; `CREATE INDEX IF NOT EXISTS` keeps them
+re-runnable. Note: on Windows `db:generate` cannot overwrite the SQLite query-engine
+DLL while `npm run dev:server` has it loaded — stop the server first, or move the
+loaded DLL aside.
+
 ## 5. Workstream 2 — Web
 
 **Stack**: React 18, Vite, no CSS framework — hand-rolled CSS custom properties for the

@@ -7,22 +7,32 @@
 
 export type ConnectPromptTarget = "cursor" | "claude-code" | "chatgpt";
 
+export type InstallOs = "mac" | "windows";
+
 const STATUS_CMD = "node ~/.vibehub/app/vibehub-tracker.cjs status";
 
-function installCommands(token: string, apiUrl: string, webUrl: string): string[] {
-  return [
-    `macOS/Linux:  curl -fsSL ${webUrl}/tracker/install.sh | VIBEHUB_API_URL="${apiUrl}" bash -s -- ${token}`,
-    `Windows (PowerShell):  $env:VIBEHUB_TOKEN="${token}"; $env:VIBEHUB_API_URL="${apiUrl}"; irm ${webUrl}/tracker/install.ps1 | iex`,
-  ];
-}
+/**
+ * Every prompt ends with this so the assistant (or the user, for ChatGPT) has
+ * one unambiguous pass/fail check — the same output the Home panel then mirrors.
+ */
+export const VERIFY_LINE = `Run: ${STATUS_CMD} — it must print Connected: yes and a Seeing: line listing the tools it detects.`;
 
 /**
- * Builds the prompt for `target`. The install one-liners set VIBEHUB_API_URL
- * explicitly so the generated command works against any deployment (prod, a
- * local dev server, staging) — not just install.sh/.ps1's baked-in default.
+ * The install one-liner for one OS. Sets VIBEHUB_API_URL explicitly so the
+ * command works against any deployment (prod, a local dev server, staging) —
+ * not just install.sh/.ps1's baked-in default. Shared by the prompt and the
+ * "Do it manually" block so the two never drift.
  */
+export function buildInstallCommand(os: InstallOs, token: string, apiUrl: string, webUrl: string): string {
+  return os === "windows"
+    ? `$env:VIBEHUB_TOKEN="${token}"; $env:VIBEHUB_API_URL="${apiUrl}"; irm ${webUrl}/tracker/install.ps1 | iex`
+    : `curl -fsSL ${webUrl}/tracker/install.sh | VIBEHUB_API_URL="${apiUrl}" bash -s -- ${token}`;
+}
+
+/** Builds the prompt for `target`. */
 export function buildConnectPrompt(target: ConnectPromptTarget, token: string, apiUrl: string, webUrl: string): string {
-  const [bash, ps1] = installCommands(token, apiUrl, webUrl);
+  const bash = buildInstallCommand("mac", token, apiUrl, webUrl);
+  const ps1 = buildInstallCommand("windows", token, apiUrl, webUrl);
 
   if (target === "chatgpt") {
     return [
@@ -32,9 +42,9 @@ export function buildConnectPrompt(target: ConnectPromptTarget, token: string, a
       "2. Give me only the matching command below and ask me to run it in my own terminal, then paste back what it printed:",
       `   - macOS/Linux: ${bash}`,
       `   - Windows (PowerShell): ${ps1}`,
-      "3. Once I've pasted the output, ask me to also run this and paste its output:",
-      `   ${STATUS_CMD}`,
-      '4. Tell me plainly whether that output says "Connected: yes". If it says the token was rejected, or anything else, help me fix that from what it actually printed — don\'t guess or assume it worked.',
+      '3. Then ask me to run the check below and paste its output. Tell me plainly whether it says "Connected: yes". If it says the token was rejected, or anything else, help me fix that from what it actually printed — don\'t guess or assume it worked.',
+      "",
+      VERIFY_LINE,
     ].join("\n");
   }
 
@@ -45,8 +55,8 @@ export function buildConnectPrompt(target: ConnectPromptTarget, token: string, a
     "2. Run the matching command yourself:",
     `   - macOS/Linux: ${bash}`,
     `   - Windows (PowerShell): ${ps1}`,
-    "3. Then run this to confirm it actually worked:",
-    `   ${STATUS_CMD}`,
-    '4. Confirm the output says "Connected: yes." If it instead reports a rejected token or anything else, tell me exactly what it printed — don\'t guess or assume it worked.',
+    "3. Confirm it worked. If the output reports a rejected token or anything else, tell me exactly what it printed — don't guess or assume it worked.",
+    "",
+    VERIFY_LINE,
   ].join("\n");
 }

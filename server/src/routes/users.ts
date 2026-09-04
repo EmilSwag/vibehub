@@ -8,9 +8,10 @@ import { env } from "../env";
 import { generateRawToken, hashToken } from "../lib/crypto";
 import { fetchOwnRepos, getFreshGithubToken, GithubAuthError, NoGithubTokenError } from "../lib/github";
 import { asyncHandler, HttpError } from "../lib/http-error";
+import { fromPayloadValue } from "../lib/json-field";
 import { computeLevel, computeLevels } from "../lib/level";
 import { detectIcon, detectLabel } from "../lib/links";
-import { presenceFor } from "../lib/sessions";
+import { normalizeModel, presenceFor, utcDay } from "../lib/sessions";
 import {
   createTrackerTokenSchema,
   patchMeSchema,
@@ -266,10 +267,23 @@ router.post(
   "/users/me/tracker-tokens",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { label } = createTrackerTokenSchema.parse(req.body);
+    const { label, replaceUnused } = createTrackerTokenSchema.parse(req.body);
+    const userId = req.user!.id;
     const raw = generateRawToken();
-    const created = await prisma.trackerToken.create({
-      data: { userId: req.user!.id, label, tokenHash: hashToken(raw) },
+    // "Token minted once" (§5.2): with `replaceUnused`, every token of the caller's
+    // that was never used (lastUsedAt null — never verified, never heartbeated) is
+    // revoked in the same transaction that creates the new one, so a retried connect
+    // flow never leaves two live-but-unused tokens behind and never shows a token in
+    // the list that the tracker will not accept. Used tokens are live devices and
+    // stay untouched; the response shape is the same either way.
+    const created = await prisma.$transaction(async (tx) => {
+      if (replaceUnused) {
+        await tx.trackerToken.updateMany({
+          where: { userId, lastUsedAt: null, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return tx.trackerToken.create({ data: { userId, label, tokenHash: hashToken(raw) } });
     });
     res.json({ token: raw, tokenId: created.id });
   })
@@ -309,22 +323,61 @@ router.get(
  * new `tokenLastUsedAt` field rather than folded back into `lastSeenAt`.
  * `tools` lists what's been seen recently so the user gets confirmation that
  * e.g. Claude Code is counted.
+ *
+ * v2 (ARCHITECTURE.md §5.2) adds what the "what's connected / is everything
+ * tracking" panel needs on top of the same fields:
+ *  - `presence`: the same snapshot friends see (status + current activity).
+ *  - `sources`: every (tool, model) pair seen in the last 7 days with per-pair
+ *    token totals, most recently seen first. Built from three places because no
+ *    single table has it: DailyStat (closed sessions + v2 `usage[]` tokens), open
+ *    Sessions (live tokens/elapsed not folded yet — same "one place at a time"
+ *    rule as routes/stats.ts, so nothing double counts), and the newest
+ *    HEARTBEAT/SESSION_START ActivityEvents (the only record of *when* a pair was
+ *    last reported, including `usage[]` sources that never own a Session).
+ *  - `devices`: the non-revoked tracker tokens, so the panel can say which
+ *    machine is reporting without a second request.
+ *  - `heartbeatIntervalMs`: the tracker's cadence, so "last seen 40s ago" can be
+ *    rendered as "one missed beat" rather than as an absolute.
+ * Polled every 5s by the UI, so it stays at six queries regardless of history size
+ * (the event scan is capped at SOURCE_EVENT_LIMIT newest rows).
  */
+const HEARTBEAT_INTERVAL_MS = 30_000; // tracker default HEARTBEAT_INTERVAL_MS (§4.2)
+const SOURCE_WINDOW_DAYS = 7;
+const SOURCE_EVENT_LIMIT = 400;
+const TOOLS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface TrackerSource {
+  tool: string;
+  /** null for presence-only tools — the DailyStat "unknown" bucket maps back to null here. */
+  model: string | null;
+  lastSeenAt: Date;
+  tokensToday: number;
+  tokens7d: number;
+  activeSecondsToday: number;
+}
+
 router.get(
   "/users/me/tracker",
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const [tokens, sessions, latestHeartbeat, presence] = await Promise.all([
+    const now = new Date();
+    const today = utcDay(now);
+    // Aligned to UTC days so DailyStat rows (per UTC day), Sessions and events all
+    // cover the same window: today plus the six days before it.
+    const since7d = new Date(today.getTime() - (SOURCE_WINDOW_DAYS - 1) * 86_400_000);
+    const since30d = new Date(now.getTime() - TOOLS_WINDOW_MS);
+
+    const [tokens, sessions, latestHeartbeat, dailyStats, events, presence] = await Promise.all([
       prisma.trackerToken.findMany({
         where: { userId, revokedAt: null },
-        select: { lastUsedAt: true },
+        select: { id: true, label: true, lastUsedAt: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
       }),
+      // One query serves both `tools` (30-day distinct, done in memory — Prisma's
+      // `distinct` is in-memory anyway) and the open/recent sessions for `sources`.
       prisma.session.findMany({
-        where: { userId, lastHeartbeatAt: { gte: since } },
-        distinct: ["tool"],
-        select: { tool: true },
+        where: { userId, lastHeartbeatAt: { gte: since30d } },
         orderBy: { lastHeartbeatAt: "desc" },
       }),
       prisma.session.findFirst({
@@ -332,18 +385,88 @@ router.get(
         orderBy: { lastHeartbeatAt: "desc" },
         select: { lastHeartbeatAt: true },
       }),
+      prisma.dailyStat.findMany({ where: { userId, date: { gte: since7d } } }),
+      prisma.activityEvent.findMany({
+        where: { userId, type: { in: ["HEARTBEAT", "SESSION_START"] }, occurredAt: { gte: since7d } },
+        orderBy: { occurredAt: "desc" },
+        take: SOURCE_EVENT_LIMIT,
+        select: { occurredAt: true, payload: true },
+      }),
       presenceFor(userId, req.user!.username),
     ]);
+
     const tokenLastUsedAt = tokens.reduce<Date | null>(
       (max, t) => (t.lastUsedAt && (!max || t.lastUsedAt > max) ? t.lastUsedAt : max),
       null
     );
+
+    const sources = new Map<string, TrackerSource>();
+    const seen = (tool: string, model: string | null, at: Date): TrackerSource => {
+      const key = `${tool}\0${model ?? ""}`;
+      const existing = sources.get(key);
+      if (!existing) {
+        const created: TrackerSource = { tool, model, lastSeenAt: at, tokensToday: 0, tokens7d: 0, activeSecondsToday: 0 };
+        sources.set(key, created);
+        return created;
+      }
+      if (at > existing.lastSeenAt) existing.lastSeenAt = at;
+      return existing;
+    };
+
+    // (1) Folded totals. The row's UTC day is only a floor for lastSeenAt — events and
+    // sessions below refine it to the actual last report time.
+    for (const row of dailyStats) {
+      const source = seen(row.tool, normalizeModel(row.model), row.date);
+      const tokensTotal = row.tokensInput + row.tokensOutput;
+      source.tokens7d += tokensTotal;
+      if (row.date.getTime() === today.getTime()) {
+        source.tokensToday += tokensTotal;
+        source.activeSecondsToday += row.activeSeconds;
+      }
+    }
+
+    // (2) Sessions: any recent one pins lastSeenAt; only OPEN ones still hold tokens
+    // and elapsed time that haven't reached DailyStat yet (bucketed by start day, the
+    // same day foldIntoDailyStat will use when it closes).
+    for (const session of sessions) {
+      if (session.lastHeartbeatAt < since7d) continue;
+      const source = seen(session.tool, normalizeModel(session.model), session.lastHeartbeatAt);
+      if (session.status === "ENDED") continue;
+      const tokensTotal = session.tokensInput + session.tokensOutput;
+      const elapsed = Math.max(0, Math.round((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 1000));
+      source.tokens7d += tokensTotal;
+      if (utcDay(session.startedAt).getTime() === today.getTime()) {
+        source.tokensToday += tokensTotal;
+        source.activeSecondsToday += elapsed;
+      }
+    }
+
+    // (3) Events: the presence pair of every heartbeat plus each v2 `usage[]` source.
+    // Payload fields are read defensively — it's a JSON column written by several
+    // server versions, so shape is asserted, not assumed.
+    const modelOf = (value: unknown) => normalizeModel(typeof value === "string" ? value : null);
+    for (const event of events) {
+      const payload = fromPayloadValue(event.payload);
+      if (typeof payload.tool === "string" && payload.tool) seen(payload.tool, modelOf(payload.model), event.occurredAt);
+      if (!Array.isArray(payload.usage)) continue;
+      for (const entry of payload.usage as unknown[]) {
+        if (!entry || typeof entry !== "object") continue;
+        const { tool, model } = entry as Record<string, unknown>;
+        if (typeof tool === "string" && tool) seen(tool, modelOf(model), event.occurredAt);
+      }
+    }
+
     res.json({
       connected: presence.status !== "offline",
       lastSeenAt: latestHeartbeat?.lastHeartbeatAt ?? null,
       activeTokens: tokens.length,
-      tools: sessions.map((s) => s.tool),
+      // Sessions arrive newest first, so the first occurrence of each tool wins.
+      tools: [...new Set(sessions.map((s) => s.tool))],
       tokenLastUsedAt,
+      heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+      presence: { status: presence.status, activity: presence.activity },
+      sources: [...sources.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()),
+      devices: tokens.map((t) => ({ id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt })),
     });
   })
 );

@@ -20,8 +20,36 @@ export type PresenceStatus = "active" | "idle" | "offline";
 
 // Legacy sentinel: the pre-Phase-9 tracker sent the literal "unknown" for a missing
 // model. Newer trackers send null. Both surface as null in presence so the UI has one
-// "no model" case to handle, not two.
-const LEGACY_UNKNOWN_MODEL = "unknown";
+// "no model" case to handle, not two. It is ALSO the DailyStat bucket for "no model"
+// (DailyStat.model is part of a composite unique key and can't be null — see
+// foldIntoDailyStat) — exported so every reader maps it back to null the same way.
+export const LEGACY_UNKNOWN_MODEL = "unknown";
+
+// Every model string a tracker has ever sent for "I don't know": the legacy literal,
+// the empty string, and Claude Code's "<synthetic>" (its own placeholder for locally
+// generated assistant turns — the live root cause of "my models are shown wrong" on a
+// profile: it leaked through as if it were a real model). Compared case-insensitively
+// after trimming.
+const MODEL_SENTINELS = new Set(["", LEGACY_UNKNOWN_MODEL, "<synthetic>"]);
+
+/**
+ * Canonical model id or null. Applied at the ingestion edge (routes/tracker.ts, for
+ * both the top-level presence model and every `usage[]` entry) so Session.model never
+ * stores a sentinel, and again on read for rows written before this existed.
+ */
+export function normalizeModel(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  return MODEL_SENTINELS.has(trimmed.toLowerCase()) ? null : trimmed;
+}
+
+/** One per-source token delta from a v2 heartbeat (§4.3 `usage[]`), already normalized. */
+export interface UsageEntry {
+  tool: string;
+  model: string | null;
+  tokensInputDelta: number;
+  tokensOutputDelta: number;
+}
 
 export interface PresenceActivity {
   projectAlias: string;
@@ -77,7 +105,9 @@ async function foldIntoDailyStat(session: Session, endedAt: Date): Promise<void>
   // DailyStat.model is part of a composite unique key, which can't be null (Postgres
   // treats NULLs as distinct, breaking the upsert), so the aggregate uses an
   // "unknown" bucket for sessions with no model. Presence still reports null.
-  const statModel = session.model ?? LEGACY_UNKNOWN_MODEL;
+  // normalizeModel() here too: rows opened by a pre-normalization server may still
+  // carry a sentinel, and those must land in the same bucket as null.
+  const statModel = normalizeModel(session.model) ?? LEGACY_UNKNOWN_MODEL;
 
   await prisma.dailyStat.upsert({
     where: {
@@ -107,6 +137,57 @@ async function foldIntoDailyStat(session: Session, endedAt: Date): Promise<void>
   await touchStreak(session.userId, day);
 }
 
+/**
+ * Heartbeat v2 token accounting (§4.3 `usage[]`): credits each per-source delta to
+ * the DailyStat row for `(userId, day, model ?? "unknown", tool)` directly — never
+ * via the Session, which is why routes/tracker.ts extends the Session with 0 tokens
+ * for such heartbeats (no double count when it later folds). Only tokens move here;
+ * `activeSeconds` stays the Session's job, since a source that merely emitted tokens
+ * in the background (a Codex log growing while the user is in Claude Code) is not
+ * where the developer *is*. Entries with no tokens are skipped; duplicates for the
+ * same pair are merged into one upsert; the streak is bumped once, and only if a row
+ * was actually written.
+ */
+export async function foldUsageIntoDailyStat(
+  userId: string,
+  day: Date,
+  usage: readonly UsageEntry[]
+): Promise<void> {
+  const merged = new Map<string, { model: string; tool: string; tokensInput: number; tokensOutput: number }>();
+  for (const entry of usage) {
+    if (entry.tokensInputDelta <= 0 && entry.tokensOutputDelta <= 0) continue;
+    const tool = entry.tool.trim() || "unknown"; // same fallback as routes/tracker.ts's presence tool
+    const model = normalizeModel(entry.model) ?? LEGACY_UNKNOWN_MODEL;
+    const key = `${model}\0${tool}`;
+    const bucket = merged.get(key) ?? { model, tool, tokensInput: 0, tokensOutput: 0 };
+    bucket.tokensInput += entry.tokensInputDelta;
+    bucket.tokensOutput += entry.tokensOutputDelta;
+    merged.set(key, bucket);
+  }
+  if (merged.size === 0) return;
+
+  for (const bucket of merged.values()) {
+    await prisma.dailyStat.upsert({
+      where: { userId_date_model_tool: { userId, date: day, model: bucket.model, tool: bucket.tool } },
+      create: {
+        userId,
+        date: day,
+        model: bucket.model,
+        tool: bucket.tool,
+        tokensInput: bucket.tokensInput,
+        tokensOutput: bucket.tokensOutput,
+        activeSeconds: 0,
+      },
+      update: {
+        tokensInput: { increment: bucket.tokensInput },
+        tokensOutput: { increment: bucket.tokensOutput },
+      },
+    });
+  }
+
+  await touchStreak(userId, day);
+}
+
 /** Closes an open session (idle timeout or explicit session_end) and folds its totals. */
 export async function closeSession(session: Session, endedAt: Date): Promise<Session> {
   if (session.status === "ENDED") return session;
@@ -123,8 +204,9 @@ export function sessionToActivity(session: Session): PresenceActivity {
   return {
     projectAlias: session.projectAlias,
     tool: session.tool,
-    // Normalize both the new null and the legacy "unknown" sentinel to null.
-    model: session.model && session.model !== LEGACY_UNKNOWN_MODEL ? session.model : null,
+    // Normalize the new null and every legacy sentinel ("unknown", "<synthetic>", "")
+    // to null — rows written before ingestion-time normalization may still carry one.
+    model: normalizeModel(session.model),
     startedAt: session.startedAt.toISOString(),
   };
 }
