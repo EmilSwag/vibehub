@@ -6,7 +6,7 @@ import { prisma } from "../db";
 import { env, primaryWebOrigin } from "../env";
 import { encryptSecret } from "../lib/crypto";
 import { asyncHandler, HttpError } from "../lib/http-error";
-import { devLoginSchema } from "../lib/schemas";
+import { devLoginSchema, qaLoginSchema } from "../lib/schemas";
 import { toMeUser } from "../lib/serializers";
 import { optionalAuth } from "../middleware/auth";
 
@@ -230,6 +230,71 @@ router.post(
     res.json({ user: toMeUser(user) });
   })
 );
+
+// Round 5 Phase 6: independent prod QA E2E needs a real session for a throwaway
+// vh-qa-* user without GitHub OAuth and without touching prod's real DEV_LOGIN
+// gate (which is off in prod and stays off — this is a separate, narrower
+// mechanism). Only exists at all when QA_LOGIN_SECRET is set; left unset in
+// every environment by default, including prod unless an operator opts in.
+//
+// The route is registered conditionally, not just guarded inside the handler,
+// so that with no secret configured `POST /auth/qa-login` is genuinely
+// unmatched by any router and falls through to the app's own catch-all 404 —
+// identical status and body to any other unknown route, not a distinguishable
+// "exists but refuses" response.
+if (env.qaLoginSecret) {
+  const QA_LOGIN_RATE_LIMIT = 10;
+  const QA_LOGIN_WINDOW_MS = 60_000;
+  // Single Railway instance for this service (see meta/facts/vibehub-deployment.md)
+  // so in-memory is fine — no shared store needed for a QA-only endpoint.
+  const qaLoginHits = new Map<string, { count: number; windowStart: number }>();
+
+  function qaLoginRateLimitOk(ip: string): boolean {
+    const now = Date.now();
+    const entry = qaLoginHits.get(ip);
+    if (!entry || now - entry.windowStart >= QA_LOGIN_WINDOW_MS) {
+      qaLoginHits.set(ip, { count: 1, windowStart: now });
+      return true;
+    }
+    entry.count += 1;
+    return entry.count <= QA_LOGIN_RATE_LIMIT;
+  }
+
+  // Hash both sides to fixed-length digests first: timingSafeEqual throws on
+  // length mismatch, and comparing raw strings of attacker-controlled length
+  // directly would leak the secret's length through short-circuit timing.
+  function qaSecretMatches(provided: string): boolean {
+    const a = crypto.createHash("sha256").update(provided).digest();
+    const b = crypto.createHash("sha256").update(env.qaLoginSecret!).digest();
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  router.post(
+    "/qa-login",
+    asyncHandler(async (req, res) => {
+      const ip = req.ip ?? "unknown";
+      if (!qaLoginRateLimitOk(ip)) throw new HttpError(429, "Too many requests");
+
+      const provided = req.header("x-qa-secret") ?? "";
+      if (!qaSecretMatches(provided)) throw new HttpError(401, "Invalid QA secret");
+
+      const { username } = qaLoginSchema.parse(req.body);
+
+      let user = await prisma.user.findUnique({ where: { username } });
+      if (!user) {
+        // onboardedAt/roles left at their schema defaults (null) — a fresh QA
+        // user walks onboarding for real, same as a fresh GitHub signup would.
+        user = await prisma.user.create({
+          data: { username, displayName: username, isDevAccount: true },
+        });
+      }
+
+      const token = await createAuthSession(user.id, req.header("user-agent"));
+      setSessionCookie(res, token);
+      res.json({ user: toMeUser(user) });
+    })
+  );
+}
 
 router.post(
   "/logout",

@@ -13,6 +13,10 @@ export const env = {
   githubCallbackUrl:
     process.env.GITHUB_CALLBACK_URL ?? "http://localhost:4000/api/v1/auth/github/callback",
   devLoginEnabled: process.env.DEV_LOGIN_ENABLED === "true",
+  // Round 5 Phase 6: optional prod QA login (routes/auth.ts POST /auth/qa-login),
+  // scoped to vh-qa-* usernames only. Unset (the default) => the route doesn't
+  // exist, not just refuses — see the route registration for why.
+  qaLoginSecret: process.env.QA_LOGIN_SECRET || null,
   sessionIdleTimeoutMs: Number(process.env.SESSION_IDLE_TIMEOUT_MS ?? 600_000),
   isProduction: process.env.NODE_ENV === "production",
   // Where avatar files live. On Railway this is a persistent volume mounted at

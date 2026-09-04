@@ -9,6 +9,12 @@ export const usernameSchema = z
 
 export const devLoginSchema = z.object({ username: usernameSchema });
 
+// Round 5 Phase 6: feature-flagged prod QA login (routes/auth.ts POST /auth/qa-login).
+// Scoped to a fixed prefix so it can never collide with/impersonate a real username.
+export const qaLoginSchema = z.object({
+  username: z.string().regex(/^vh-qa-[a-z0-9-]{1,20}$/, "must match ^vh-qa-[a-z0-9-]{1,20}$"),
+});
+
 // Self-selected onboarding role cards (User.roles, multi-select, stored as CSV).
 // Archetype stays computed separately.
 export const USER_ROLES = ["designer", "developer", "gamedev", "creator", "founder"] as const;
