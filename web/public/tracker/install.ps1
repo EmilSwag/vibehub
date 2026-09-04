@@ -1,4 +1,4 @@
-# VibeHub tracker — one-line install for Windows (PowerShell).
+﻿# VibeHub tracker — one-line install for Windows (PowerShell).
 #
 #   $env:VIBEHUB_TOKEN="<TRACKER_TOKEN>"; irm https://web-production-da778.up.railway.app/tracker/install.ps1 | iex
 #
