@@ -10,6 +10,7 @@ import { decryptGithubToken, fetchOwnRepos, NoGithubTokenError } from "../lib/gi
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { computeLevel, computeLevels } from "../lib/level";
 import { detectIcon, detectLabel } from "../lib/links";
+import { presenceFor } from "../lib/sessions";
 import {
   createTrackerTokenSchema,
   patchMeSchema,
@@ -277,9 +278,18 @@ router.get(
 
 /**
  * "Is my tracker actually talking to us?" — drives the Connect-your-tools panel
- * (onboarding step, Home banner, Settings). `connected` flips true on the first
- * authenticated heartbeat (TrackerToken.lastUsedAt); `tools` lists what it has
- * seen recently so the user gets confirmation that e.g. Claude Code is counted.
+ * (onboarding step, Home banner, Settings). `connected`/`lastSeenAt` are
+ * heartbeat-based (reuse `presenceFor()`, §lib/sessions.ts) — NOT
+ * `TrackerToken.lastUsedAt`. That field also gets bumped by `/tracker/verify`
+ * (the `login` command's own token check, before any daemon or heartbeat
+ * exists), so a `connected` derived from it flipped true — and hid the Home
+ * banner — the instant `login` ran, well before the tracker was actually
+ * running or reporting anything. Round 5 root cause of a live PO report:
+ * banner gone, presence dot still empty. The old signal is still useful (it's
+ * genuinely "has this token ever been used for anything") — exposed as the
+ * new `tokenLastUsedAt` field rather than folded back into `lastSeenAt`.
+ * `tools` lists what's been seen recently so the user gets confirmation that
+ * e.g. Claude Code is counted.
  */
 router.get(
   "/users/me/tracker",
@@ -287,7 +297,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const [tokens, sessions] = await Promise.all([
+    const [tokens, sessions, latestHeartbeat, presence] = await Promise.all([
       prisma.trackerToken.findMany({
         where: { userId, revokedAt: null },
         select: { lastUsedAt: true },
@@ -298,16 +308,23 @@ router.get(
         select: { tool: true },
         orderBy: { lastHeartbeatAt: "desc" },
       }),
+      prisma.session.findFirst({
+        where: { userId },
+        orderBy: { lastHeartbeatAt: "desc" },
+        select: { lastHeartbeatAt: true },
+      }),
+      presenceFor(userId, req.user!.username),
     ]);
-    const lastSeenAt = tokens.reduce<Date | null>(
+    const tokenLastUsedAt = tokens.reduce<Date | null>(
       (max, t) => (t.lastUsedAt && (!max || t.lastUsedAt > max) ? t.lastUsedAt : max),
       null
     );
     res.json({
-      connected: lastSeenAt !== null,
-      lastSeenAt,
+      connected: presence.status !== "offline",
+      lastSeenAt: latestHeartbeat?.lastHeartbeatAt ?? null,
       activeTokens: tokens.length,
       tools: sessions.map((s) => s.tool),
+      tokenLastUsedAt,
     });
   })
 );
