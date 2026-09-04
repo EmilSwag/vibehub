@@ -7,9 +7,30 @@
   color: var(--vh-text-dim);
 }
 
+.dotWrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
 .dot {
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.pulse {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  opacity: 0.4;
+  animation: vh-status-pulse 1800ms var(--ease-out) infinite;
+}
+
+@keyframes vh-status-pulse {
+  0% { opacity: 0.4; transform: scale(0.7); }
+  70% { opacity: 0; transform: scale(1.9); }
+  100% { opacity: 0; transform: scale(1.9); }
 }

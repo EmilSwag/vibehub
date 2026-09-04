@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE, usersApi } from "../lib/api";
 import { buildConnectPrompt } from "../lib/connectPrompt";
-import { formatDateTime, formatShortDate } from "../lib/format";
+import { elapsedShort, formatDateTime, formatShortDate, toolLabel } from "../lib/format";
+import { useExitTransition } from "../lib/motion";
 import type { ConnectPromptTarget } from "../lib/connectPrompt";
 import type { TrackerStatus, TrackerToken } from "../types";
+import { useAuth } from "../context/AuthContext";
+import { useRealtime } from "../context/RealtimeContext";
 import { Button } from "./ui/Button";
 import { Icon } from "./ui/Icon";
 import { Skeleton } from "./ui/Skeleton";
+import { ConnectSuccessModal } from "./ui/ConnectSuccessModal";
 import styles from "./ConnectTools.module.css";
 
 type Os = "mac" | "windows";
@@ -22,9 +26,11 @@ const SUPPORTED = [
   { id: "quadcode", name: "Quadcode", sees: "project · time" },
 ];
 
-const TOOL_NAMES: Record<string, string> = Object.fromEntries(SUPPORTED.map((t) => [t.id, t.name]));
-// Tracker adapters report kebab-case ("claude-code"); older builds used snake_case.
-const toolLabel = (id: string): string => TOOL_NAMES[id.replace(/-/g, "_")] ?? TOOL_NAMES[id] ?? id;
+// Shown once per browser session, on either surface (Home banner or Settings) —
+// whichever notices the connection first. Also covers landing on an already-
+// connected account (no live "flip" to catch), since the check is level- not
+// edge-triggered: "is connected, haven't celebrated yet" rather than "just changed".
+const CELEBRATED_KEY = "vh-connect-celebrated";
 
 /** The three targets `buildConnectPrompt` knows how to write for (round 5: Home flow). */
 const TARGETS: { id: ConnectPromptTarget; label: string }[] = [
@@ -46,8 +52,10 @@ function installCommand(os: Os, token: string): string {
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
 interface Props {
-  /** Compact = onboarding/banner density; full = Settings (shows device list). */
-  variant?: "compact" | "full";
+  /** compact = onboarding (always visible); banner = Home (hides itself once
+   * connected, with an exit transition); full = Settings (shows device list).
+   * compact and banner render identically otherwise. */
+  variant?: "compact" | "banner" | "full";
   /** Fires the first time we observe a live heartbeat. */
   onConnected?: () => void;
 }
@@ -58,6 +66,8 @@ interface Props {
  * card flips to "Connected" on the first one. Polls every 5s while waiting.
  */
 export function ConnectTools({ variant = "compact", onConnected }: Props) {
+  const { user } = useAuth();
+  const { presences } = useRealtime();
   const [status, setStatus] = useState<TrackerStatus | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TrackerToken[]>([]);
@@ -66,6 +76,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [celebrating, setCelebrating] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -93,6 +104,21 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     return () => window.clearInterval(id);
   }, [status?.connected, refresh]);
 
+  // Level-triggered on purpose (see CELEBRATED_KEY comment above) — fires once
+  // per session the moment `connected` is true and hasn't been shown yet.
+  useEffect(() => {
+    if (!status?.connected) return;
+    if (sessionStorage.getItem(CELEBRATED_KEY)) return;
+    sessionStorage.setItem(CELEBRATED_KEY, "1");
+    setCelebrating(true);
+  }, [status?.connected]);
+
+  const me = user ? presences.get(user.username) : undefined;
+  const celebrateBody =
+    me?.status === "active" && me.activity
+      ? `${me.activity.projectAlias} · ${toolLabel(me.activity.tool)} · ${elapsedShort(me.activity.startedAt)}`
+      : "Waiting for the first heartbeat.";
+
   const createToken = useCallback(async () => {
     setCreating(true);
     setError(null);
@@ -111,12 +137,16 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     }
   }, [os, variant]);
 
-  // Compact (Home): skip the button — mint the token the moment we know the
+  // compact/banner: skip the button — mint the token the moment we know the
   // tracker isn't connected, so step 2's prompt is ready to copy immediately.
   useEffect(() => {
-    if (variant !== "compact" || !status || status.connected || token || creating) return;
+    if (variant === "full" || !status || status.connected || token || creating) return;
     void createToken();
   }, [variant, status, token, creating, createToken]);
+
+  // Home only: hide once connected, with an exit transition instead of vanishing.
+  const showCard = variant !== "banner" || !status?.connected;
+  const { render: renderCard, closing: cardClosing } = useExitTransition(showCard, 260);
 
   const command = useMemo(() => (token ? installCommand(os, token) : null), [os, token]);
   const prompt = useMemo(
@@ -141,7 +171,10 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
 
   if (!status) {
     return (
-      <div className={cx(styles.card, styles.cardLoading)} aria-busy="true">
+      <div
+        className={cx(styles.card, styles.cardLoading, variant === "banner" && styles.bannerSpacing)}
+        aria-busy="true"
+      >
         <Skeleton width="40%" height={14} />
         <Skeleton width="90%" height={12} />
         <Skeleton width="70%" height={12} />
@@ -175,8 +208,22 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     </div>
   );
 
+  if (!renderCard) {
+    return (
+      <ConnectSuccessModal open={celebrating} body={celebrateBody} onClose={() => setCelebrating(false)} />
+    );
+  }
+
   return (
-    <div className={cx(styles.card, status.connected && styles.cardConnected)}>
+    <>
+    <div
+      className={cx(
+        styles.card,
+        status.connected && styles.cardConnected,
+        variant === "banner" && styles.bannerSpacing,
+        variant === "banner" && (cardClosing ? "leave" : "reveal")
+      )}
+    >
       <div className={styles.head}>
         <span className={cx(styles.dot, status.connected && styles.dotLive)} aria-hidden="true" />
         <div className={styles.headText}>
@@ -188,14 +235,14 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
               ? status.tools.length
                 ? `Seeing ${status.tools.map(toolLabel).join(", ")}`
                 : "Waiting for your first session…"
-              : variant === "compact"
+              : variant !== "full"
                 ? "Paste a prompt into your AI tool — no terminal needed."
                 : "A tiny local tracker turns your AI sessions into status, time and token stats."}
           </span>
         </div>
       </div>
 
-      {!status.connected && variant === "compact" && (
+      {!status.connected && variant !== "full" && (
         <>
           <ol className={styles.steps}>
             <li>
@@ -343,5 +390,11 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
 
       {error && <p className={styles.error}>{error}</p>}
     </div>
+    <ConnectSuccessModal
+      open={celebrating}
+      body={celebrateBody}
+      onClose={() => setCelebrating(false)}
+    />
+    </>
   );
 }

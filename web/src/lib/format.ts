@@ -27,6 +27,19 @@ export function presenceLine(activity: {
   return `in project ${activity.projectAlias} · ${activity.tool} · ${elapsedShort(activity.startedAt)}`;
 }
 
+// Tracker adapters report kebab-case ("claude-code"); older builds used snake_case.
+const TOOL_NAMES: Record<string, string> = {
+  claude_code: "Claude Code",
+  codex: "Codex CLI",
+  cursor: "Cursor",
+  vscode: "VS Code",
+  quadcode: "Quadcode",
+};
+
+export function toolLabel(id: string): string {
+  return TOOL_NAMES[id.replace(/-/g, "_")] ?? TOOL_NAMES[id] ?? id;
+}
+
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;

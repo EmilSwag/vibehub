@@ -62,10 +62,6 @@
 }
 
 /* ---- round 3 ---- */
-.banner {
-  margin: 0 0 22px;
-}
-
 .youCard {
   display: flex;
   align-items: center;
@@ -82,24 +78,6 @@
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
-}
-.youStatus {
-  font-size: 12.5px;
-  color: var(--vh-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.youDot {
-  flex: none;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1.5px solid var(--vh-text-faint);
-}
-.youDotLive {
-  border-color: var(--vh-text);
-  background: var(--vh-text);
 }
 
 .pill {

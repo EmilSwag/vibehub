@@ -1,0 +1,52 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: var(--vh-space-4);
+  animation: vh-fade-in var(--dur-enter) var(--ease-out) both;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 320px;
+  background: var(--vh-surface);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-pop);
+  padding: var(--vh-space-4);
+  text-align: center;
+  /* Reuses the shared fade-up keyframe (styles/motion.css) at the spec'd 320ms —
+   * the shared `.reveal` utility is 560ms (page-reveal), too slow for a modal. */
+  animation: vh-fade-up var(--dur-enter) var(--ease-out) both;
+}
+
+.check {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--vh-space-2);
+  border-radius: 50%;
+  background: var(--vh-accent);
+  color: var(--vh-on-accent);
+  /* Reuses the shared pop keyframe at 200ms (spec) — `.pop` utility is 320ms. */
+  animation: vh-pop var(--dur-state) var(--ease-spring) both;
+}
+
+.title {
+  margin: 0 0 var(--vh-space-1);
+  font-size: 20px;
+}
+
+.body {
+  margin: 0 0 var(--vh-space-3);
+  font-family: var(--vh-font-sans);
+  font-size: 13.5px;
+  color: var(--vh-text-dim);
+}
+
+.action {
+  width: 100%;
+}

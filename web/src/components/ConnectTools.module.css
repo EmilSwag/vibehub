@@ -19,6 +19,9 @@
 .cardConnected {
   border-color: var(--vh-text);
 }
+.bannerSpacing {
+  margin-bottom: 22px;
+}
 
 .head {
   display: flex;
