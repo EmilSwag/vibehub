@@ -16,7 +16,9 @@
  * or null.
  */
 
-import { decryptSecret } from "./crypto";
+import { prisma } from "../db";
+import { env } from "../env";
+import { decryptSecret, encryptSecret } from "./crypto";
 
 export interface RepoRef {
   owner: string;
@@ -91,6 +93,112 @@ export function decryptGithubToken(encrypted: string | null | undefined): string
   } catch {
     return null;
   }
+}
+
+const GITHUB_OAUTH_TOKEN_URL = "https://github.com/login/oauth/access_token";
+// Renew a little before the token actually dies so an in-flight request never races
+// the expiry boundary.
+const TOKEN_EXPIRY_SKEW_MS = 60_000;
+
+/**
+ * Thrown when a user *did* connect GitHub but the stored credentials can no longer
+ * be used and can't be renewed (access token expired/revoked and no usable refresh
+ * token) — i.e. the only fix is for the user to sign in with GitHub again. Callers
+ * map this to a 409 with a "reconnect GitHub" message, distinct from
+ * NoGithubTokenError (never connected at all).
+ */
+export class GithubAuthError extends Error {}
+
+/** Just the User columns getFreshGithubToken needs — so callers can pass a full row or a narrow select. */
+export interface GithubCredentialFields {
+  id: string;
+  githubAccessToken: string | null;
+  githubRefreshToken: string | null;
+  githubTokenExpiresAt: Date | null;
+  githubRefreshTokenExpiresAt: Date | null;
+}
+
+interface GithubRefreshResponse {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  refresh_token_expires_in?: number;
+  error?: string;
+  error_description?: string;
+}
+
+/**
+ * A GitHub access token that is valid *right now* for `user`, or null if the user has
+ * never connected GitHub.
+ *
+ * GitHub App user-to-server tokens expire (~8h); classic OAuth-App tokens don't. This
+ * hides that difference from callers:
+ *  - no stored token            → null (NoGithubTokenError territory — never connected)
+ *  - non-expiring / still valid → the stored access token, as-is
+ *  - expired but refreshable    → transparently refreshed via the refresh token, the
+ *                                 new access+refresh pair persisted, fresh token returned
+ *  - expired and NOT refreshable→ throws GithubAuthError (caller ⇒ "reconnect GitHub")
+ *
+ * Accounts connected before refresh support existed have a (now-expired) access token
+ * and null refresh fields: `githubTokenExpiresAt` is null, so the stale token is tried
+ * once and GitHub's 401 surfaces at the call site — the caller maps that to reconnect.
+ */
+export async function getFreshGithubToken(user: GithubCredentialFields): Promise<string | null> {
+  const accessToken = decryptGithubToken(user.githubAccessToken);
+  if (!accessToken) return null;
+
+  const expiresAt = user.githubTokenExpiresAt;
+  // Non-expiring (classic OAuth App / legacy row) or comfortably in-date: use as-is.
+  if (!expiresAt || expiresAt.getTime() - Date.now() > TOKEN_EXPIRY_SKEW_MS) {
+    return accessToken;
+  }
+
+  // Expiring token that's at/near expiry — try to refresh.
+  const refreshToken = decryptGithubToken(user.githubRefreshToken);
+  const refreshExpiresAt = user.githubRefreshTokenExpiresAt;
+  if (!refreshToken || (refreshExpiresAt && refreshExpiresAt.getTime() <= Date.now())) {
+    throw new GithubAuthError("GitHub access expired and cannot be refreshed");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(GITHUB_OAUTH_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        client_id: env.githubClientId,
+        client_secret: env.githubClientSecret,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    });
+  } catch {
+    // Network/timeout talking to GitHub — not the user's fault, don't force a reconnect.
+    throw new Error("GitHub token refresh request failed");
+  }
+
+  const json = (await res.json().catch(() => ({}))) as GithubRefreshResponse;
+  if (!res.ok || !json.access_token) {
+    // GitHub rejected the refresh token (revoked, app uninstalled, expired) — reconnect.
+    throw new GithubAuthError(`GitHub token refresh rejected: ${json.error ?? res.status}`);
+  }
+
+  // Persist the rotated pair (GitHub rotates the refresh token on each use).
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      githubAccessToken: encryptSecret(json.access_token),
+      githubRefreshToken: json.refresh_token ? encryptSecret(json.refresh_token) : user.githubRefreshToken,
+      githubTokenExpiresAt:
+        typeof json.expires_in === "number" ? new Date(Date.now() + json.expires_in * 1000) : null,
+      githubRefreshTokenExpiresAt:
+        typeof json.refresh_token_expires_in === "number"
+          ? new Date(Date.now() + json.refresh_token_expires_in * 1000)
+          : refreshExpiresAt,
+    },
+  });
+  return json.access_token;
 }
 
 function authHeaders(token: string | null | undefined): Record<string, string> {

@@ -22,8 +22,18 @@ const GITHUB_TIMEOUT_MS = 10_000;
 
 interface GithubTokenResponse {
   access_token?: string;
+  // GitHub Apps with expiring user tokens also return these; classic OAuth Apps omit
+  // them (their tokens don't expire). All optional so both app types parse cleanly.
+  refresh_token?: string;
+  expires_in?: number;
+  refresh_token_expires_in?: number;
   error?: string;
   error_description?: string;
+}
+
+/** GitHub App tokens carry expiries; turn `expires_in` seconds into an absolute Date (or null). */
+function expiryFromSeconds(seconds: number | undefined): Date | null {
+  return typeof seconds === "number" && seconds > 0 ? new Date(Date.now() + seconds * 1000) : null;
 }
 
 interface GithubUserResponse {
@@ -142,7 +152,17 @@ router.get(
     const ghUser = (await ghUserRes.json()) as GithubUserResponse;
 
     const githubId = String(ghUser.id);
-    const encryptedToken = encryptSecret(tokenJson.access_token);
+    // Store the whole credential set, not just the access token: GitHub App user
+    // tokens expire in ~8h, and without the refresh token the server can't renew
+    // them — the repo picker then 401s a few hours after sign-in. Refresh token is
+    // encrypted at rest exactly like the access token. Classic OAuth Apps omit these
+    // fields, so the columns stay null and the token is treated as non-expiring.
+    const githubCredentials = {
+      githubAccessToken: encryptSecret(tokenJson.access_token),
+      githubRefreshToken: tokenJson.refresh_token ? encryptSecret(tokenJson.refresh_token) : null,
+      githubTokenExpiresAt: expiryFromSeconds(tokenJson.expires_in),
+      githubRefreshTokenExpiresAt: expiryFromSeconds(tokenJson.refresh_token_expires_in),
+    };
 
     let user = await prisma.user.findUnique({ where: { githubId } });
     if (user) {
@@ -150,7 +170,7 @@ router.get(
         where: { id: user.id },
         data: {
           githubUsername: ghUser.login,
-          githubAccessToken: encryptedToken,
+          ...githubCredentials,
           avatarUrl: user.avatarUrl ?? ghUser.avatar_url ?? null,
         },
       });
@@ -162,7 +182,7 @@ router.get(
           displayName: ghUser.name?.trim() || ghUser.login,
           githubId,
           githubUsername: ghUser.login,
-          githubAccessToken: encryptedToken,
+          ...githubCredentials,
           avatarUrl: ghUser.avatar_url ?? null,
         },
       });

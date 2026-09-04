@@ -52,6 +52,14 @@ model User {
   githubId           String?   @unique
   githubUsername     String?
   githubAccessToken  String?
+  // GitHub App user-to-server tokens expire (~8h). We keep the refresh token
+  // (encrypted, like the access token) and both expiries so the server can mint a
+  // fresh access token silently instead of forcing a re-login. Null for classic
+  // OAuth-App tokens (which don't expire) and for accounts connected before this
+  // column existed — those must reconnect once to populate it. See lib/github.ts.
+  githubRefreshToken          String?
+  githubTokenExpiresAt        DateTime?
+  githubRefreshTokenExpiresAt DateTime?
   passwordHash       String?
   archetype          Archetype?
   archetypeComputedAt DateTime?

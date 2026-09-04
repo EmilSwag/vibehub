@@ -6,7 +6,7 @@ import multer from "multer";
 import { prisma } from "../db";
 import { env } from "../env";
 import { generateRawToken, hashToken } from "../lib/crypto";
-import { decryptGithubToken, fetchOwnRepos, NoGithubTokenError } from "../lib/github";
+import { fetchOwnRepos, getFreshGithubToken, GithubAuthError, NoGithubTokenError } from "../lib/github";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { computeLevel, computeLevels } from "../lib/level";
 import { detectIcon, detectLabel } from "../lib/links";
@@ -165,20 +165,39 @@ router.post(
 /**
  * Repo picker (round 5) — the owner's own repos, for attaching one to a project.
  * Auth precedence and scope policy: lib/github.ts's fetchOwnRepos. 409 (not 401/
- * 403) when there's simply no GitHub account connected yet — this is a normal,
- * expected state for a dev-login/username account, not an auth failure.
+ * 403) covers every "the browser is authenticated but GitHub access isn't usable"
+ * case — never connected, or connected-but-expired — because the fix for all of
+ * them is the same user action (sign in with GitHub), and the web treats 409 here
+ * as "show the connect/reconnect hint" rather than a hard error.
+ *
+ * getFreshGithubToken renews an expired GitHub App token transparently; it only
+ * throws GithubAuthError when renewal is impossible (no/rejected refresh token).
+ * A late 401 from GitHub itself — token looked in-date to us but GitHub rejected it
+ * (revoked, app uninstalled, or a legacy row whose real expiry we never stored) —
+ * is mapped here too, so this route never degrades into an opaque 500.
  */
 router.get(
   "/users/me/github/repos",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const token = decryptGithubToken(req.user!.githubAccessToken);
+    let token: string | null;
+    try {
+      token = await getFreshGithubToken(req.user!);
+    } catch (err) {
+      if (err instanceof GithubAuthError) {
+        throw new HttpError(409, "GitHub access expired. Sign in with GitHub again to reconnect.");
+      }
+      throw err;
+    }
     try {
       const repos = await fetchOwnRepos(req.user!.id, token);
       res.json({ repos });
     } catch (err) {
       if (err instanceof NoGithubTokenError) {
         throw new HttpError(409, "No GitHub account connected. Sign in with GitHub to list your repos.");
+      }
+      if (err instanceof Error && /^GitHub 401$/.test(err.message)) {
+        throw new HttpError(409, "GitHub access expired. Sign in with GitHub again to reconnect.");
       }
       throw err;
     }

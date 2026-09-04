@@ -5,7 +5,7 @@ import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../db";
 import { env } from "../env";
-import { decryptGithubToken, fetchRepoActivity, parseGithubRepoUrl } from "../lib/github";
+import { fetchRepoActivity, getFreshGithubToken, parseGithubRepoUrl } from "../lib/github";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import {
   createProjectSchema,
@@ -232,7 +232,17 @@ router.get(
   asyncHandler(async (req, res) => {
     const project = await prisma.project.findUnique({
       where: { id: req.params.id },
-      include: { owner: { select: { githubAccessToken: true } } },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            githubAccessToken: true,
+            githubRefreshToken: true,
+            githubTokenExpiresAt: true,
+            githubRefreshTokenExpiresAt: true,
+          },
+        },
+      },
     });
     if (!project || (!project.isPublic && project.ownerId !== req.user?.id)) {
       throw new HttpError(404, "Project not found");
@@ -243,7 +253,10 @@ router.get(
       return;
     }
     try {
-      const token = decryptGithubToken(project.owner.githubAccessToken);
+      // Refreshes the owner's GitHub App token if it has expired (and persists the new
+      // one). Null → falls back to the server GITHUB_TOKEN/anonymous inside fetchRepoActivity;
+      // GithubAuthError (owner must reconnect) is caught below and degrades to no commits.
+      const token = await getFreshGithubToken(project.owner);
       const activity = await fetchRepoActivity(ref, token, 30);
       res.json(activity);
     } catch {

@@ -25,6 +25,10 @@ model User {
   githubId            String?   @unique
   githubUsername      String?
   githubAccessToken   String?
+  // Mirror of schema.prisma — GitHub App token refresh support. See lib/github.ts.
+  githubRefreshToken          String?
+  githubTokenExpiresAt        DateTime?
+  githubRefreshTokenExpiresAt DateTime?
   passwordHash        String?
   archetype           String? // Archetype: CODER | ARTIST | DIRECTOR | GENERALIST
   archetypeComputedAt DateTime?
