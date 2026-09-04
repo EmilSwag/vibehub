@@ -148,7 +148,7 @@ model Session {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   projectAlias    String
   tool            String
-  model           String
+  model           String?  // null for presence-only tools (Cursor/Quadcode/Grok/ChatGPT); set for Claude Code/Codex
   status          String   @default("ACTIVE") // ACTIVE | IDLE | ENDED
   startedAt       DateTime @default(now())
   lastHeartbeatAt DateTime @default(now())

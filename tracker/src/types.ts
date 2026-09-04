@@ -39,7 +39,12 @@ export interface HeartbeatPayload {
   eventType: HeartbeatEventType;
   projectAlias: string;
   tool: string;
-  model: string;
+  /**
+   * The AI model in use when it's knowable (log-backed tools: Claude Code, Codex),
+   * `null` otherwise (presence-only tools: Cursor, Quadcode, Grok, ChatGPT app). The
+   * tool is always sent; only the model degrades to null.
+   */
+  model: string | null;
   tokensInputDelta?: number;
   tokensOutputDelta?: number;
   occurredAt: string;

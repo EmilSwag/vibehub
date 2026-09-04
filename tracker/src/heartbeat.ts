@@ -6,12 +6,11 @@ import type { SendResult } from "./queue";
 import { markAuthRejected, readStatus, writeOfflineStatus, writeStatus } from "./statusFile";
 import type { HeartbeatPayload, QueuedEvent, TrackerConfig } from "./types";
 
-const UNKNOWN_MODEL = "unknown";
-
 interface ActiveSession {
   projectAlias: string;
   tool: string;
-  model: string;
+  /** null when the tool exposes no model (presence-only tools). */
+  model: string | null;
   startedAt: string;
 }
 
@@ -125,13 +124,16 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
 
   if (detection && detection.active && alias !== null) {
     const tool = detection.tool;
-    const model = detection.model ?? state.activeSession?.model ?? UNKNOWN_MODEL;
+    // Carry the model when knowable, else null. A previously-known model is kept if
+    // this poll saw none (log line without a model field), so a session doesn't
+    // flip known → null mid-run.
+    const model = detection.model ?? state.activeSession?.model ?? null;
     const changed =
       !state.activeSession ||
       state.activeSession.projectAlias !== alias ||
       state.activeSession.tool !== tool ||
-      // model unknown → known is a refinement, not a new session
-      (state.activeSession.model !== model && state.activeSession.model !== UNKNOWN_MODEL);
+      // model null → known is a refinement, not a new session
+      (state.activeSession.model !== model && state.activeSession.model !== null);
 
     if (changed) {
       if (state.activeSession) {

@@ -187,7 +187,10 @@ model Session {
   user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   projectAlias     String
   tool             String
-  model            String
+  // null when the tool exposes no model (presence-only tools: Cursor, Quadcode,
+  // Grok, ChatGPT app). Known for log-backed tools (Claude Code, Codex). The tool
+  // is always set; only the model can be null.
+  model            String?
   status           SessionStatus @default(ACTIVE)
   startedAt        DateTime      @default(now())
   lastHeartbeatAt  DateTime      @default(now())

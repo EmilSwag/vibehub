@@ -52,7 +52,9 @@ export async function computeStats(user: User, rangeDays: number) {
   for (const row of dailyStats) add(row.model, row.tool, row.tokensInput, row.tokensOutput, row.activeSeconds);
   for (const session of openSessions) {
     const elapsed = Math.max(0, Math.round((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 1000));
-    add(session.model, session.tool, session.tokensInput, session.tokensOutput, elapsed);
+    // Match the DailyStat "unknown" bucket (foldIntoDailyStat) so an open no-model
+    // session and its later-folded self aggregate into the same row.
+    add(session.model ?? "unknown", session.tool, session.tokensInput, session.tokensOutput, elapsed);
   }
 
   const byModel = [...buckets.values()].sort(

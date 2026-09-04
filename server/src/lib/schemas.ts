@@ -106,7 +106,8 @@ export const heartbeatSchema = z.object({
   eventType: z.enum(HEARTBEAT_EVENT_TYPES),
   projectAlias: z.string().min(1).max(200),
   tool: z.string().min(1).max(60).optional(),
-  model: z.string().min(1).max(60).optional(),
+  // null for presence-only tools (no model knowable); omitted by older trackers.
+  model: z.string().min(1).max(60).nullable().optional(),
   tokensInputDelta: z.number().int().nonnegative().optional(),
   tokensOutputDelta: z.number().int().nonnegative().optional(),
   occurredAt: z.string().datetime(),

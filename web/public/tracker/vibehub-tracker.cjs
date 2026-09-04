@@ -2540,8 +2540,30 @@ var import_node_child_process = require("node:child_process"), import_node_util 
   { tool: "quadcode", names: ["genui", "quadcode", "quadcode ai"], titleSuffixes: ["quadcode ai"] },
   { tool: "claude-code", names: ["claude"], titleSuffixes: [], logBacked: !0 },
   { tool: "codex", names: ["codex"], titleSuffixes: [], logBacked: !0 },
-  { tool: "chatgpt", names: ["chatgpt"], titleSuffixes: ["chatgpt"] }
-], ProcessAdapter = class {
+  { tool: "chatgpt", names: ["chatgpt"], titleSuffixes: ["chatgpt"] },
+  // xAI Grok desktop/CLI. No log adapter, so it's presence-only with a null model.
+  { tool: "grok", names: ["grok"], titleSuffixes: ["grok"] }
+], JUNK_TITLE_PATTERNS = [
+  /wndname$/i,
+  // OleMainThreadWndName, OleDdeWndName, …
+  /^default ime$/i,
+  /^msctfime ui$/i,
+  /^m$/i,
+  /^dde server window$/i,
+  /gdi\+ window/i,
+  /broadcasteventwindow/i,
+  // .NET-BroadcastEventWindow.*
+  /^cicmarshalwnd$/i,
+  /mediacontextnotificationwindow/i,
+  /^chrome_widgetwin/i,
+  /^hidden window$/i,
+  /^\.net-/i
+];
+function isRealWindowTitle(title) {
+  let t = title?.trim();
+  return !t || t === "N/A" ? !1 : !JUNK_TITLE_PATTERNS.some((re) => re.test(t));
+}
+var ProcessAdapter = class {
   constructor(idleAfterMs) {
     this.idleAfterMs = idleAfterMs;
   }
@@ -2554,7 +2576,7 @@ var import_node_child_process = require("node:child_process"), import_node_util 
       for (let rule of RULES) {
         let matches = procs.filter((p) => rule.names.includes(p.name));
         if (matches.length === 0) continue;
-        let titled = matches.find((p) => p.title && p.title.trim() && p.title !== "N/A"), title = titled?.title?.trim() ?? null, prev = this.seen.get(rule.tool), changedAt = !prev || prev.title !== title ? now : prev.changedAt;
+        let titled = matches.find((p) => isRealWindowTitle(p.title)), title = titled ? titled.title.trim() : null, prev = this.seen.get(rule.tool), changedAt = !prev || prev.title !== title ? now : prev.changedAt;
         this.seen.set(rule.tool, { title, changedAt });
         let idle = now - changedAt > this.idleAfterMs;
         out.set(rule.tool, {
@@ -2616,6 +2638,7 @@ async function cwdOf(pid) {
   }
 }
 function projectFromTitle(title, suffixes) {
+  if (!isRealWindowTitle(title)) return null;
   let t = title.replace(/^[●•*]\s*/, "").trim(), lower = t.toLowerCase();
   for (let s of suffixes) {
     if (lower.endsWith(` - ${s}`)) {
@@ -2626,7 +2649,9 @@ function projectFromTitle(title, suffixes) {
   }
   if (!t) return null;
   let parts = t.split(" - ").map((p) => p.trim()).filter(Boolean);
-  return parts.length === 0 ? null : parts[parts.length - 1].replace(/\s*\[.*?\]\s*$/, "").trim() || null;
+  if (parts.length === 0) return null;
+  let candidate = parts[parts.length - 1].replace(/\s*\[.*?\]\s*$/, "").trim();
+  return !candidate || !isRealWindowTitle(candidate) ? null : /[a-z0-9]/i.test(candidate) ? candidate : null;
 }
 
 // src/detector.ts
@@ -2722,7 +2747,6 @@ function markAuthRejected(rejected) {
 }
 
 // src/heartbeat.ts
-var UNKNOWN_MODEL = "unknown";
 function createLoopState(config) {
   return {
     activeSession: null,
@@ -2783,9 +2807,9 @@ async function tick(config, state) {
   detection && (state.pendingTokensIn += detection.tokensInputDelta, state.pendingTokensOut += detection.tokensOutputDelta);
   let alias = detection ? resolveProjectAlias(detection.cwd, config, detection.projectHint) : null;
   if (detection && detection.active && alias !== null) {
-    let tool = detection.tool, model = detection.model ?? state.activeSession?.model ?? UNKNOWN_MODEL;
-    !state.activeSession || state.activeSession.projectAlias !== alias || state.activeSession.tool !== tool || // model unknown → known is a refinement, not a new session
-    state.activeSession.model !== model && state.activeSession.model !== UNKNOWN_MODEL ? (state.activeSession && await endActiveSession(config, state.activeSession, nowIso), state.activeSession = { projectAlias: alias, tool, model, startedAt: nowIso }, await sendOrQueue(config, {
+    let tool = detection.tool, model = detection.model ?? state.activeSession?.model ?? null;
+    !state.activeSession || state.activeSession.projectAlias !== alias || state.activeSession.tool !== tool || // model null → known is a refinement, not a new session
+    state.activeSession.model !== model && state.activeSession.model !== null ? (state.activeSession && await endActiveSession(config, state.activeSession, nowIso), state.activeSession = { projectAlias: alias, tool, model, startedAt: nowIso }, await sendOrQueue(config, {
       eventType: "session_start",
       projectAlias: alias,
       tool,

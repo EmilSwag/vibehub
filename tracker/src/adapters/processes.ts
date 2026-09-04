@@ -35,7 +35,39 @@ const RULES: ToolRule[] = [
   { tool: "claude-code", names: ["claude"], titleSuffixes: [], logBacked: true },
   { tool: "codex", names: ["codex"], titleSuffixes: [], logBacked: true },
   { tool: "chatgpt", names: ["chatgpt"], titleSuffixes: ["chatgpt"] },
+  // xAI Grok desktop/CLI. No log adapter, so it's presence-only with a null model.
+  { tool: "grok", names: ["grok"], titleSuffixes: ["grok"] },
 ];
+
+/**
+ * tasklist /v reports *a* window title per process, and GUI/Electron apps (Cursor,
+ * Code, Claude desktop, …) run several same-named processes — the one that answers
+ * first is often a hidden OLE/IME/broadcast helper whose "title" is a Win32 window
+ * *class* name, not anything a user typed. Those must never be read as a project
+ * name (the `OleMainThreadWndName`-as-project bug). Matched case-insensitively;
+ * anything here is treated as "no title".
+ */
+const JUNK_TITLE_PATTERNS: RegExp[] = [
+  /wndname$/i, // OleMainThreadWndName, OleDdeWndName, …
+  /^default ime$/i,
+  /^msctfime ui$/i,
+  /^m$/i,
+  /^dde server window$/i,
+  /gdi\+ window/i,
+  /broadcasteventwindow/i, // .NET-BroadcastEventWindow.*
+  /^cicmarshalwnd$/i,
+  /mediacontextnotificationwindow/i,
+  /^chrome_widgetwin/i,
+  /^hidden window$/i,
+  /^\.net-/i,
+];
+
+/** True when `title` is a real, user-meaningful window title (not junk/empty/N/A). */
+export function isRealWindowTitle(title: string | null | undefined): title is string {
+  const t = title?.trim();
+  if (!t || t === "N/A") return false;
+  return !JUNK_TITLE_PATTERNS.some((re) => re.test(t));
+}
 
 interface Seen {
   title: string | null;
@@ -58,9 +90,12 @@ export class ProcessAdapter implements Adapter {
         const matches = procs.filter((p) => rule.names.includes(p.name));
         if (matches.length === 0) continue;
 
-        // Prefer the process that actually owns a titled window.
-        const titled = matches.find((p) => p.title && p.title.trim() && p.title !== "N/A");
-        const title = titled?.title?.trim() ?? null;
+        // Prefer the process that owns a *real* window title — skip the hidden
+        // OLE/IME/broadcast helpers whose "title" is a Win32 class name, so their
+        // junk never leaks in as the project (see isRealWindowTitle / the
+        // OleMainThreadWndName bug).
+        const titled = matches.find((p) => isRealWindowTitle(p.title));
+        const title = titled ? titled.title!.trim() : null;
         const prev = this.seen.get(rule.tool);
         const changed = !prev || prev.title !== title;
         const changedAt = changed ? now : prev!.changedAt;
@@ -167,6 +202,9 @@ async function cwdOf(pid: number): Promise<string | null> {
 
 /** "● index.ts - vibehub - Cursor" → "vibehub"; "Quadcode AI" → null (no project in title). */
 export function projectFromTitle(title: string, suffixes: string[]): string | null {
+  // Guard again here even though the caller already filters: this is exported and
+  // unit-tested, and a junk title must never resolve to a project name.
+  if (!isRealWindowTitle(title)) return null;
   let t = title.replace(/^[●•*]\s*/, "").trim();
   const lower = t.toLowerCase();
   for (const s of suffixes) {
@@ -181,5 +219,8 @@ export function projectFromTitle(title: string, suffixes: string[]): string | nu
   if (parts.length === 0) return null;
   // "<file> - <project>" → project; "<project>" → project. Strip "[Administrator]" etc.
   const candidate = parts[parts.length - 1].replace(/\s*\[.*?\]\s*$/, "").trim();
-  return candidate || null;
+  if (!candidate || !isRealWindowTitle(candidate)) return null;
+  // A real project/folder name has at least one alphanumeric char; reject pure
+  // punctuation/whitespace leftovers.
+  return /[a-z0-9]/i.test(candidate) ? candidate : null;
 }

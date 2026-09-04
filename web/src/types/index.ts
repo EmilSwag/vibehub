@@ -153,7 +153,8 @@ export interface GithubRepoSummary {
 export interface Activity {
   projectAlias: string;
   tool: string;
-  model: string;
+  /** null when the tool exposes no model (presence-only tools: Cursor, Quadcode, Grok, ChatGPT). */
+  model: string | null;
   startedAt: string;
 }
 

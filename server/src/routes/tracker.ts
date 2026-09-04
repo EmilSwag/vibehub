@@ -42,8 +42,9 @@ const EVENT_TYPE_MAP = {
   git_commit: "GIT_COMMIT",
 } as const;
 
-async function findOpenSession(userId: string, projectAlias: string, tool: string, model: string) {
+async function findOpenSession(userId: string, projectAlias: string, tool: string, model: string | null) {
   return prisma.session.findFirst({
+    // `model: null` correctly filters to IS NULL rows (presence-only tools).
     where: { userId, projectAlias, tool, model, status: { not: "ENDED" } },
     orderBy: { lastHeartbeatAt: "desc" },
   });
@@ -69,7 +70,9 @@ router.post(
       Math.abs(occurredAtRaw.getTime() - now.getTime()) <= MAX_CLOCK_SKEW_MS ? occurredAtRaw : now;
 
     const tool = body.tool ?? UNKNOWN;
-    const model = body.model ?? UNKNOWN;
+    // Model is null when the tool exposes none (presence-only tools) — stored and
+    // surfaced as null. The tool is never dropped; only the model degrades.
+    const model = body.model ?? null;
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { username: true } });
 
     const logEvent = (sessionId: string | null, payload: Record<string, unknown>) =>

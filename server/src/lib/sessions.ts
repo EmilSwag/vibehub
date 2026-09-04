@@ -18,10 +18,16 @@ export const ONLINE_AFTER_MS = 2 * 60_000;
 
 export type PresenceStatus = "active" | "idle" | "offline";
 
+// Legacy sentinel: the pre-Phase-9 tracker sent the literal "unknown" for a missing
+// model. Newer trackers send null. Both surface as null in presence so the UI has one
+// "no model" case to handle, not two.
+const LEGACY_UNKNOWN_MODEL = "unknown";
+
 export interface PresenceActivity {
   projectAlias: string;
   tool: string;
-  model: string;
+  /** null when the tool exposes no model (presence-only tools) — never an empty string. */
+  model: string | null;
   startedAt: string;
 }
 
@@ -68,20 +74,24 @@ async function foldIntoDailyStat(session: Session, endedAt: Date): Promise<void>
     0,
     Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000)
   );
+  // DailyStat.model is part of a composite unique key, which can't be null (Postgres
+  // treats NULLs as distinct, breaking the upsert), so the aggregate uses an
+  // "unknown" bucket for sessions with no model. Presence still reports null.
+  const statModel = session.model ?? LEGACY_UNKNOWN_MODEL;
 
   await prisma.dailyStat.upsert({
     where: {
       userId_date_model_tool: {
         userId: session.userId,
         date: day,
-        model: session.model,
+        model: statModel,
         tool: session.tool,
       },
     },
     create: {
       userId: session.userId,
       date: day,
-      model: session.model,
+      model: statModel,
       tool: session.tool,
       tokensInput: session.tokensInput,
       tokensOutput: session.tokensOutput,
@@ -113,7 +123,8 @@ export function sessionToActivity(session: Session): PresenceActivity {
   return {
     projectAlias: session.projectAlias,
     tool: session.tool,
-    model: session.model,
+    // Normalize both the new null and the legacy "unknown" sentinel to null.
+    model: session.model && session.model !== LEGACY_UNKNOWN_MODEL ? session.model : null,
     startedAt: session.startedAt.toISOString(),
   };
 }
