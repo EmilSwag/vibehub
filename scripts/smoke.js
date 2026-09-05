@@ -324,6 +324,207 @@ async function main() {
   const trackerOffline = await call("GET", "/users/me/tracker", { as: "smoke" });
   check("offline presence reports an empty tool list, not null", Array.isArray(trackerOffline?.presence?.tools) && trackerOffline.presence.tools.length === 0, JSON.stringify(trackerOffline?.presence));
 
+  // --- round 7: stats range=all + per-bucket lastActiveAt (§5.6) --------------------
+  // The Steam-style models block needs a lifetime "hrs on record" per model and a "last
+  // used 4 Sep" line. `range=all` drops the lower bound entirely (and reports
+  // rangeDays: null); every byModel bucket now carries the newest moment that (tool,
+  // model) pair was seen — to the second while its session is open, to the UTC day once
+  // it has folded into DailyStat.
+  await call("POST", "/tracker/heartbeat", {
+    token: tokenRes?.token,
+    body: {
+      eventType: "heartbeat",
+      projectAlias: "smoke-range",
+      tool: "codex",
+      model: "gpt-5-codex",
+      tokensInputDelta: 10,
+      tokensOutputDelta: 20,
+      occurredAt: new Date().toISOString(),
+    },
+  });
+  const statsAll = await call("GET", `/users/${smokeUser}/stats?range=all`);
+  const stats30 = await call("GET", `/users/${smokeUser}/stats?range=30d`);
+  check("range=all → rangeDays null", statsAll?.rangeDays === null, JSON.stringify(statsAll?.rangeDays));
+  check(
+    "range=all totals >= range=30d totals",
+    statsAll?.totalTokens >= stats30?.totalTokens && statsAll?.totalActiveSeconds >= stats30?.totalActiveSeconds,
+    `all=${statsAll?.totalTokens}/${statsAll?.totalActiveSeconds} 30d=${stats30?.totalTokens}/${stats30?.totalActiveSeconds}`
+  );
+  check(
+    "every byModel bucket carries a parseable lastActiveAt",
+    statsAll?.byModel?.length > 0 &&
+      statsAll.byModel.every((b) => typeof b.lastActiveAt === "string" && !Number.isNaN(Date.parse(b.lastActiveAt))),
+    JSON.stringify(statsAll?.byModel?.map((b) => [b.tool, b.model, b.lastActiveAt]))
+  );
+  const newestBucket = [...(statsAll?.byModel ?? [])].sort(
+    (a, b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt)
+  )[0];
+  check(
+    "lastActiveAt orders the just-heartbeated pair newest, at second precision",
+    newestBucket?.tool === "codex" &&
+      newestBucket?.model === "gpt-5-codex" &&
+      Date.now() - Date.parse(newestBucket.lastActiveAt) < 120_000,
+    JSON.stringify(newestBucket)
+  );
+  // Seeded ada has two weeks of folded history, so "all" must reach further back than
+  // one day — otherwise "no lower bound" would be indistinguishable from the default.
+  const adaAll = await call("GET", "/users/ada/stats?range=all");
+  const adaDay = await call("GET", "/users/ada/stats?range=1d");
+  check(
+    "range=all reaches past a narrow range (ada: all > 1d)",
+    adaAll?.totalTokens > 0 && adaAll.totalTokens > adaDay?.totalTokens,
+    `all=${adaAll?.totalTokens} 1d=${adaDay?.totalTokens}`
+  );
+  check(
+    "folded DailyStat buckets also report lastActiveAt",
+    adaAll?.byModel?.length > 0 && adaAll.byModel.every((b) => typeof b.lastActiveAt === "string"),
+    JSON.stringify(adaAll?.byModel?.map((b) => [b.tool, b.model, b.lastActiveAt]))
+  );
+  await call("POST", "/tracker/heartbeat", {
+    token: tokenRes?.token,
+    body: { eventType: "session_end", projectAlias: "smoke-range", tool: "codex", model: "gpt-5-codex", occurredAt: new Date().toISOString() },
+  });
+
+  // --- round 7: repo browser — GET /projects/:id/repo (§5.5) ------------------------
+  // Real GitHub call against a real public repo. Anonymous GitHub allows 60 requests an
+  // hour per IP, so a rate-limited run still has to be a *correct* run: the endpoint is
+  // contractually allowed to answer 503 { error: "github_unavailable" }, and this block
+  // asserts that shape instead of the 200 shape when it does, saying so out loud.
+  const repoProject = await call("POST", "/projects", {
+    as: "smoke",
+    body: {
+      name: "Smoke Repo Browser",
+      description: "round 7 repo browser",
+      repoUrl: "https://github.com/expressjs/express",
+      liveUrl: "https://expressjs.com",
+    },
+    expect: 201,
+  });
+  const repoId = repoProject?.project?.id;
+
+  // Signed out on purpose: a public project's code is browsable without an account.
+  const repoRoot = await call("GET", `/projects/${repoId}/repo`, { expect: [200, 503] });
+  const githubBusy = repoRoot?.error === "github_unavailable";
+  if (githubBusy) {
+    console.log("note  GitHub was rate-limited/unreachable — asserting the 503 contract, not the 200 shape");
+    check(
+      "repo browser: 503 body is exactly { error: github_unavailable }",
+      Object.keys(repoRoot).length === 1 && repoRoot.error === "github_unavailable",
+      JSON.stringify(repoRoot)
+    );
+  } else {
+    const entries = repoRoot?.entries ?? [];
+    const firstFileAt = entries.findIndex((e) => e.type === "file");
+    const alphaWithinGroup = (list) =>
+      list.every((e, i) => i === 0 || list[i - 1].name.localeCompare(e.name, "en", { sensitivity: "base" }) <= 0);
+    check(
+      "repo browser: repo + defaultBranch + path for the root listing",
+      repoRoot?.repo?.owner === "expressjs" &&
+        repoRoot?.repo?.repo === "express" &&
+        typeof repoRoot?.defaultBranch === "string" &&
+        repoRoot.defaultBranch.length > 0 &&
+        repoRoot?.path === "",
+      JSON.stringify({ repo: repoRoot?.repo, defaultBranch: repoRoot?.defaultBranch, path: repoRoot?.path })
+    );
+    check(
+      "repo browser: entries are dirs first, then files, alpha within each group",
+      entries.length > 0 &&
+        (firstFileAt === -1 || !entries.slice(firstFileAt).some((e) => e.type === "dir")) &&
+        alphaWithinGroup(entries.filter((e) => e.type === "dir")) &&
+        alphaWithinGroup(entries.filter((e) => e.type === "file")),
+      JSON.stringify(entries.map((e) => `${e.type}:${e.name}`).slice(0, 12))
+    );
+    check(
+      "repo browser: entry shape { name, type, size, url } — dirs have size null",
+      entries.every(
+        (e) =>
+          typeof e.name === "string" &&
+          (e.type === "dir" || e.type === "file") &&
+          (e.size === null || typeof e.size === "number") &&
+          typeof e.url === "string" &&
+          e.url.startsWith("https://github.com/")
+      ) &&
+        entries.filter((e) => e.type === "dir").every((e) => e.size === null) &&
+        entries.some((e) => e.type === "file" && typeof e.size === "number"),
+      JSON.stringify(entries.slice(0, 3))
+    );
+    check(
+      "repo browser: root carries languages (shares summing to ~1) + readme",
+      Array.isArray(repoRoot?.languages) &&
+        repoRoot.languages.length > 0 &&
+        Math.abs(repoRoot.languages.reduce((sum, l) => sum + l.share, 0) - 1) < 0.01 &&
+        repoRoot.languages.every((l, i) => i === 0 || repoRoot.languages[i - 1].share >= l.share) &&
+        typeof repoRoot?.readme?.excerpt === "string" &&
+        typeof repoRoot?.readme?.url === "string",
+      JSON.stringify({ languages: repoRoot?.languages, readmeUrl: repoRoot?.readme?.url })
+    );
+    const excerpt = repoRoot?.readme?.excerpt ?? "";
+    check(
+      "repo browser: readme excerpt is plain text, <= ~600 chars",
+      excerpt.length > 0 &&
+        excerpt.length <= 601 &&
+        !excerpt.includes("](") &&
+        !excerpt.includes("![") &&
+        !excerpt.startsWith("#") &&
+        !excerpt.includes("<img"),
+      JSON.stringify(excerpt.slice(0, 160))
+    );
+
+    const repoLib = await call("GET", `/projects/${repoId}/repo?path=lib`, { expect: [200, 503] });
+    if (repoLib?.error) {
+      console.log("note  subpath listing hit the GitHub rate limit — 503 shape asserted instead");
+      check("repo browser: subpath 503 body", repoLib.error === "github_unavailable", JSON.stringify(repoLib));
+    } else {
+      check(
+        "repo browser: ?path=lib lists that folder; languages/readme are root-only",
+        repoLib?.path === "lib" &&
+          Array.isArray(repoLib?.entries) &&
+          repoLib.entries.length > 0 &&
+          repoLib.languages === null &&
+          repoLib.readme === null,
+        JSON.stringify({ path: repoLib?.path, count: repoLib?.entries?.length, languages: repoLib?.languages, readme: repoLib?.readme })
+      );
+    }
+  }
+
+  // Path validation runs before any GitHub call, so these four cost nothing and never flake.
+  await call("GET", `/projects/${repoId}/repo?path=../../etc`, { expect: 400 });
+  await call("GET", `/projects/${repoId}/repo?path=lib/../../secrets`, { expect: 400 });
+  await call("GET", `/projects/${repoId}/repo?path=${"a/".repeat(21)}b`, { expect: 400 });
+  await call("GET", `/projects/${repoId}/repo?path=${"a".repeat(201)}`, { expect: 400 });
+
+  // Not a GitHub repo, and no repo at all — both 404, never an empty file list.
+  const gitlabProject = await call("POST", "/projects", {
+    as: "smoke",
+    body: { name: "Smoke Gitlab", repoUrl: "https://gitlab.com/smoke/elsewhere" },
+    expect: 201,
+  });
+  await call("GET", `/projects/${gitlabProject?.project?.id}/repo`, { expect: 404 });
+  const noRepoProject = await call("POST", "/projects", { as: "smoke", body: { name: "Smoke No Repo" }, expect: 201 });
+  await call("GET", `/projects/${noRepoProject?.project?.id}/repo`, { expect: 404 });
+
+  // Visibility gate is the one from GET /projects/:id: private is a 404 for everyone
+  // but the owner, and the check happens before GitHub is touched.
+  const privateProject = await call("POST", "/projects", {
+    as: "smoke",
+    body: { name: "Smoke Private Repo", repoUrl: "https://github.com/expressjs/express", isPublic: false },
+    expect: 201,
+  });
+  const privateId = privateProject?.project?.id;
+  await call("GET", `/projects/${privateId}/repo`, { as: "ada", expect: 404 });
+  await call("GET", `/projects/${privateId}/repo`, { expect: 404 });
+  // The owner can browse it — served from the 10-minute cache filled above, so free.
+  const privateOwn = await call("GET", `/projects/${privateId}/repo`, { as: "smoke", expect: [200, 503] });
+  check(
+    "repo browser: owner browses their own private project",
+    privateOwn?.error === "github_unavailable" || privateOwn?.repo?.repo === "express",
+    JSON.stringify(privateOwn?.repo ?? privateOwn)
+  );
+
+  for (const id of [repoId, gitlabProject?.project?.id, noRepoProject?.project?.id, privateId]) {
+    await call("DELETE", `/projects/${id}`, { as: "smoke", expect: 204 });
+  }
+
   const tokens = await call("GET", "/users/me/tracker-tokens", { as: "smoke" });
   check("token list hides raw token", tokens?.tokens?.length === 1 && !("token" in tokens.tokens[0]));
 

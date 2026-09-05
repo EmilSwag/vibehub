@@ -633,18 +633,81 @@ every ~5s, so it is a fixed six queries regardless of history size.
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/api/v1/users/:username/projects` | → `{ projects[] }` |
+| GET | `/api/v1/projects/:id` | → `{ project, owner, liked }` — public, or the owner's own private card |
 | POST | `/api/v1/projects` | `{ name, description?, repoUrl?, liveUrl? }` → `{ project }` |
 | PATCH | `/api/v1/projects/:id` | partial → `{ project }` |
 | DELETE | `/api/v1/projects/:id` | → `204` |
 | POST | `/api/v1/projects/:id/like` | → `{ likeCount }` |
 | DELETE | `/api/v1/projects/:id/like` | → `{ likeCount }` |
+| GET | `/api/v1/projects/:id/commits` | → `{ repo, commits[], lastPushAt, build, latestRelease }` — degrades to empty when GitHub is unreachable |
+| GET | `/api/v1/projects/:id/repo?path=` | repo file browser, below |
+
+**`GET /projects/:id/repo?path=<subpath>` (round 7)** — the project page's file browser:
+one directory level of the linked GitHub repo's default branch, so a project with no
+screenshots and no recent pushes still shows what the code *is*. Visibility gate is
+identical to `GET /projects/:id` — a public project is browsable signed-out, a private
+one is a 404 for everyone but its owner. Auth, timeout and caching are the
+`/projects/:id/commits` pattern: the owner's refreshed OAuth token first (so a private
+repo works for its owner), then `GITHUB_TOKEN`, then anonymous; 8 s per GitHub call;
+10-minute cache per (repo, path, auth-or-anon).
+
+```json
+{
+  "repo": { "owner": "expressjs", "repo": "express" },
+  "defaultBranch": "master",
+  "path": "",
+  "entries": [
+    { "name": "lib", "type": "dir", "size": null, "url": "https://github.com/expressjs/express/tree/master/lib" },
+    { "name": "index.js", "type": "file", "size": 224, "url": "https://github.com/expressjs/express/blob/master/index.js" }
+  ],
+  "languages": [ { "name": "JavaScript", "share": 0.9987 } ],
+  "readme": { "excerpt": "Fast, unopinionated, minimalist web framework for Node.js…", "url": "https://github.com/expressjs/express#readme" }
+}
+```
+
+- `path` — the normalized subpath the listing is for; `""` is the repo root. Validated,
+  not sanitized: no `..`, no empty segments, ≤ 200 chars, ≤ 20 segments, no control
+  characters. A bad path is a `400` and never reaches GitHub.
+- `entries` — directories first, then files, alphabetical (case-insensitive) within each
+  group; capped at 300. `size` is bytes for files and `null` for directories (GitHub
+  reports `0`, which would read as "empty"). `url` is the github.com page for the entry.
+- `languages` / `readme` — repo-level, so they are returned **only** for `path=""` and
+  are `null` for any subpath. `share` is a fraction of total bytes (0–1, 4 dp), biggest
+  first. `readme.excerpt` is the first ~600 characters of the README with markdown
+  syntax stripped — plain text, no links or images. Either may be `null` on its own (no
+  README, or GitHub declined just that call) without failing the listing.
+- **Errors, deliberately not degrading.** `/commits` may quietly return an empty list —
+  the card still means something without it. An empty *file browser* would instead read
+  as "this repo has no code", so: no GitHub repo linked (or a non-GitHub `repoUrl`) →
+  `404`; repo or path missing → `404`; GitHub rate-limited, 5xx or unreachable → `503`
+  `{ "error": "github_unavailable" }`, which the web renders as "GitHub is busy — open
+  the repo" next to the repo link.
 
 ### 5.6 Stats
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/api/v1/users/:username/stats?range=30d` | → `{ byModel[], topModel, totalTokens, totalActiveSeconds, streak, githubCommits[] }` |
+| GET | `/api/v1/users/:username/stats?range=30d` | → `{ byModel[], topModel, totalTokens, totalActiveSeconds, streak, githubCommits[], rangeDays }` |
 | GET | `/api/v1/users/:username/stats/compare?with=otherUsername&range=30d` | → `{ a: {...}, b: {...} }` (same shape as above, twice) |
+
+`range` is `<n>d` (1–365, default `30d`) or **`all`** (round 7) — no lower bound at all,
+for the lifetime "hrs on record" column on the profile's models block. `rangeDays`
+echoes the resolved window and is `null` for `range=all`. Anything unparseable falls
+back to `30d`.
+
+Each `byModel` bucket is one `(tool, model)` pair:
+
+```json
+{ "tool": "claude-code", "model": "claude-fable-5-1", "tokensInput": 812000, "tokensOutput": 240000,
+  "activeSeconds": 66240, "lastActiveAt": "2026-09-05T11:02:31.000Z" }
+```
+
+`lastActiveAt` (round 7, additive — older clients ignore it) is the newest moment that
+pair was seen inside the range: the max over every contributing `DailyStat.date` (UTC
+midnight — a rollup row has no finer "when") and every open `Session.lastHeartbeatAt`
+(to the second). So a model in use right now sorts newest and reads as live, while a
+model last used on Tuesday reports Tuesday's UTC midnight. It is `null` only for the
+impossible case of a bucket with no contributing row.
 
 ### 5.7 Presence
 

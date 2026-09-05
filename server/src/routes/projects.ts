@@ -5,7 +5,15 @@ import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../db";
 import { env } from "../env";
-import { fetchRepoActivity, getFreshGithubToken, parseGithubRepoUrl } from "../lib/github";
+import {
+  fetchReadmeExcerpt,
+  fetchRepoActivity,
+  fetchRepoLanguages,
+  fetchRepoTree,
+  getFreshGithubToken,
+  GithubNotFoundError,
+  parseGithubRepoUrl,
+} from "../lib/github";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import {
   createProjectSchema,
@@ -262,6 +270,103 @@ router.get(
     } catch {
       // GitHub hiccup — the card still renders, just without the push list.
       res.json({ repo: ref, commits: [], lastPushAt: null, fetchedAt: new Date().toISOString(), build: null, latestRelease: null });
+    }
+  })
+);
+
+/** The five owner columns getFreshGithubToken needs — shared by /commits and /repo. */
+const GITHUB_CREDENTIAL_SELECT = {
+  id: true,
+  githubAccessToken: true,
+  githubRefreshToken: true,
+  githubTokenExpiresAt: true,
+  githubRefreshTokenExpiresAt: true,
+} as const;
+
+const REPO_PATH_MAX_LENGTH = 200;
+const REPO_PATH_MAX_SEGMENTS = 20;
+
+/**
+ * `?path=` → a normalized repo subpath ("" for the root), or a 400.
+ *
+ * The value is interpolated into a GitHub URL, so it is validated rather than
+ * sanitized: no traversal, no empty segments, and hard caps on length and depth so a
+ * crafted link can't turn one page view into an expensive walk of someone's rate limit.
+ */
+function parseRepoPath(raw: unknown): string {
+  if (raw === undefined || raw === null || raw === "") return "";
+  if (typeof raw !== "string") throw new HttpError(400, "Invalid path");
+
+  const trimmed = raw.trim().replace(/^\/+|\/+$/g, "");
+  if (!trimmed) return "";
+  if (trimmed.length > REPO_PATH_MAX_LENGTH) throw new HttpError(400, "Path too long");
+  if (trimmed.includes("..")) throw new HttpError(400, "Invalid path");
+  // Control characters never belong in a git path we would serve; a space does,
+  // so 32 stays legal and only the C0 range plus DEL is rejected.
+  for (const ch of trimmed) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 32 || code === 127) throw new HttpError(400, "Invalid path");
+  }
+
+  const segments = trimmed.split("/");
+  if (segments.length > REPO_PATH_MAX_SEGMENTS) throw new HttpError(400, "Path too deep");
+  if (segments.some((segment) => segment === "" || segment === ".")) throw new HttpError(400, "Invalid path");
+  return segments.join("/");
+}
+
+/**
+ * Repo file browser for the project page (round 7) — one directory level of the linked
+ * GitHub repo's default branch, plus the language breakdown and README excerpt at the
+ * root. Same visibility gate as `GET /projects/:id`, so a signed-out visitor can browse
+ * a public project's code and a private one stays a 404.
+ *
+ * Deliberately *not* degrading like `/commits`: an empty file list would read as "this
+ * repo has no code". No GitHub repo linked → 404; GitHub rate-limited or down → 503
+ * `github_unavailable`, which the web shows as "GitHub is busy — open the repo".
+ */
+router.get(
+  "/projects/:id/repo",
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const project = await prisma.project.findUnique({
+      where: { id: req.params.id },
+      include: { owner: { select: GITHUB_CREDENTIAL_SELECT } },
+    });
+    if (!project || (!project.isPublic && project.ownerId !== req.user?.id)) {
+      throw new HttpError(404, "Project not found");
+    }
+
+    const subPath = parseRepoPath(req.query.path);
+    const ref = parseGithubRepoUrl(project.repoUrl);
+    if (!ref) throw new HttpError(404, "Project has no GitHub repository");
+
+    let token: string | null = null;
+    try {
+      token = await getFreshGithubToken(project.owner);
+    } catch {
+      // Owner must reconnect GitHub (or the refresh call failed) — fall through to the
+      // server token / anonymous, exactly as the commits route does.
+      token = null;
+    }
+
+    try {
+      const tree = await fetchRepoTree(ref, token, subPath);
+      // Languages and README describe the repo, not the folder — root listing only.
+      const [languages, readme] =
+        subPath === ""
+          ? await Promise.all([fetchRepoLanguages(ref, token), fetchReadmeExcerpt(ref, token)])
+          : [null, null];
+      res.json({
+        repo: ref,
+        defaultBranch: tree.defaultBranch,
+        path: tree.path,
+        entries: tree.entries,
+        languages,
+        readme,
+      });
+    } catch (err) {
+      if (err instanceof GithubNotFoundError) throw new HttpError(404, "Repository path not found");
+      throw new HttpError(503, "github_unavailable");
     }
   })
 );
