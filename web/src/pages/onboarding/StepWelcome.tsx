@@ -10,12 +10,15 @@ interface Props {
   user: User;
   invited: number;
   busy: boolean;
+  /** True once a heartbeat landed during the connect step — the tracker is
+   *  already running, so this screen must not ask for it again. */
+  tracking: boolean;
   onEnter: () => void;
 }
 
 const WORDS = ["Welcome,", "bro."];
 
-export function StepWelcome({ user, invited, busy, onEnter }: Props) {
+export function StepWelcome({ user, invited, busy, tracking, onEnter }: Props) {
   const chips = [
     `@${user.username}`,
     rolesLabel(user.roles) ?? "Explorer",
@@ -38,7 +41,9 @@ export function StepWelcome({ user, invited, busy, onEnter }: Props) {
         ))}
       </h1>
       <p className={[styles.lead, "reveal"].join(" ")} style={{ animationDelay: "420ms" }}>
-        You're in. Start the tracker and your friends will see what you're building.
+        {tracking
+          ? "You're in. Your friends can see what you're building."
+          : "You're in. Start the tracker and your friends will see what you're building."}
       </p>
 
       <ul className={[styles.chips, "stagger"].join(" ")} style={{ "--stagger": "70ms" } as CSSProperties}>

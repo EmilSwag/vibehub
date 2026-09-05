@@ -6,6 +6,9 @@ import styles from "./Onboarding.module.css";
 interface Props {
   onBack: () => void;
   onNext: () => void;
+  /** Raised on the first heartbeat so the welcome step can say the tracker is
+   *  already running instead of asking for it a second time. */
+  onConnected: () => void;
 }
 
 /**
@@ -17,9 +20,13 @@ interface Props {
  * screen; dismissing it walks straight on to the welcome step rather than dropping
  * the person back on a step they have already finished.
  */
-export function StepConnect({ onBack, onNext }: Props) {
+export function StepConnect({ onBack, onNext, onConnected }: Props) {
   const [connected, setConnected] = useState(false);
   const advance = useCallback(() => onNext(), [onNext]);
+  const markConnected = useCallback(() => {
+    setConnected(true);
+    onConnected();
+  }, [onConnected]);
 
   return (
     <div className={styles.step}>
@@ -28,7 +35,7 @@ export function StepConnect({ onBack, onNext }: Props) {
         Pick your tool, paste one prompt — status, hours and tokens, nothing else leaves your machine.
       </p>
 
-      <ConnectTools onConnected={() => setConnected(true)} onCelebrated={advance} />
+      <ConnectTools onConnected={markConnected} onCelebrated={advance} />
 
       <div className={styles.actions}>
         <button type="button" className={styles.linkButton} onClick={onBack}>

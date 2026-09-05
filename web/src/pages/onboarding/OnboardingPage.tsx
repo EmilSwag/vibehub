@@ -36,6 +36,7 @@ export function OnboardingPage() {
     return floor;
   });
   const [invited, setInvited] = useState(0);
+  const [tracking, setTracking] = useState(false);
   const [finishing, setFinishing] = useState(false);
 
   const index = STEPS.indexOf(step);
@@ -96,10 +97,20 @@ export function OnboardingPage() {
           />
         )}
         {step === "connect" && (
-          <StepConnect onBack={() => go("friends")} onNext={() => go("welcome")} />
+          <StepConnect
+            onBack={() => go("friends")}
+            onNext={() => go("welcome")}
+            onConnected={() => setTracking(true)}
+          />
         )}
         {step === "welcome" && (
-          <StepWelcome user={user} invited={invited} busy={finishing} onEnter={finish} />
+          <StepWelcome
+            user={user}
+            invited={invited}
+            busy={finishing}
+            tracking={tracking}
+            onEnter={finish}
+          />
         )}
       </div>
     </div>

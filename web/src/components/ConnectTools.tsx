@@ -390,10 +390,15 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
           className={cx(styles.card, isBanner && styles.bannerSpacing, cardClosing ? "leave" : "reveal")}
           aria-busy={!connectToken}
         >
-          <div className={styles.head}>
-            <strong className={styles.title}>Connect your tools</strong>
-            <span className={styles.sub}>Paste one prompt into your AI tool. No terminal needed.</span>
-          </div>
+          {/* Onboarding's step already carries the title and the one-line
+              explainer above this card; repeating them here is the redundant
+              label the design rules forbid (round-7 live pass). */}
+          {variant !== "compact" && (
+            <div className={styles.head}>
+              <strong className={styles.title}>Connect your tools</strong>
+              <span className={styles.sub}>Paste one prompt into your AI tool. No terminal needed.</span>
+            </div>
+          )}
 
           <Segment label="AI tool" options={TARGETS} value={target} onChange={setTarget} />
 
