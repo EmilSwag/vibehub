@@ -174,7 +174,6 @@ export function ProfilePage() {
             <>
               <div className={styles.nameRow}>
                 <h1 className={styles.displayName}>{profile.user.displayName}</h1>
-                <span className={styles.username}>@{profile.user.username}</span>
                 {profile.user.roles.map((r) => (
                   <Badge key={r}>{roleTitle(r)}</Badge>
                 ))}
@@ -184,6 +183,8 @@ export function ProfilePage() {
                   </Badge>
                 )}
               </div>
+
+              <span className={styles.username}>@{profile.user.username}</span>
 
               {/* Only friends' presence is known to the client; anyone else gets no
                   status rather than a misleading "Offline". */}

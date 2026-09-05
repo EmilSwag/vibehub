@@ -13,8 +13,8 @@
   min-width: 0;
 }
 
-/* Name, @handle and badges sit on one baseline — centring them makes the small
- * chips float against the 32px serif. */
+/* Name and badges sit on one baseline — centring them makes the small chips
+ * float against the 32px serif. */
 .nameRow {
   display: flex;
   align-items: baseline;
@@ -32,9 +32,14 @@
   margin: 0;
 }
 
+/* The @handle is its own quiet line directly under the name — the way a handle
+ * reads everywhere else on the web — not a chip competing with the badges. */
 .username {
+  display: block;
+  margin-top: 2px;
   font-family: var(--vh-font-mono);
   font-size: 13px;
+  line-height: 18px;
   color: var(--vh-text-faint);
 }
 
