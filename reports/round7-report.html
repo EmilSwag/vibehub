@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VibeHub — Round 7 (Jace, web) report</title>
+<style>
+  :root {
+    --bg: #f5f5f5;
+    --surface: #ffffff;
+    --surface-2: #ececec;
+    --border: #dcdcdc;
+    --text: #111111;
+    --text-dim: #555555;
+    --text-faint: #8a8a8a;
+    --accent: #111111;
+    --ok: #1a7a3c;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.page-head { margin-bottom: 40px; }
+  header.page-head h1 {
+    font-size: 28px;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  header.page-head .sub { color: var(--text-dim); font-size: 15px; margin: 0 0 18px; }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .pill.ok { color: var(--ok); border-color: #bfe3cb; background: #eef8f1; }
+  code, .mono {
+    font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .task {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 30px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .task-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .task-num {
+    font-family: "SF Mono", monospace;
+    font-size: 13px;
+    color: var(--text-faint);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 9px;
+  }
+  .task h2 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .status {
+    margin-left: auto;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ok);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .task .plan-line {
+    font-size: 13px;
+    color: var(--text-faint);
+    margin: 0 0 16px;
+    font-style: italic;
+  }
+  .task h3.sub-head {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--text-faint);
+    margin: 18px 0 8px;
+  }
+  .task ul.changes { margin: 0; padding-left: 20px; font-size: 14px; }
+  .task ul.changes li { margin-bottom: 6px; }
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .file-chip {
+    font-family: "SF Mono", monospace;
+    font-size: 11.5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    color: var(--text-dim);
+  }
+  .file-chip.new::before { content: "+ "; color: var(--ok); font-weight: 700; }
+  .file-chip.gone { text-decoration: line-through; color: var(--text-faint); }
+  .file-chip.gone::before { content: "− "; text-decoration: none; font-weight: 700; }
+  .shots {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .shot { min-width: 0; }
+  .shot img {
+    width: 100%;
+    display: block;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #0f0f0f;
+  }
+  .shot figcaption {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  figure { margin: 0; }
+  .note {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: var(--surface-2);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .note strong { color: var(--text); }
+  section.bugs {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 30px;
+    margin-bottom: 22px;
+  }
+  section.bugs h2 { font-size: 17px; margin: 0 0 4px; }
+  section.bugs .sub { color: var(--text-faint); font-size: 13px; margin: 0 0 16px; }
+  table.bugtable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.bugtable th, table.bugtable td {
+    text-align: left;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.bugtable th { color: var(--text-faint); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  section.mobile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 30px;
+    margin-bottom: 22px;
+  }
+  section.mobile h2 { font-size: 17px; margin: 0 0 4px; }
+  section.mobile .sub { color: var(--text-faint); font-size: 13px; margin: 0 0 16px; }
+  table.pagetable { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-bottom: 24px; }
+  table.pagetable th, table.pagetable td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.pagetable th { color: var(--text-faint); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .pass { color: var(--ok); font-weight: 600; }
+  .fixed { color: #a3690a; font-weight: 600; }
+  .before-after {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .before-after figure.bad img { border-color: #e3b3b3; }
+  .before-after figure.good img { border-color: #bfe3cb; }
+  .mobile-frame img {
+    max-height: 480px;
+    width: auto;
+    margin: 0 auto;
+  }
+  .mobile-frame { display: flex; justify-content: center; }
+  .mobile-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .mobile-gallery figure img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #0f0f0f;
+  }
+  .mobile-gallery figcaption {
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  footer.page-foot {
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--text-faint);
+    margin-top: 36px;
+  }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="page-head">
+    <h1>VibeHub — Round 7 (web)</h1>
+    <p class="sub">Jace's web lane from <code>meta/plans/vibehub-round7-profile-polish.md</code> — stats/models split, Steam-1:1 model rows, connect celebration, level redesign, project repo browser. What changed per item, verified live.</p>
+    <div class="meta-row">
+      <span class="pill">web <code>8f1c8d6</code> → <code>00ad44d</code></span>
+      <span class="pill">on top of Cody's <code>be42b76</code></span>
+      <span class="pill">baseline <code>ceb4c19</code></span>
+      <span class="pill ok">tsc -b clean</span>
+      <span class="pill ok">vite build clean</span>
+      <span class="pill ok">format.check 121/0</span>
+      <span class="pill ok">recentModels.check 15/0</span>
+      <span class="pill ok">live-verified</span>
+      <span class="pill ok">390px pass</span>
+      <span class="pill ok">pushed to origin/main</span>
+    </div>
+  </header>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">01</span>
+      <h2>Scroll-to-top on route change</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "ScrollToTop on pathname change (PUSH/REPLACE only, never POP — back/forward keeps position), mounted once in App; /u/a → /u/b counts"</p>
+
+    <h3 class="sub-head">What changed</h3>
+    <ul class="changes">
+      <li>New <code>ScrollToTop</code> component mounted once inside the router in <code>App</code>. On every pathname change it calls <code>window.scrollTo({ top: 0, behavior: "auto" })</code>.</li>
+      <li><code>useNavigationType() === "POP"</code> returns early, so browser back/forward restores where you were — only PUSH and REPLACE reset the offset.</li>
+      <li>Fixes the PO's ask directly: opening someone's profile from the bottom of a long Home feed used to land you mid-page.</li>
+    </ul>
+
+    <h3 class="sub-head">Files</h3>
+    <div class="files">
+      <span class="file-chip new">components/ScrollToTop.tsx</span>
+      <span class="file-chip">App.tsx</span>
+    </div>
+
+    <div class="note">
+      <strong>Measured, not assumed:</strong> a profile scrolled to <code>scrollTop 983</code> (its maximum), then an in-app click through to a project page — the new page reported <code>scrollTop 0</code>.
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">02</span>
+      <h2>Overall stats and per-model stats are two separate blocks</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "Stats card = tiles only (Active time, Top model, Streak, Tokens · fuel). New Models section (SectionTitle + count) with its own Card. ToolRows is retired"</p>
+
+    <h3 class="sub-head">What changed</h3>
+    <ul class="changes">
+      <li><code>StatsPanel</code> is now tiles and nothing else — Active time, Top model, Streak, Tokens · fuel.</li>
+      <li>A second section, <code>MODELS</code> with its own count chip and its own card, sits below it.</li>
+      <li>Round 6's <code>ToolRows</code> (tools as rows, models nested inside) is retired along with its lib and contract-check file; the multi-tool presence glyph stack it introduced stays.</li>
+    </ul>
+
+    <h3 class="sub-head">Files</h3>
+    <div class="files">
+      <span class="file-chip">components/StatsPanel.tsx</span>
+      <span class="file-chip">components/StatsPanel.module.css</span>
+      <span class="file-chip">pages/ProfilePage.tsx</span>
+      <span class="file-chip gone">components/ToolRows.tsx</span>
+      <span class="file-chip gone">components/ToolRows.module.css</span>
+      <span class="file-chip gone">lib/toolRows.ts</span>
+      <span class="file-chip gone">lib/__checks__/toolRows.check.ts</span>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-01-profile-stats-models-split.png" alt="Profile page showing a STATS section of four tiles and a separate MODELS section below it">
+        <figcaption>STATS and MODELS as two blocks</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/15-profile-light-desktop.png" alt="Full profile page in light theme on desktop">
+        <figcaption>Whole profile, light desktop</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">03</span>
+      <h2>Models block is Steam "Recent Activity", 1:1</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "card header right = 'X hours past 2 weeks' (range=14d). Rows = models (tools merged). Right column: '18.4 hrs on record' (range=all) and 'last used 4 Sep' — or 'Currently in use'. Show the 3 most recently used; 'View all N models ▾'"</p>
+
+    <h3 class="sub-head">What changed</h3>
+    <ul class="changes">
+      <li>New <code>RecentModels</code> section reading two ranges at once: <code>range=14d</code> for the header number, <code>range=all</code> for the hours on record.</li>
+      <li>Row anatomy copied from Steam: left capsule with a centred <code>ModelGlyph</code>, model name, a sub-line of the tools that ran it plus faint token count (<code>~</code> when Quadcode-estimated), and a right-aligned column with hours on record over the last-used date.</li>
+      <li>A model in the viewed user's live presence swaps the date for <strong>"Currently in use"</strong> in <code>--vh-live</code> — the one place a hue is allowed in this block.</li>
+      <li>Three rows, then "View all N models" expands the rest inline as compact rows; "Show less" collapses.</li>
+      <li>A tool with no model still gets a row, named after the tool — dropping those would silently lose hours, merging them would invent a model.</li>
+      <li>Old-server fallback: with no <code>lastActiveAt</code>, rows sort by hours, print no date, and the hours column drops the "on record" claim rather than passing a 30-day total off as a lifetime one.</li>
+      <li>15 contract pins in <code>lib/__checks__/recentModels.check.ts</code> cover grouping, labelling, sorting, the estimate marker and input immutability.</li>
+    </ul>
+
+    <h3 class="sub-head">Files</h3>
+    <div class="files">
+      <span class="file-chip new">components/RecentModels.tsx</span>
+      <span class="file-chip new">components/RecentModels.module.css</span>
+      <span class="file-chip new">lib/recentModels.ts</span>
+      <span class="file-chip new">lib/__checks__/recentModels.check.ts</span>
+      <span class="file-chip">lib/api.ts</span>
+      <span class="file-chip">types/index.ts</span>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-02-models-view-all-expanded.png" alt="Models card expanded to six rows with a Show less control">
+        <figcaption>"View all 6 models" expanded — three full rows, rest compact</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-08-currently-in-use-green.png" alt="Model row showing Currently in use in green instead of a last-used date">
+        <figcaption>Live model — "Currently in use", <code>rgb(22,163,74)</code></figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/03-models-expanded-currently-in-use-dark.png" alt="Models card in dark theme with a live model row">
+        <figcaption>Same block, dark theme</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/14-models-empty-state.png" alt="Models card empty state with a single line and one action">
+        <figcaption>Empty state — one line, one action</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">04</span>
+      <h2>Level display redesigned</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "one ring = the progress (faint track + solid progress, round caps), number centered, caption 'Level' — never a second concentric circle. Breakdown = real popover … opens toward the page so it never covers the stats grid; mobile = bottom sheet"</p>
+
+    <h3 class="sub-head">What changed</h3>
+    <ul class="changes">
+      <li>The decorative tier ring is gone. One ring remains — a faint track with the XP progress drawn over it in round caps — with the level number centred and a small-caps "LEVEL" caption under it. Tier now reads from the number plate, not a second circle.</li>
+      <li>The breakdown is a real popover: border, <code>--vh-shadow-panel</code>, anchored to the badge and opening sideways <em>into</em> the page above 640px, so it cannot cover the stats grid. Below 640px it is a bottom sheet.</li>
+      <li>First row is "N XP to level M" with the same progress bar, then XP, Active, Tokens, Projects, Friends, Commits.</li>
+      <li>Keyboard-reachable; Escape and click-outside both close it and hand focus back to the badge.</li>
+      <li>Both the popover and the celebration layer are portalled to <code>&lt;body&gt;</code>: every page sits inside <code>.reveal</code>, whose <code>fill-mode: both</code> leaves a transform behind, and a transformed ancestor becomes the containing block for <code>position: fixed</code>.</li>
+      <li>New token <code>--vh-shadow-panel</code> in all three theme blocks, for floating layers that must not merge into the card behind them.</li>
+    </ul>
+
+    <h3 class="sub-head">Files</h3>
+    <div class="files">
+      <span class="file-chip">components/ui/LevelBadge.tsx</span>
+      <span class="file-chip">components/ui/LevelBadge.module.css</span>
+      <span class="file-chip">styles/tokens.css</span>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-03-level-popover-clear-of-stats.png" alt="Level badge popover open beside the badge, entirely above the stats card">
+        <figcaption>Popover opens into the page — 0 px² overlap with the stats card</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/04-level-popover-clear-of-stats.png" alt="Level breakdown popover with XP, Active, Tokens, Projects, Friends and Commits rows">
+        <figcaption>Breakdown rows under "N XP to level M"</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/17-friends-sm-level-badges.png" alt="Friend rows each showing a small level badge">
+        <figcaption>Same badge at <code>sm</code> in friend rows</figcaption>
+      </figure>
+    </div>
+
+    <div class="note">
+      <strong>Measured:</strong> with the popover open, its rect and the stats card's rect were compared in the browser — <code>overlap 0 px²</code>, 37 px of clearance. Escape closed it and <code>document.activeElement</code> was the badge again.
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">05</span>
+      <h2>Connect flow: audit, polish, and a first-heartbeat celebration</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "primary path = pick tool → Copy (one click, primary) → 'Listening…' … Success = full-screen celebration layer (Confetti behind, big serif 'Connected.' word-by-word, chips, live counter, models row, single button 'Enter'). Fires on the first heartbeat on any surface; ≤ 6 s of motion"</p>
+
+    <h3 class="sub-head">What changed</h3>
+    <ul class="changes">
+      <li><strong>The five open design-QA items are closed:</strong> the mobile Copy button no longer overlaps the command text; the onboarding dots are back to 4; the prompt code block is no longer a card-inside-a-card (it lives behind a "Show prompt" text link); "I'll do this later" is a text link, not the only primary-styled button; the stray empty radio bubble beside the heading is gone.</li>
+      <li>One primary action on the card: <em>Copy prompt for &lt;tool&gt;</em>. Under it, "Listening…" with the pulse. Skip and manual install are text links.</li>
+      <li>New <code>ConnectCelebration</code>: a portalled full-screen layer with the monochrome <code>Confetti</code> canvas behind it, "All connected." revealed word-by-word, chips for tool · model · project, a live counter (tokens today + active time today summed from <code>sources</code>, re-polled every 5 s while open, tabular nums), a row of every model with its <code>ModelGlyph</code>, and a single "Enter".</li>
+      <li>It fires on the first heartbeat wherever the user is — Home banner, onboarding, or Settings — once per session, and is dismissible before its ≤ 6 s of motion finishes.</li>
+      <li>After dismissal <code>TrackingStatus</code> already shows the same counter and models — no blank or "waiting" frame in between. In onboarding, dismissing advances to the welcome step.</li>
+      <li><code>prefers-reduced-motion</code>: no canvas, instant reveal.</li>
+      <li>New <code>lib/sources.ts</code> sums today's tokens and active seconds out of <code>TrackerStatus.sources[]</code>, so the counter needs no new API.</li>
+      <li>Round 6's <code>ConnectSuccessModal</code> (check icon, one line, "Got it") is retired.</li>
+    </ul>
+
+    <h3 class="sub-head">Files</h3>
+    <div class="files">
+      <span class="file-chip new">components/ui/ConnectCelebration.tsx</span>
+      <span class="file-chip new">components/ui/ConnectCelebration.module.css</span>
+      <span class="file-chip new">lib/sources.ts</span>
+      <span class="file-chip">components/ConnectTools.tsx</span>
+      <span class="file-chip">components/ConnectTools.module.css</span>
+      <span class="file-chip">components/TrackingStatus.tsx</span>
+      <span class="file-chip">components/TrackingStatus.module.css</span>
+      <span class="file-chip">pages/onboarding/StepConnect.tsx</span>
+      <span class="file-chip">pages/onboarding/OnboardingPage.tsx</span>
+      <span class="file-chip">components/ui/Icon.tsx</span>
+      <span class="file-chip gone">components/ui/ConnectSuccessModal.tsx</span>
+      <span class="file-chip gone">components/ui/ConnectSuccessModal.module.css</span>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="round7/screenshots/07-connect-card-one-primary.png" alt="Connect card with a single primary Copy prompt button and text links below">
+        <figcaption>One primary action, prompt behind a disclosure</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/01-onboarding-four-dots.png" alt="Onboarding step showing four progress dots">
+        <figcaption>4 dots — the work, not the payoff</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-06-celebration-home.png" alt="Full-screen celebration with fireworks, All connected, chips, counter, model row and an Enter button">
+        <figcaption>First heartbeat on Home — 4 s after it landed</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-10-celebration-onboarding.png" alt="The same celebration layer during onboarding with a fuller fireworks burst">
+        <figcaption>Same layer inside onboarding</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/02-celebration-fullscreen-fireworks.png" alt="Celebration layer with monochrome fireworks particles filling the screen">
+        <figcaption>Monochrome fireworks — no hue anywhere</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-07-tracking-panel-after-dismiss.png" alt="Tracking panel showing tokens today, active time, live presence, models and devices">
+        <figcaption>After "Enter" — same counter and models, no blank frame</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/08-first-heartbeat-celebration-home.png" alt="Celebration layer raised by a first heartbeat on the Home banner">
+        <figcaption>First build pass — same moment on Home</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/09-tracking-panel-counter-models.png" alt="Tracking panel with the live counter and model row">
+        <figcaption>Counter and models, first build pass</figcaption>
+      </figure>
+    </div>
+
+    <div class="note">
+      <strong>Timed:</strong> heartbeat posted at <code>22:49:43</code>, celebration observed on screen at <code>22:49:47</code> — inside the single 5 s poll the plan allows. Repeated on the onboarding surface with the same result.
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">06</span>
+      <h2>Project page shows the code — folders, languages, README, and the site</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "hero = cover (fitted) + title + owner; primary button 'Open site ↗' when liveUrl, secondary 'GitHub' when repo; then RepoBrowser: languages bar, README excerpt, file tree … click a folder → lazy-loads ?path= and expands inline with breadcrumb; 503 → one calm line; non-GitHub → hide browser, keep links"</p>
+
+    <h3 class="sub-head">What changed</h3>
+    <ul class="changes">
+      <li>The hero leads with the cover, title and owner, then <strong>Open site ↗</strong> as the primary button when the project has a <code>liveUrl</code>, with GitHub as the secondary — the PO's "link to the site", promoted from a small text link.</li>
+      <li>New <code>RepoBrowser</code> reads Cody's <code>GET /projects/:id/repo</code>: a monochrome languages bar with legend, a plain-text README excerpt with "Read on GitHub", and the file tree at the default branch — folders first, GitHub-style rows of glyph, name and size.</li>
+      <li>Clicking a folder lazy-loads <code>?path=</code> and swaps the listing in place with a breadcrumb back to the root; the page never navigates away.</li>
+      <li>GitHub rate-limited or unreachable (503) degrades to one calm line — "GitHub is busy — open the repo" — with the link. A non-GitHub or missing repo hides the browser entirely and keeps the links.</li>
+      <li>Commits stay below in the same card. With no images, no commits and no repo the page still shows title, owner, links and description — it is never an empty shell.</li>
+    </ul>
+
+    <h3 class="sub-head">Files</h3>
+    <div class="files">
+      <span class="file-chip new">components/projects/RepoBrowser.tsx</span>
+      <span class="file-chip new">components/projects/RepoBrowser.module.css</span>
+      <span class="file-chip">pages/ProjectPage.tsx</span>
+      <span class="file-chip">pages/ProjectPage.module.css</span>
+      <span class="file-chip">lib/api.ts</span>
+      <span class="file-chip">types/index.ts</span>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-04-project-repo-browser-real-tree.png" alt="Project page with Open site primary button, languages bar, README excerpt and a file tree">
+        <figcaption>Hero + languages + README + tree (real <code>expressjs/express</code>)</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/r7b-05-repo-lib-breadcrumb.png" alt="Repo browser showing the lib folder expanded with an express slash lib breadcrumb">
+        <figcaption><code>lib/</code> expanded in place, breadcrumb back to root</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/05-project-page-repo-browser-dark.png" alt="Project page repo browser in dark theme">
+        <figcaption>Same page, dark theme</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="round7/screenshots/06-repo-browser-lib-breadcrumb.png" alt="Repo browser breadcrumb and file listing in dark theme">
+        <figcaption>Breadcrumb + sizes, dark</figcaption>
+      </figure>
+    </div>
+
+    <div class="note">
+      <strong>Real data, not fixtures:</strong> the test project points at <code>https://github.com/expressjs/express</code> with <code>liveUrl https://expressjs.com</code>. The endpoint returned <code>master</code>, 14 entries (<code>.github</code>, <code>examples</code>, <code>lib</code>, <code>test</code> first), <code>JavaScript 100%</code> and the README excerpt; <code>lib/</code> listed its six real files with sizes.
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">07</span>
+      <h2>Tested it myself — Success Criteria signed off</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "local server (SQLite db:dev + seed) + web; create a project with a real public repo + a liveUrl; as a friend: scroll Home to the bottom → open the profile → must land at top … fake a first heartbeat on a fresh account → celebration with counter + models; both themes; 390 px pass"</p>
+
+    <h3 class="sub-head">How it was run</h3>
+    <ul class="changes">
+      <li>An isolated stack — server on <code>:4100</code> against <code>server/prisma/jace7.db</code>, web on <code>:5273</code> — so the shared <code>:4000</code> / <code>dev.db</code> instance was never touched.</li>
+      <li>Driven as a friend account (<code>grace</code>) plus three throwaway accounts for the first-heartbeat paths, with <code>scripts/fake-heartbeat.js</code> standing in for a real tracker.</li>
+    </ul>
+
+    <h3 class="sub-head">Success Criteria</h3>
+    <table class="pagetable">
+      <thead><tr><th>Criterion</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Stats and Models are two blocks; Models reads like Steam Recent Activity, 3 rows + "View all"; live model shows green "Currently in use"</td>
+          <td class="pass">✓ <code>STATS</code> + <code>MODELS 6</code>; header "30.6 hours past 2 weeks"; rows "18.7 hrs on record" / "last used Sep 5"; expand → 6 rows + "Show less"; live row computed <code>rgb(22,163,74)</code></td>
+        </tr>
+        <tr>
+          <td>First heartbeat → fireworks + counter + models within one poll (≤ 5 s), on Home and in onboarding</td>
+          <td class="pass">✓ 22:49:43 → 22:49:47 (~4 s) on Home; repeated in onboarding; dismissal left the panel already populated; onboarding auto-advanced</td>
+        </tr>
+        <tr>
+          <td>Opening any profile lands at top; level badge is one clean ring; breakdown never overlaps stats</td>
+          <td class="pass">✓ <code>scrollTop 983</code> → navigate → <code>scrollTop 0</code>; single progress ring; popover/stats overlap <code>0 px²</code>, 37 px clearance</td>
+        </tr>
+        <tr>
+          <td>Friend's project page shows folders + "Open site"; expands a folder; degrades calmly on GitHub 503</td>
+          <td class="pass">✓ tree at <code>express/master</code>, <code>lib/</code> expanded with breadcrumb; the 503 line was hit for real first, with the anonymous quota at 0/60</td>
+        </tr>
+        <tr>
+          <td>Old server + new web and new server + old web both keep working</td>
+          <td class="pass">✓ see "Contract and compatibility" below</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <strong>On the GitHub quota:</strong> the anonymous API allows 60 requests/hour, which repeated repo browsing exhausts — that is how the "GitHub is busy" path got exercised for real rather than simulated. To then verify the <em>successful</em> tree, the local server was restarted with the machine's existing <code>gh</code> CLI token in <code>GITHUB_TOKEN</code> (read-only public reads, local process only, never written to disk or committed). That process has since been stopped.
+    </div>
+  </div>
+
+  <div class="task">
+    <div class="task-head">
+      <span class="task-num">08</span>
+      <h2>Build, checks, commit hygiene</h2>
+      <span class="status">✓ done</span>
+    </div>
+    <p class="plan-line">Plan: "npm run build clean (tsc + vite + EOL guard), format.check.ts green, no raw NUL bytes … commit explicit web/src/** paths; push"</p>
+
+    <h3 class="sub-head">What was verified</h3>
+    <ul class="changes">
+      <li><code>npm run build</code> — EOL fix, <code>tsc -b</code>, <code>vite build</code>, EOL check — clean; 145 modules; LF-only confirmed on both shipped files.</li>
+      <li><code>format.check.ts</code>: 121 passed, 0 failed. <code>recentModels.check.ts</code>: 15 passed, 0 failed.</li>
+      <li>No raw NUL bytes: <code>git diff --stat</code> shows no <code>Bin</code> for any source file, and the four files edited during the live pass were byte-checked and normalised to LF.</li>
+      <li>Both commits stage explicit <code>web/src/**</code> paths — <code>server/</code>, <code>tracker/</code> and <code>web/public/</code> were never staged, even while local build steps re-touched <code>web/public</code>.</li>
+    </ul>
+  </div>
+
+  <section class="mobile">
+    <h2>Contract and compatibility</h2>
+    <p class="sub">Round 7 shipped a server change and a web change in parallel. Both directions were checked so a half-deployed prod cannot break.</p>
+
+    <table class="pagetable">
+      <thead><tr><th>Direction</th><th>What was checked</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>New server + old web</strong></td>
+          <td>The ranges a round-6 client sends — <code>30d</code>, <code>14d</code>, <code>7d</code> — still answer with exactly the round-6 bucket keys (<code>tool</code>, <code>model</code>, <code>tokensInput</code>, <code>tokensOutput</code>, <code>activeSeconds</code>), with <code>lastActiveAt</code> merely added.</td>
+          <td class="pass">✓ additive only</td>
+        </tr>
+        <tr>
+          <td><strong>Old server + new web</strong></td>
+          <td>Simulated by stripping <code>lastActiveAt</code> from every stats bucket and answering <code>GET /projects/:id/repo</code> with 404, then driving the real UI.</td>
+          <td class="pass">✓ rows fell back to hours-descending with no dates and no "on record" claim; the repo browser removed itself and the page kept "Open site", "GitHub" and its pushes</td>
+        </tr>
+        <tr>
+          <td><strong>Signed-out public project</strong></td>
+          <td>Hit incidentally when a server restart dropped the session: the public project page rendered with its links and repo browser for an anonymous viewer.</td>
+          <td class="pass">✓ same gate as <code>/p/:id</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="font-size:13.5px;color:var(--text-dim);margin:0;">
+      <strong>No contract deviations.</strong> <code>range=all</code>, <code>lastActiveAt</code>, and <code>GET /projects/:id/repo</code> (entries, <code>languages[].share</code> as a 0–1 fraction, readme excerpt, 503 <code>github_unavailable</code>) all landed as specified and the web reads them as written.
+    </p>
+  </section>
+
+  <section class="bugs">
+    <h2>Incidental fixes found during the live pass</h2>
+    <p class="sub">Not on the plan — surfaced by actually walking the onboarding wizard end to end. Both are design-rule violations in the flow this round owns, so they were fixed rather than filed. Commit <code>00ad44d</code>.</p>
+    <table class="bugtable">
+      <thead><tr><th>Bug</th><th>Where</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>The connect card repeated the step it sits in: "Connect your AI tools" as the step title, then "Connect your tools / Paste one prompt into your AI tool. No terminal needed." inside the card — the redundant label rule 1 forbids.</td>
+          <td><code>components/ConnectTools.tsx</code></td>
+          <td>The card header now renders only in the <code>banner</code> (Home) and <code>full</code> (Settings) variants, where the card stands alone. The <code>compact</code> (onboarding) variant drops it.</td>
+        </tr>
+        <tr>
+          <td>The welcome step told a user who had just watched the "All connected." celebration to <em>"Start the tracker and your friends will see what you're building."</em></td>
+          <td><code>pages/onboarding/StepWelcome.tsx</code>, <code>StepConnect.tsx</code>, <code>OnboardingPage.tsx</code></td>
+          <td><code>StepConnect</code> reports the first heartbeat up to <code>OnboardingPage</code>, which passes a <code>tracking</code> flag to <code>StepWelcome</code>; the lead becomes "You're in. Your friends can see what you're building." and keeps the original ask when connect was skipped.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="sub-head" style="margin-top:22px;">Before and after</h3>
+    <div class="before-after">
+      <figure class="shot bad">
+        <img src="round7/screenshots/r7b-09-onboarding-connect-BEFORE-dup-header.png" alt="Onboarding connect step where the card repeats the step title and its explanatory sentence">
+        <figcaption>Before — the card repeats the step above it</figcaption>
+      </figure>
+      <figure class="shot good">
+        <img src="round7/screenshots/r7b-11-onboarding-connect-AFTER-fix.png" alt="Onboarding connect step with the card reduced to the tool picker, primary button and listening line">
+        <figcaption>After — tool picker, one primary, "Listening…"</figcaption>
+      </figure>
+      <figure class="shot good">
+        <img src="round7/screenshots/r7b-12-welcome-copy-tracker-connected.png" alt="Welcome step reading You're in. Your friends can see what you're building.">
+        <figcaption>Welcome copy after connecting</figcaption>
+      </figure>
+      <figure class="shot good">
+        <img src="round7/screenshots/r7b-13-onboarding-connect-dark.png" alt="Onboarding connect step in dark theme after the fix">
+        <figcaption>Re-checked in dark</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="mobile">
+    <h2>390px mobile pass</h2>
+    <p class="sub">Every surface this round touched, checked at a real 390px viewport.</p>
+
+    <table class="pagetable">
+      <thead><tr><th>Surface</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Profile — Stats tiles + Models rows</td><td class="pass">✓ clean — rows keep the capsule, hours column wraps under the name</td></tr>
+        <tr><td>Level breakdown</td><td class="pass">✓ becomes a portalled bottom sheet below 640px</td></tr>
+        <tr><td>Project page — repo tree</td><td class="pass">✓ clean — sizes stay right-aligned, long names truncate</td></tr>
+        <tr><td>Project page — GitHub 503 fallback</td><td class="pass">✓ clean — one line plus link, no empty card</td></tr>
+        <tr><td>Connect card — manual install</td><td class="pass">✓ fixed this round — Copy no longer overlaps the command text</td></tr>
+        <tr><td>Onboarding connect step</td><td class="pass">✓ clean — one full-width primary, links below</td></tr>
+      </tbody>
+    </table>
+
+    <div class="mobile-gallery">
+      <figure><img src="round7/screenshots/10-models-390-light.png" alt="Models block at 390px in light theme"><figcaption>Models</figcaption></figure>
+      <figure><img src="round7/screenshots/11-level-bottom-sheet-390.png" alt="Level breakdown as a bottom sheet at 390px"><figcaption>Level sheet</figcaption></figure>
+      <figure><img src="round7/screenshots/16-repo-tree-390-light.png" alt="Repo file tree at 390px in light theme"><figcaption>Repo tree</figcaption></figure>
+      <figure><img src="round7/screenshots/12-project-390-github-busy-fallback.png" alt="Project page at 390px showing the GitHub is busy fallback line"><figcaption>503 fallback</figcaption></figure>
+      <figure><img src="round7/screenshots/13-connect-manual-390-no-overlap.png" alt="Manual connect instructions at 390px with the Copy button clear of the command text"><figcaption>Manual connect</figcaption></figure>
+    </div>
+  </section>
+
+  <footer class="page-foot">
+    Verified against an isolated local stack (server <code>:4100</code> on <code>jace7.db</code>, web <code>:5273</code>) with <code>npm run build</code>, <code>format.check.ts</code> and <code>recentModels.check.ts</code> all green — screenshots above are from those passes, not staged. Throwaway accounts created during verification live only in the local SQLite file. Web commits <code>8f1c8d6</code> and <code>00ad44d</code>, on top of Cody's server commit <code>be42b76</code>, all pushed to <code>origin/main</code>. Deploy is Many's, server → web.
+  </footer>
+
+</div>
+</body>
+</html>
