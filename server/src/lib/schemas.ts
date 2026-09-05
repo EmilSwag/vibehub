@@ -120,10 +120,27 @@ const modelSchema = z.string().max(60).nullable().optional();
 // Codex log also grows). When `usage` is present the server folds these straight into
 // DailyStat and IGNORES the top-level deltas for token accounting; the tracker still
 // sends those as a legacy sum so servers that predate `usage` keep working.
+// Round 6 multi-tool presence (ARCHITECTURE.md §4.3): every tool the tracker can see
+// open at this moment, primary first. People sit in several terminals and IDEs at once,
+// so presence shows the whole stack — but time and tokens still accrue only to the
+// primary (the top-level tool/model). Presence data only; never token accounting.
+export const MAX_TOOL_ENTRIES = 10;
+export const toolEntrySchema = z.object({
+  tool: z.string().min(1).max(60),
+  model: modelSchema,
+  /** null when unknown, or when the user hid that project — the tool still shows. */
+  projectAlias: z.string().max(200).nullable().optional(),
+});
+
 export const MAX_USAGE_ENTRIES = 30;
 export const usageEntrySchema = z.object({
   tool: z.string().min(1).max(60),
   model: modelSchema,
+  // Round 6: the tracker sets this when the counts were derived rather than reported
+  // (Quadcode logs carry no token numbers, so its adapter estimates from character
+  // counts). Accepted and echoed into the ActivityEvent payload; it does not change
+  // accounting. Any surface that shows these numbers must label them "est.".
+  estimated: z.boolean().optional(),
   tokensInputDelta: z.number().int().nonnegative(),
   tokensOutputDelta: z.number().int().nonnegative(),
 });
@@ -142,4 +159,5 @@ export const heartbeatSchema = z.object({
   occurredAt: z.string().datetime(),
   repoAlias: z.string().min(1).max(200).optional(),
   usage: z.array(usageEntrySchema).max(MAX_USAGE_ENTRIES).optional(),
+  tools: z.array(toolEntrySchema).max(MAX_TOOL_ENTRIES).optional(),
 });

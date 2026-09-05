@@ -172,6 +172,7 @@ reconstructed server-side from heartbeats. This is **not** an auth/login session
 | endedAt | DateTime? | set when closed by idle timeout or explicit `session_end` |
 | tokensInput | Int | running total, default 0 |
 | tokensOutput | Int | running total, default 0 |
+| coTools | Json? | round 6: latest `tools[]` seen open with this session (§4.3), `[{tool, model, projectAlias}]`, primary first. Presence only. `String?` (JSON-encoded) on the SQLite mirror — SQLite has no Json type, same divergence as `ActivityEvent.payload` (§2.15) |
 
 A session closes (`status = ENDED`, `endedAt` set) when no heartbeat arrives for
 **10 minutes** (`SESSION_IDLE_TIMEOUT_MS`, server-configurable), or immediately on a
@@ -390,6 +391,37 @@ as the sum across all sources so servers that predate `usage` keep working. When
 - still derives presence (the open `Session`) from the top-level
   `projectAlias`/`tool`/`model`.
 
+Each `usage[]` entry may also carry `estimated: true` — the counts were derived, not
+reported. Quadcode chat logs contain no token numbers anywhere, so its adapter
+estimates from character counts (§4.5). The server accepts the flag and echoes it into
+the `ActivityEvent` payload; it does **not** change accounting. Anywhere those numbers
+are shown — profile, `tracker status` — they must be labelled "est.". An estimate is
+never presented as measured.
+
+**Multi-tool presence — `tools[]`** (round 6, optional, backward compatible). People sit
+in several terminals and IDEs at once, so a single "current activity" understates what
+is open. A heartbeat may therefore carry:
+
+```json
+"tools": [
+  { "tool": "quadcode",    "model": "claude-fable-5-1", "projectAlias": "vibehub" },
+  { "tool": "cursor",      "model": null,               "projectAlias": "vibehub" },
+  { "tool": "claude-code", "model": "claude-opus-5",    "projectAlias": null }
+]
+```
+
+At most 10 entries, primary first (entry 0 always matches the top-level
+`tool`/`model`), deduped by tool. `projectAlias` is `null` when unknown or when the
+user hid that project — the tool still shows, its project name does not. This is
+**presence only**: time and tokens still accrue solely to the primary. Steam semantics
+— show everything open, credit the one being driven.
+
+The server stores the latest list on the live `Session` (`coTools`, §2.8) and surfaces
+it as `tools` on every presence read (§5.7, §5.9, and `GET /users/me/tracker`). A
+heartbeat without `tools[]` leaves whatever the session already had; a session that
+never received one reports `[activity]`, so a reader always has a non-empty list while
+someone is online, and `[]` when offline.
+
 Without `usage`, the legacy path is unchanged: the top-level deltas accrue on the
 `Session` and reach `DailyStat` when it closes.
 
@@ -442,6 +474,50 @@ the **only** interface `vibehub/macos` depends on; it never calls the server dir
 `status` is `"active" | "idle" | "offline"`. When `"offline"`, the other fields are
 `null` except `updatedAt`. The macOS app computes the human string itself, e.g.
 `"in project neon-app · Claude Code · 1h 42m"`, from `sessionStartedAt`.
+
+### 4.5 Quadcode AI adapter (estimated tokens)
+
+Quadcode writes one JSONL per chat section, per project:
+
+```
+<QuadcodeAI root>/apps/<Project>/.quadcodeai/.data/chats/<section>.files/chat_N.jsonl
+```
+
+Roots: `%APPDATA%\QuadcodeAI` (Windows), `~/Library/Application Support/QuadcodeAI`
+(macOS), `~/.config/QuadcodeAI` (Linux), plus `~/.quadcodeai`; `QUADCODE_HOME`
+overrides. One JSON record per line: `method` `"USER"|"LLM"`, `message`, `timestamp`,
+and `variations[].model_name` on LLM replies.
+
+Three measured properties of that format shape the adapter (verified over 44 logs /
+341 LLM records; full evidence in the round 6 plan's Amendment 1):
+
+- **No token counts exist anywhere** — not in the record, not in `meta_info` (RAG
+  metadata, whose `max_tokens` is a *boolean*), not in `cluster_node_info` (a node id).
+  Tokens are therefore estimated at ~4 characters each and always carry
+  `estimated: true` (§4.3).
+- **The LLM record's `timestamp` is the turn start, not its end**, and the line is only
+  appended when the turn finishes — one observed record spanned 3h47m. The *append* is
+  the activity signal (the file's mtime), never the embedded timestamp. During a long
+  turn nothing is appended, and the process adapter's presence-only observation
+  (`genui.exe` / "Quadcode AI") carries presence instead.
+- **`message` is ~99% embedded tool transcript** (`message_raw` is byte-identical). So
+  `<TOOL_RESULT>` spans — tool output, not model output — are stripped before counting,
+  while `<TOOL_RUN>` args are kept because the model wrote them. Counting the raw
+  message overstated output by ~138x on the measured record.
+
+`projectAlias` comes from the nearest git repository: the project folder if it is one,
+else an enclosing repo, else the single repo directly inside it (so
+`apps/Vibemunity` reports `vibehub`, agreeing with what every other adapter reports
+from its cwd), else the folder name.
+
+**Media generation is not model-tagged.** `model_name` only ever holds the chat model;
+a media call names only a meta-section id, and the media model lives in a file on disk,
+not in the log. Quadcode media work is tracked as activity under the chat model that
+drove it.
+
+Chat logs embed base64 image uploads inline and can be huge, so the tailer skips any
+single append over 8 MB or record over 2 MB rather than reading it. Only the model,
+project, timestamps and character counts ever leave the machine — never message text.
 
 ## 5. REST + WebSocket Contract
 
@@ -516,7 +592,10 @@ every ~5s, so it is a fixed six queries regardless of history size.
   not `TrackerToken.lastUsedAt`, which `/tracker/verify` also bumps — see the route
   comment for the incident behind that). `tokenLastUsedAt` exposes the token signal
   separately. `tools` — tool ids seen in the last 30 days, most recent first (compat).
-- `presence` — the same snapshot friends get (§5.7), minus `username`.
+- `presence` — the same snapshot friends get (§5.7), minus `username`: `status`,
+  `activity`, and the round 6 `tools` list. Note `presence.tools` (per-tool presence
+  detail) is a different thing from the sibling top-level `tools` field below, which
+  is a flat list of recently-seen tool ids kept for compatibility.
 - `sources` — every `(tool, model)` pair seen in the last 7 days (today + 6 UTC days),
   most recently seen first. Totals come from `DailyStat` rows in the window plus open
   `Session`s (live tokens/elapsed not folded yet — the same "one place at a time"
@@ -571,7 +650,7 @@ every ~5s, so it is a fixed six queries regardless of history size.
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/api/v1/presence/friends` | initial snapshot → `{ presences: [{ username, status, activity }] }` |
+| GET | `/api/v1/presence/friends` | initial snapshot → `{ presences: [{ username, status, activity, tools }] }` — `tools` is the round 6 multi-tool list (§4.3), primary first, `[activity]` for sessions from an older tracker and `[]` when offline |
 
 ### 5.8 Tracker ingestion
 
@@ -595,7 +674,9 @@ Server → client events:
 ```json
 { "type": "presence:update", "username": "ada", "status": "active",
   "activity": { "projectAlias": "neon-app", "tool": "claude-code",
-                "model": "claude-sonnet-5", "startedAt": "2026-09-03T13:40:00.000Z" } }
+                "model": "claude-sonnet-5", "startedAt": "2026-09-03T13:40:00.000Z" },
+  "tools": [ { "tool": "claude-code", "model": "claude-sonnet-5", "projectAlias": "neon-app" },
+             { "tool": "cursor", "model": null, "projectAlias": "neon-app" } ] }
 
 { "type": "wall:new-comment", "wallOwner": "ada", "comment": { "...": "WallComment shape" } }
 

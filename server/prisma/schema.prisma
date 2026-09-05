@@ -197,6 +197,12 @@ model Session {
   endedAt          DateTime?
   tokensInput      Int           @default(0)
   tokensOutput     Int           @default(0)
+  // Round 6 multi-tool presence: the latest `tools[]` the tracker reported with this
+  // session's heartbeat — every tool it could see open at that moment, primary first,
+  // as [{tool, model, projectAlias}]. Presence only: hours and tokens still accrue to
+  // this row's own tool/model. Null for sessions opened by a tracker that predates it,
+  // which readers surface as just [activity].
+  coTools          Json?
 
   activityEvents ActivityEvent[]
 

@@ -3,7 +3,7 @@ import { Router } from "express";
 import { prisma } from "../db";
 import { env } from "../env";
 import { asyncHandler } from "../lib/http-error";
-import { toPayloadValue } from "../lib/json-field";
+import { toJsonArrayValue, toPayloadValue } from "../lib/json-field";
 import { heartbeatSchema } from "../lib/schemas";
 import { closeSession, foldUsageIntoDailyStat, normalizeModel, presenceFor, utcDay, type UsageEntry } from "../lib/sessions";
 import { requireTrackerToken } from "../middleware/auth";
@@ -132,6 +132,19 @@ router.post(
     const tokensInputDelta = usage ? 0 : body.tokensInputDelta ?? 0;
     const tokensOutputDelta = usage ? 0 : body.tokensOutputDelta ?? 0;
 
+    // Round 6 multi-tool presence (§4.3): every tool the tracker can see open right
+    // now rides along on the live session so presence can show the whole stack. This
+    // is presence data only — it never touches time or token accounting. Absent (an
+    // older tracker) leaves whatever the session already had, and presence readers
+    // fall back to just the primary activity.
+    const coTools = body.tools
+      ? body.tools.map((entry) => ({
+          tool: entry.tool.trim() || UNKNOWN,
+          model: normalizeModel(entry.model),
+          projectAlias: entry.projectAlias ?? null,
+        }))
+      : null;
+
     const isStale = (candidate: Session) =>
       now.getTime() - candidate.lastHeartbeatAt.getTime() > env.sessionIdleTimeoutMs;
 
@@ -166,6 +179,7 @@ router.post(
           lastHeartbeatAt: now,
           tokensInput: { increment: tokensInputDelta },
           tokensOutput: { increment: tokensOutputDelta },
+          ...(coTools ? { coTools: toJsonArrayValue(coTools) as never } : {}),
         },
       });
     } else {
@@ -181,6 +195,7 @@ router.post(
           lastHeartbeatAt: now,
           tokensInput: tokensInputDelta,
           tokensOutput: tokensOutputDelta,
+          ...(coTools ? { coTools: toJsonArrayValue(coTools) as never } : {}),
         },
       });
     }
@@ -197,6 +212,7 @@ router.post(
       tokensInputDelta,
       tokensOutputDelta,
       ...(usage ? { usage } : {}),
+      ...(coTools ? { tools: coTools } : {}),
     });
 
     await emitPresenceUpdate(userId, await presenceFor(userId, user.username));

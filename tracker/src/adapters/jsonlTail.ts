@@ -10,9 +10,23 @@ import path from "node:path";
  *   The first time a file is seen we start from its current end, so an old
  *   multi-megabyte session doesn't get replayed (and double-counted) on startup.
  */
+export interface JsonlTailerOptions {
+  /**
+   * Skip (and jump past) an appended chunk larger than this instead of reading it.
+   * Default: no limit. Quadcode chat logs can grow by megabytes in one append
+   * because a record embeds base64 image uploads inline; slurping that only to
+   * count characters is not worth the memory (it is enough to OOM a naive read).
+   */
+  maxChunkBytes?: number;
+  /** Skip a single line longer than this without parsing it. Default: no limit. */
+  maxLineChars?: number;
+}
+
 export class JsonlTailer {
   private offsets = new Map<string, number>();
   private partial = new Map<string, string>();
+
+  constructor(private options: JsonlTailerOptions = {}) {}
 
   recentFiles(root: string, maxAgeMs: number): string[] {
     const out: string[] = [];
@@ -66,6 +80,14 @@ export class JsonlTailer {
     if (size === known) return [];
 
     const length = size - known;
+    const maxChunk = this.options.maxChunkBytes ?? Number.POSITIVE_INFINITY;
+    if (length > maxChunk) {
+      // Too much appended at once to be worth reading (see maxChunkBytes above).
+      // Resync to the current end so the next poll tails normally again.
+      this.offsets.set(file, size);
+      this.partial.delete(file);
+      return [];
+    }
     const buf = Buffer.alloc(length);
     let fd: number | null = null;
     try {
@@ -84,9 +106,11 @@ export class JsonlTailer {
     this.partial.set(file, lines.pop() ?? "");
 
     const parsed: unknown[] = [];
+    const maxLine = this.options.maxLineChars ?? Number.POSITIVE_INFINITY;
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      if (trimmed.length > maxLine) continue; // oversized record (embedded image data)
       try {
         parsed.push(JSON.parse(trimmed));
       } catch {

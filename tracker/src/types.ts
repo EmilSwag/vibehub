@@ -56,6 +56,27 @@ export interface HeartbeatUsage {
   model: string | null;
   tokensInputDelta: number;
   tokensOutputDelta: number;
+  /**
+   * Round 6: true when the numbers were derived, not reported. Quadcode logs carry
+   * no token counts at all, so its adapter estimates them from character counts.
+   * The server accepts and records the flag; it does not change accounting. Any
+   * surface showing these numbers must say "est." — never pass an estimate off as
+   * measured.
+   */
+  estimated?: boolean;
+}
+
+/**
+ * Round 6: one tool the tracker can see open right now. People sit in several
+ * terminals and IDEs at once, so presence reports the whole stack while time and
+ * tokens still accrue only to the primary (the top-level `tool`/`model`) — Steam
+ * semantics: show everything open, credit the one being driven.
+ */
+export interface HeartbeatTool {
+  tool: string;
+  model: string | null;
+  /** null when unknown, or when the project is hidden by a user alias override. */
+  projectAlias: string | null;
 }
 
 export interface HeartbeatPayload {
@@ -77,6 +98,13 @@ export interface HeartbeatPayload {
    * ignores the top-level sums (no double count). Only on `"heartbeat"` events.
    */
   usage?: HeartbeatUsage[];
+  /**
+   * Round 6: every tool seen open at this moment, primary first, deduped by tool,
+   * at most 10. Presence only — it never affects time or token accounting. Omitted
+   * on session_start/session_end, and absent entirely from older trackers, which
+   * is why the server falls back to `[activity]`.
+   */
+  tools?: HeartbeatTool[];
   occurredAt: string;
 }
 

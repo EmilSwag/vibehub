@@ -64,7 +64,7 @@ export interface TrackerStatus {
   /** How often the tracker is expected to report; the UI can size its own polling on it. */
   heartbeatIntervalMs: number;
   /** The viewer's own presence, same shape PresenceBlock takes. */
-  presence: { status: PresenceStatus; activity: Activity | null };
+  presence: { status: PresenceStatus; activity: Activity | null; tools?: PresenceTool[] };
   /** Every (tool, model) pair seen in the last 7 days, most recently seen first. */
   sources: TrackerSource[];
   devices: TrackerDevice[];
@@ -192,10 +192,32 @@ export interface Activity {
   startedAt: string;
 }
 
+/**
+ * Round 6: one tool the person has open right now. People sit in several terminals
+ * and IDEs at once, so presence lists the whole stack — but hours and tokens still
+ * accrue only to the primary, which is `activity` and always `tools[0]`.
+ *
+ * Not to be confused with `TrackerStatus.tools`, which is a flat list of tool *ids*
+ * seen recently. This one is per-tool presence detail.
+ */
+export interface PresenceTool {
+  tool: string;
+  /** null when that tool exposes no model (Cursor, ChatGPT app, a fresh Quadcode chat). */
+  model: string | null;
+  /** null when unknown, or when the user hid that project — the tool still shows. */
+  projectAlias: string | null;
+}
+
 export interface Presence {
   username: string;
   status: PresenceStatus;
   activity: Activity | null;
+  /**
+   * Optional because a server older than round 6 does not send it. Never read it
+   * directly — use `toolsOf(presence)` from lib/api.ts, which falls back to the
+   * primary activity.
+   */
+  tools?: PresenceTool[];
 }
 
 export interface StatByModel {
@@ -241,6 +263,8 @@ export type WsServerEvent =
       username: string;
       status: PresenceStatus;
       activity: Activity | null;
+      /** Round 6; absent from servers that predate it — see `toolsOf` in lib/api.ts. */
+      tools?: PresenceTool[];
     }
   | {
       type: "wall:new-comment";

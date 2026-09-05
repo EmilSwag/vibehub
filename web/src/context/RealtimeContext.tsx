@@ -121,6 +121,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           username: event.username,
           status: event.status,
           activity: event.activity,
+          // Round 6 multi-tool presence. Carried through verbatim, including
+          // undefined from a pre-round-6 server — readers call `toolsOf()`, which
+          // falls back to the primary activity.
+          tools: event.tools,
         });
         presencesRef.current = next;
         setPresences(next);

@@ -155,6 +155,7 @@ model Session {
   endedAt         DateTime?
   tokensInput     Int      @default(0)
   tokensOutput    Int      @default(0)
+  coTools         String?  // round 6: latest tools[] seen open, primary first; JSON-encoded — SQLite has no native Json type (mirror of `Json?` in schema.prisma, same divergence as ActivityEvent.payload)
 
   activityEvents ActivityEvent[]
 

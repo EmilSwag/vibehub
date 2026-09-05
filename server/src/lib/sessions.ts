@@ -1,6 +1,7 @@
 import type { Session } from "@prisma/client";
 import { prisma } from "../db";
 import { env } from "../env";
+import { fromJsonArrayValue } from "./json-field";
 
 // Round 5: presence must decay from `lastHeartbeatAt` at *read* time, not trust
 // the stored `Session.status` column. That column is only advanced by the ~30s
@@ -59,10 +60,65 @@ export interface PresenceActivity {
   startedAt: string;
 }
 
+/**
+ * Round 6: one tool the tracker could see open when it last reported. People sit in
+ * several terminals and IDEs at once, so presence lists the whole stack while hours
+ * and tokens still accrue only to the primary — `activity` — which is always the
+ * first entry.
+ */
+export interface PresenceTool {
+  tool: string;
+  model: string | null;
+  /** null when unknown, or when the user hid that project: the tool still shows. */
+  projectAlias: string | null;
+}
+
 export interface PresenceSnapshot {
   username: string;
   status: PresenceStatus;
   activity: PresenceActivity | null;
+  /**
+   * Every tool seen open, primary first and deduped by tool. Falls back to just the
+   * primary (`[activity]`) for sessions written by a tracker that predates `tools[]`,
+   * and is `[]` when offline — so a reader can always use it without a null check.
+   */
+  tools: PresenceTool[];
+}
+
+/** Largest `tools[]` we will echo back, mirroring the heartbeat schema's cap. */
+const MAX_PRESENCE_TOOLS = 10;
+
+/**
+ * Reads `Session.coTools` defensively — it is a Json column that several tracker
+ * versions write, so shape is asserted rather than assumed. Entries are normalised
+ * (models through `normalizeModel`), deduped by tool keeping the first occurrence,
+ * and the primary is forced to the front so `tools[0]` always matches `activity`.
+ */
+function presenceTools(raw: unknown, primary: PresenceActivity | null): PresenceTool[] {
+  const out: PresenceTool[] = [];
+  const seen = new Set<string>();
+  const push = (tool: string, model: string | null, projectAlias: string | null) => {
+    if (!tool || seen.has(tool) || out.length >= MAX_PRESENCE_TOOLS) return;
+    seen.add(tool);
+    out.push({ tool, model, projectAlias });
+  };
+
+  if (primary) push(primary.tool, primary.model, primary.projectAlias);
+
+  {
+    // `Json?` on Postgres, JSON-encoded `String?` on the SQLite mirror — see lib/json-field.ts.
+    for (const entry of fromJsonArrayValue(raw)) {
+      if (!entry || typeof entry !== "object") continue;
+      const { tool, model, projectAlias } = entry as Record<string, unknown>;
+      if (typeof tool !== "string" || !tool) continue;
+      push(
+        tool,
+        normalizeModel(typeof model === "string" ? model : null),
+        typeof projectAlias === "string" && projectAlias ? projectAlias : null
+      );
+    }
+  }
+  return out;
 }
 
 export function utcDay(date: Date): Date {
@@ -221,12 +277,18 @@ export async function presenceFor(userId: string, username: string): Promise<Pre
     where: { userId, status: { not: "ENDED" } },
     orderBy: { lastHeartbeatAt: "desc" },
   });
-  if (!session) return { username, status: "offline", activity: null };
+  if (!session) return { username, status: "offline", activity: null, tools: [] };
 
   const silentForMs = Date.now() - session.lastHeartbeatAt.getTime();
   const status: PresenceStatus =
     silentForMs > env.sessionIdleTimeoutMs ? "offline" : silentForMs > ONLINE_AFTER_MS ? "idle" : "active";
 
-  if (status === "offline") return { username, status: "offline", activity: null };
-  return { username, status, activity: sessionToActivity(session) };
+  if (status === "offline") return { username, status: "offline", activity: null, tools: [] };
+  const activity = sessionToActivity(session);
+  return {
+    username,
+    status,
+    activity,
+    tools: presenceTools((session as { coTools?: unknown }).coTools, activity),
+  };
 }

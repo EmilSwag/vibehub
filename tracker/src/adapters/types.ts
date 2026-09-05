@@ -10,6 +10,13 @@ export interface UsageDelta {
   model: string | null;
   tokensInputDelta: number;
   tokensOutputDelta: number;
+  /**
+   * True when the counts are derived rather than reported by the tool. Quadcode
+   * logs carry no token numbers at all, so its adapter estimates from character
+   * counts. Never present an estimate as measured: the UI and `tracker status`
+   * must say "est." wherever these land (round 6 contract).
+   */
+  estimated?: boolean;
 }
 
 export interface Observation {

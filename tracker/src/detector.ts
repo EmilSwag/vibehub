@@ -1,6 +1,7 @@
 import { ClaudeCodeAdapter } from "./adapters/claudeCode";
 import { CodexAdapter } from "./adapters/codex";
 import { ProcessAdapter } from "./adapters/processes";
+import { QuadcodeAdapter } from "./adapters/quadcode";
 import type { Adapter, Observation } from "./adapters/types";
 
 /** Token deltas for one (tool, model) pair, merged across every observation this poll. */
@@ -9,6 +10,8 @@ export interface DetectionUsage {
   model: string | null;
   tokensInputDelta: number;
   tokensOutputDelta: number;
+  /** True when any contribution to this bucket was estimated rather than measured. */
+  estimated?: boolean;
 }
 
 /** A (tool, model) pair that exists right now or produced evidence recently. */
@@ -16,6 +19,14 @@ export interface SeenSource {
   tool: string;
   model: string | null;
   lastSeenAt: number;
+  /**
+   * Where that source was seen, so the heartbeat can resolve a project alias per
+   * tool for the round 6 `tools[]` list (same inputs `resolveProjectAlias` takes
+   * for the primary). Kept in memory only — a cwd is a full path and never leaves
+   * the machine (privacy invariant, index.ts header).
+   */
+  cwd?: string | null;
+  projectHint?: string | null;
 }
 
 /** What the heartbeat loop is currently reporting — input to the hysteresis rule. */
@@ -42,8 +53,14 @@ export interface Detection {
   seen: SeenSource[];
 }
 
-/** Tools whose `activity`-confidence observations can only come from a log adapter. */
-const LOG_BACKED_TOOLS = new Set(["claude-code", "codex"]);
+/**
+ * Tools whose `activity`-confidence observations can only come from a log adapter.
+ * Safe to list a tool the process adapter also reports: presence-only observations
+ * are filtered out before `isLogBacked` is ever consulted. Quadcode is here so a
+ * chat append still outranks a bare window-title candidate when the log has not
+ * named a model yet (a brand-new chat).
+ */
+const LOG_BACKED_TOOLS = new Set(["claude-code", "codex", "quadcode"]);
 
 const hasTokens = (o: Observation): boolean => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0;
 
@@ -92,6 +109,12 @@ export class Detector {
     this.adapters = [
       new ClaudeCodeAdapter(activeWindowMs * 6), // scan a wider window so idle sessions still resolve
       new CodexAdapter(activeWindowMs * 6),
+      // Quadcode appends only at turn boundaries and a single turn can run for hours,
+      // so its logs are scanned over a much wider window than the others. Stale files
+      // never become presence candidates (that still needs activity inside
+      // activeWindowMs) — they exist so the tool keeps its model and project while its
+      // own log is silent mid-turn. See identityFor below.
+      new QuadcodeAdapter(activeWindowMs * 72),
       new ProcessAdapter(activeWindowMs),
     ];
   }
@@ -114,20 +137,29 @@ export class Detector {
         const bucket = usage.get(key) ?? { tool: o.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
         bucket.tokensInputDelta += u.tokensInputDelta;
         bucket.tokensOutputDelta += u.tokensOutputDelta;
+        if (u.estimated) bucket.estimated = true;
         usage.set(key, bucket);
       }
     }
 
     // --- sources seen (for `vibehub-tracker status`) -----------------------
     const seen = new Map<string, SeenSource>();
-    const note = (tool: string, model: string | null, at: number) => {
+    const note = (
+      tool: string,
+      model: string | null,
+      at: number,
+      where?: { cwd: string | null; projectHint: string | null }
+    ) => {
       const key = usageKey(tool, model);
       const prev = seen.get(key);
-      if (!prev || at > prev.lastSeenAt) seen.set(key, { tool, model, lastSeenAt: at });
+      if (!prev || at > prev.lastSeenAt) {
+        seen.set(key, { tool, model, lastSeenAt: at, cwd: where?.cwd ?? prev?.cwd, projectHint: where?.projectHint ?? prev?.projectHint });
+      }
     };
     for (const o of all) {
-      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0));
-      for (const u of o.usage) if (u.model !== o.model) note(o.tool, u.model, now);
+      const where = { cwd: o.cwd, projectHint: o.projectHint };
+      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0), where);
+      for (const u of o.usage) if (u.model !== o.model) note(o.tool, u.model, now, where);
     }
 
     // --- presence selection ------------------------------------------------
@@ -151,11 +183,22 @@ export class Detector {
     if (!pick) pick = newest(all);
     if (!pick) return null;
 
+    // A tool's *process* is visible continuously, but its *log* only speaks in bursts:
+    // Quadcode appends a record at turn boundaries, so a long turn writes nothing for
+    // minutes while the window stays open. When the process observation wins in that
+    // gap it knows the tool is open but neither the model nor the project, and presence
+    // would drop to "Quadcode AI, unknown project, no model" mid-turn.
+    //
+    // So fill only what the pick is missing from the freshest other observation of the
+    // SAME tool. This never overrides an established value and never crosses tools —
+    // it just stops a tool's identity flickering away between its own log writes.
+    const identity = identityFor(pick, all);
+
     return {
       tool: pick.tool,
-      model: pick.model,
-      cwd: pick.cwd,
-      projectHint: pick.projectHint,
+      model: identity.model,
+      cwd: identity.cwd,
+      projectHint: identity.projectHint,
       active,
       lastActivityAt: pick.lastActivityAt,
       tokensInputDelta: tokensIn,
@@ -164,6 +207,39 @@ export class Detector {
       seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt),
     };
   }
+}
+
+/**
+ * The best-known identity for the picked observation's tool: its own values, with any
+ * null filled from the freshest *other* observation of the same tool that does know
+ * it. Fills only nulls, so a log adapter that named a model and project keeps them
+ * even when a process observation happens to be the freshest evidence this poll.
+ */
+function identityFor(
+  pick: Observation,
+  all: Observation[]
+): { model: string | null; cwd: string | null; projectHint: string | null } {
+  const identity = { model: pick.model, cwd: pick.cwd, projectHint: pick.projectHint };
+  if (identity.model !== null && identity.cwd !== null) return identity;
+
+  const sameTool = all
+    .filter((o) => o !== pick && o.tool === pick.tool)
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+
+  for (const o of sameTool) {
+    if (identity.model === null && o.model !== null) identity.model = o.model;
+    if (identity.cwd === null && o.cwd !== null) {
+      identity.cwd = o.cwd;
+      // cwd wins over a window-title hint, so drop a hint that would now be ignored.
+      identity.projectHint = null;
+    }
+    if (identity.model !== null && identity.cwd !== null) break;
+  }
+  if (identity.projectHint === null && identity.cwd === null) {
+    const hinted = sameTool.find((o) => o.projectHint !== null);
+    if (hinted) identity.projectHint = hinted.projectHint;
+  }
+  return identity;
 }
 
 /** Same tool as the current session: current project > tokens this poll > newest. */

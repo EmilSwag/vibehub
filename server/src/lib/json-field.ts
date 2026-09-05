@@ -11,6 +11,27 @@ export function toPayloadValue(payload: Record<string, unknown>): unknown {
   return env.databaseProvider === "sqlite" ? JSON.stringify(payload) : payload;
 }
 
+/**
+ * Same divergence, same fix, for round 6's `Session.coTools` — `Json?` on Postgres,
+ * `String?` on the SQLite mirror. Kept as its own pair because this one holds an
+ * array rather than an object.
+ */
+export function toJsonArrayValue(value: unknown[]): unknown {
+  return env.databaseProvider === "sqlite" ? JSON.stringify(value) : value;
+}
+
+export function fromJsonArrayValue(value: unknown): unknown[] {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? value : [];
+}
+
 export function fromPayloadValue(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
     try {

@@ -718,7 +718,7 @@ var require_suggestSimilar = __commonJS({
 // ../node_modules/commander/lib/command.js
 var require_command = __commonJS({
   "../node_modules/commander/lib/command.js"(exports2) {
-    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path7 = require("node:path"), fs6 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
+    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path8 = require("node:path"), fs7 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
       /**
        * Initialize a new `Command`.
        *
@@ -1430,11 +1430,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         args = args.slice();
         let launchWithNode = !1, sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          let localBin = path7.resolve(baseDir, baseName);
-          if (fs6.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path7.extname(baseName))) return;
+          let localBin = path8.resolve(baseDir, baseName);
+          if (fs7.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path8.extname(baseName))) return;
           let foundExt = sourceExt.find(
-            (ext) => fs6.existsSync(`${localBin}${ext}`)
+            (ext) => fs7.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
         }
@@ -1443,21 +1443,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs6.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs7.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path7.resolve(
-            path7.dirname(resolvedScriptPath),
+          executableDir = path8.resolve(
+            path8.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            let legacyName = path7.basename(
+            let legacyName = path8.basename(
               this._scriptPath,
-              path7.extname(this._scriptPath)
+              path8.extname(this._scriptPath)
             );
             legacyName !== this._name && (localFile = findFile(
               executableDir,
@@ -1466,7 +1466,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path7.extname(executableFile));
+        launchWithNode = sourceExt.includes(path8.extname(executableFile));
         let proc;
         process2.platform !== "win32" ? launchWithNode ? (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.argv[0], args, { stdio: "inherit" })) : proc = childProcess.spawn(executableFile, args, { stdio: "inherit" }) : (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.execPath, args, { stdio: "inherit" })), proc.killed || ["SIGUSR1", "SIGUSR2", "SIGTERM", "SIGINT", "SIGHUP"].forEach((signal) => {
           process2.on(signal, () => {
@@ -2094,7 +2094,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        return this._name = path7.basename(filename, path7.extname(filename)), this;
+        return this._name = path8.basename(filename, path8.extname(filename)), this;
       }
       /**
        * Get or set the directory for searching for executable subcommands of this command.
@@ -2107,8 +2107,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path8) {
-        return path8 === void 0 ? this._executableDir : (this._executableDir = path8, this);
+      executableDir(path9) {
+        return path9 === void 0 ? this._executableDir : (this._executableDir = path9, this);
       }
       /**
        * Return program help documentation.
@@ -2274,7 +2274,7 @@ var import_index = __toESM(require_commander(), 1), {
 } = import_index.default;
 
 // src/index.ts
-var path6 = __toESM(require("node:path"));
+var path7 = __toESM(require("node:path"));
 
 // src/paths.ts
 var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request");
@@ -2338,13 +2338,17 @@ function idleThresholdMs(config) {
 }
 
 // src/daemon.ts
-var import_node_child_process2 = require("node:child_process"), fs5 = __toESM(require("node:fs"));
+var import_node_child_process2 = require("node:child_process"), fs6 = __toESM(require("node:fs"));
 
 // src/adapters/claudeCode.ts
 var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path"));
 
 // src/adapters/jsonlTail.ts
 var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(require("node:path")), JsonlTailer = class {
+  constructor(options = {}) {
+    this.options = options;
+  }
+  options;
   offsets = /* @__PURE__ */ new Map();
   partial = /* @__PURE__ */ new Map();
   recentFiles(root, maxAgeMs) {
@@ -2383,7 +2387,10 @@ var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(req
     if (size < known)
       return this.offsets.set(file, 0), this.partial.delete(file), this.readNewLines(file);
     if (size === known) return [];
-    let length = size - known, buf = Buffer.alloc(length), fd = null;
+    let length = size - known, maxChunk = this.options.maxChunkBytes ?? Number.POSITIVE_INFINITY;
+    if (length > maxChunk)
+      return this.offsets.set(file, size), this.partial.delete(file), [];
+    let buf = Buffer.alloc(length), fd = null;
     try {
       fd = import_node_fs.default.openSync(file, "r"), import_node_fs.default.readSync(fd, buf, 0, length, known);
     } catch {
@@ -2395,10 +2402,10 @@ var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(req
     let lines = ((this.partial.get(file) ?? "") + buf.toString("utf8")).split(`
 `);
     this.partial.set(file, lines.pop() ?? "");
-    let parsed = [];
+    let parsed = [], maxLine = this.options.maxLineChars ?? Number.POSITIVE_INFINITY;
     for (let line of lines) {
       let trimmed = line.trim();
-      if (trimmed)
+      if (trimmed && !(trimmed.length > maxLine))
         try {
           parsed.push(JSON.parse(trimmed));
         } catch {
@@ -2439,9 +2446,15 @@ function normalizeModel(model) {
 }
 var UsageAccumulator = class {
   buckets = /* @__PURE__ */ new Map();
-  add(model, tokensInputDelta, tokensOutputDelta) {
+  /**
+   * `estimated` marks counts the adapter derived rather than read (Quadcode logs
+   * carry no token numbers). It is sticky per bucket: once any contribution to a
+   * (model) bucket is an estimate the whole bucket is reported as estimated,
+   * because the two cannot be told apart downstream.
+   */
+  add(model, tokensInputDelta, tokensOutputDelta, estimated = !1) {
     let key = model ?? "", b = this.buckets.get(key) ?? { model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-    b.tokensInputDelta += tokensInputDelta, b.tokensOutputDelta += tokensOutputDelta, this.buckets.set(key, b);
+    b.tokensInputDelta += tokensInputDelta, b.tokensOutputDelta += tokensOutputDelta, estimated && (b.estimated = !0), this.buckets.set(key, b);
   }
   toList() {
     return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0);
@@ -2753,14 +2766,195 @@ function projectFromTitle(title, suffixes) {
   return !candidate || !isRealWindowTitle(candidate) ? null : /[a-z0-9]/i.test(candidate) ? candidate : null;
 }
 
+// src/adapters/quadcode.ts
+var import_node_fs3 = __toESM(require("node:fs")), import_node_os3 = __toESM(require("node:os")), import_node_path4 = __toESM(require("node:path"));
+var CHARS_PER_TOKEN = 4, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_LINE_CHARS = 2 * 1024 * 1024, QuadcodeAdapter = class {
+  constructor(recentWindowMs) {
+    this.recentWindowMs = recentWindowMs;
+    this.roots = quadcodeRoots();
+  }
+  recentWindowMs;
+  name = "quadcode";
+  tailer = new JsonlTailer({ maxChunkBytes: MAX_CHUNK_BYTES, maxLineChars: MAX_LINE_CHARS });
+  roots;
+  fileMeta = /* @__PURE__ */ new Map();
+  /** projectDir -> resolved project path; git probing is filesystem work, do it once. */
+  projectPaths = /* @__PURE__ */ new Map();
+  async poll() {
+    let out = [], cutoff = Date.now() - this.recentWindowMs;
+    for (let root of this.roots)
+      for (let { file, projectDir } of chatLogs(root)) {
+        let mtime = this.tailer.mtime(file);
+        if (mtime < cutoff) {
+          this.tailer.readNewLines(file);
+          continue;
+        }
+        let meta = this.fileMeta.get(file) ?? { model: peekModel(file), projectPath: this.projectPathFor(projectDir) }, usage = new UsageAccumulator(), sawLine = !1;
+        for (let raw of this.tailer.readNewLines(file)) {
+          let line = raw;
+          if (line.is_status_message) continue;
+          let text = typeof line.message == "string" ? line.message : "";
+          if (text)
+            if (sawLine = !0, line.method === "LLM") {
+              let model = modelOf(line);
+              model !== null && (meta.model = model), usage.add(model, 0, estimateTokens(stripToolResults(text)), !0);
+            } else line.method === "USER" && usage.add(meta.model, estimateTokens(text), 0, !0);
+        }
+        this.fileMeta.set(file, meta), out.push({
+          tool: this.name,
+          cwd: meta.projectPath,
+          projectHint: null,
+          model: meta.model,
+          // The append is the activity, and mtime is when it happened (see 2 above).
+          lastActivityAt: mtime,
+          observedAt: sawLine ? Date.now() : void 0,
+          tokensInputDelta: usage.totalInput,
+          tokensOutputDelta: usage.totalOutput,
+          usage: usage.toList(),
+          confidence: "activity"
+        });
+      }
+    return out;
+  }
+  /**
+   * Project alias source, in order (round 6 Amendment 1, deviation 3): the
+   * Quadcode project folder if it is itself a git repo; else the nearest
+   * enclosing repo; else the single git repo directly inside it — that is the
+   * `Vibemunity/vibehub` case, where every other adapter reports `vibehub` from
+   * its cwd and Quadcode would otherwise disagree with them about the same work;
+   * else the folder itself.
+   */
+  projectPathFor(projectDir) {
+    let cached = this.projectPaths.get(projectDir);
+    if (cached) return cached;
+    let resolved = projectDir;
+    if (!isGitRepo(projectDir)) {
+      let enclosing = nearestEnclosingRepo(projectDir);
+      if (enclosing)
+        resolved = enclosing;
+      else {
+        let inner = soleInnerRepo(projectDir);
+        inner && (resolved = inner);
+      }
+    }
+    return this.projectPaths.set(projectDir, resolved), resolved;
+  }
+};
+function quadcodeRoots() {
+  let override = process.env.QUADCODE_HOME;
+  if (override) return [override];
+  let home = import_node_os3.default.homedir(), roots = [];
+  if (process.platform === "win32") {
+    let appData = process.env.APPDATA || import_node_path4.default.join(home, "AppData", "Roaming");
+    roots.push(import_node_path4.default.join(appData, "QuadcodeAI"));
+  } else process.platform === "darwin" ? roots.push(import_node_path4.default.join(home, "Library", "Application Support", "QuadcodeAI")) : roots.push(import_node_path4.default.join(home, ".config", "QuadcodeAI"));
+  return roots.push(import_node_path4.default.join(home, ".quadcodeai")), roots;
+}
+function chatLogs(root) {
+  let out = [], appsDir = import_node_path4.default.join(root, "apps");
+  for (let project of dirs(appsDir)) {
+    let projectDir = import_node_path4.default.join(appsDir, project), chatsDir = import_node_path4.default.join(projectDir, ".quadcodeai", ".data", "chats");
+    for (let section of dirs(chatsDir)) {
+      if (!section.endsWith(".files")) continue;
+      let sectionDir = import_node_path4.default.join(chatsDir, section), entries;
+      try {
+        entries = import_node_fs3.default.readdirSync(sectionDir, { withFileTypes: !0 });
+      } catch {
+        continue;
+      }
+      for (let e of entries)
+        e.isFile() && e.name.endsWith(".jsonl") && out.push({ file: import_node_path4.default.join(sectionDir, e.name), projectDir });
+    }
+  }
+  return out;
+}
+function dirs(parent) {
+  try {
+    return import_node_fs3.default.readdirSync(parent, { withFileTypes: !0 }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+var isGitRepo = (dir) => {
+  try {
+    return import_node_fs3.default.existsSync(import_node_path4.default.join(dir, ".git"));
+  } catch {
+    return !1;
+  }
+};
+function nearestEnclosingRepo(from) {
+  let dir = import_node_path4.default.dirname(from);
+  for (let i = 0; i < 8; i += 1) {
+    if (isGitRepo(dir)) return dir;
+    let parent = import_node_path4.default.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+function soleInnerRepo(dir) {
+  let found = [];
+  for (let name of dirs(dir)) {
+    if (name.startsWith(".")) continue;
+    let full = import_node_path4.default.join(dir, name);
+    if (isGitRepo(full) && found.push(full), found.length > 1) return null;
+  }
+  return found.length === 1 ? found[0] : null;
+}
+function estimateTokens(text) {
+  return text ? Math.round(text.length / CHARS_PER_TOKEN) : 0;
+}
+function stripToolResults(text) {
+  let OPEN = "<TOOL_RESULT>", CLOSE = "</TOOL_RESULT>", out = "", i = 0;
+  for (; ; ) {
+    let start = text.indexOf(OPEN, i);
+    if (start === -1)
+      return out += text.slice(i), out;
+    out += text.slice(i, start);
+    let end = text.indexOf(CLOSE, start + OPEN.length);
+    if (end === -1) return out;
+    i = end + CLOSE.length;
+  }
+}
+function modelOf(line) {
+  let variations = Array.isArray(line.variations) ? line.variations : [];
+  if (variations.length === 0) return null;
+  let idx = typeof line.variation_index == "number" && line.variation_index >= 0 && line.variation_index < variations.length ? line.variation_index : 0;
+  return normalizeModel(variations[idx]?.model_name);
+}
+var PEEK_BYTES2 = 512 * 1024;
+function peekModel(file) {
+  let fd = null;
+  try {
+    let size = import_node_fs3.default.statSync(file).size, start = Math.max(0, size - PEEK_BYTES2), buf = Buffer.alloc(size - start);
+    fd = import_node_fs3.default.openSync(file, "r"), import_node_fs3.default.readSync(fd, buf, 0, buf.length, start);
+    let text = buf.toString("utf8"), KEY = '"model_name":', at = text.lastIndexOf(KEY);
+    if (at === -1) return null;
+    let openQuote = text.indexOf('"', at + KEY.length);
+    if (openQuote === -1) return null;
+    let closeQuote = text.indexOf('"', openQuote + 1);
+    return closeQuote === -1 ? null : normalizeModel(text.slice(openQuote + 1, closeQuote));
+  } catch {
+    return null;
+  } finally {
+    fd !== null && import_node_fs3.default.closeSync(fd);
+  }
+}
+
 // src/detector.ts
-var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex"]), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, isLogBacked = (o) => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool), newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), usageKey = (tool, model) => `${tool}\0${model ?? ""}`, Detector = class {
+var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex", "quadcode"]), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, isLogBacked = (o) => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool), newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), usageKey = (tool, model) => `${tool}\0${model ?? ""}`, Detector = class {
   constructor(activeWindowMs) {
     this.activeWindowMs = activeWindowMs;
     this.adapters = [
       new ClaudeCodeAdapter(activeWindowMs * 6),
       // scan a wider window so idle sessions still resolve
       new CodexAdapter(activeWindowMs * 6),
+      // Quadcode appends only at turn boundaries and a single turn can run for hours,
+      // so its logs are scanned over a much wider window than the others. Stale files
+      // never become presence candidates (that still needs activity inside
+      // activeWindowMs) — they exist so the tool keeps its model and project while its
+      // own log is silent mid-turn. See identityFor below.
+      new QuadcodeAdapter(activeWindowMs * 72),
       new ProcessAdapter(activeWindowMs)
     ];
   }
@@ -2775,16 +2969,17 @@ var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex"]), hasTok
       for (let u of o.usage) {
         if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) continue;
         let key = usageKey(o.tool, u.model), bucket = usage.get(key) ?? { tool: o.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-        bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, usage.set(key, bucket);
+        bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, u.estimated && (bucket.estimated = !0), usage.set(key, bucket);
       }
     }
-    let seen = /* @__PURE__ */ new Map(), note = (tool, model, at) => {
+    let seen = /* @__PURE__ */ new Map(), note = (tool, model, at, where) => {
       let key = usageKey(tool, model), prev = seen.get(key);
-      (!prev || at > prev.lastSeenAt) && seen.set(key, { tool, model, lastSeenAt: at });
+      (!prev || at > prev.lastSeenAt) && seen.set(key, { tool, model, lastSeenAt: at, cwd: where?.cwd ?? prev?.cwd, projectHint: where?.projectHint ?? prev?.projectHint });
     };
     for (let o of all) {
-      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0));
-      for (let u of o.usage) u.model !== o.model && note(o.tool, u.model, now);
+      let where = { cwd: o.cwd, projectHint: o.projectHint };
+      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0), where);
+      for (let u of o.usage) u.model !== o.model && note(o.tool, u.model, now, where);
     }
     let fresh = (o) => now - o.lastActivityAt <= this.activeWindowMs, candidates = all.filter((o) => o.confidence === "activity" && fresh(o)), pick = null;
     if (current) {
@@ -2796,29 +2991,43 @@ var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex"]), hasTok
       pick = newest(logBacked.filter(hasTokens)) ?? newest(logBacked) ?? newest(candidates);
     }
     let active = pick !== null;
-    return pick || (pick = newest(all)), pick ? {
+    if (pick || (pick = newest(all)), !pick) return null;
+    let identity = identityFor(pick, all);
+    return {
       tool: pick.tool,
-      model: pick.model,
-      cwd: pick.cwd,
-      projectHint: pick.projectHint,
+      model: identity.model,
+      cwd: identity.cwd,
+      projectHint: identity.projectHint,
       active,
       lastActivityAt: pick.lastActivityAt,
       tokensInputDelta: tokensIn,
       tokensOutputDelta: tokensOut,
       usage: [...usage.values()],
       seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-    } : null;
+    };
   }
 };
+function identityFor(pick, all) {
+  let identity = { model: pick.model, cwd: pick.cwd, projectHint: pick.projectHint };
+  if (identity.model !== null && identity.cwd !== null) return identity;
+  let sameTool = all.filter((o) => o !== pick && o.tool === pick.tool).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  for (let o of sameTool)
+    if (identity.model === null && o.model !== null && (identity.model = o.model), identity.cwd === null && o.cwd !== null && (identity.cwd = o.cwd, identity.projectHint = null), identity.model !== null && identity.cwd !== null) break;
+  if (identity.projectHint === null && identity.cwd === null) {
+    let hinted = sameTool.find((o) => o.projectHint !== null);
+    hinted && (identity.projectHint = hinted.projectHint);
+  }
+  return identity;
+}
 function bestForCurrent(same, current) {
   let sameProject = (o) => current.cwd !== null ? o.cwd === current.cwd : o.cwd === null && current.projectHint !== null && o.projectHint === current.projectHint, inProject = same.filter(sameProject);
   return newest(inProject.filter(hasTokens)) ?? newest(same.filter(hasTokens)) ?? newest(inProject) ?? newest(same);
 }
 
 // src/projectAlias.ts
-var path5 = __toESM(require("node:path")), HIDDEN = "hidden", UNKNOWN_PROJECT_ALIAS = "unknown";
+var path6 = __toESM(require("node:path")), HIDDEN = "hidden", UNKNOWN_PROJECT_ALIAS = "unknown";
 function resolveProjectAlias(cwd, config, hint = null) {
-  let folderName = cwd ? path5.basename(cwd) : hint?.trim() || null;
+  let folderName = cwd ? path6.basename(cwd) : hint?.trim() || null;
   if (!folderName) return UNKNOWN_PROJECT_ALIAS;
   let override = config.projectAliases?.[folderName];
   return override === HIDDEN ? null : (override ?? folderName).slice(0, 64);
@@ -2875,12 +3084,12 @@ function markAuthRejected(rejected) {
 }
 
 // src/stopRequest.ts
-var fs4 = __toESM(require("node:fs"));
+var fs5 = __toESM(require("node:fs"));
 function requestStop() {
   writeJsonAtomic(STOP_REQUEST_PATH, { requestedAt: (/* @__PURE__ */ new Date()).toISOString(), byPid: process.pid });
 }
 function isStopRequested() {
-  return fs4.existsSync(STOP_REQUEST_PATH);
+  return fs5.existsSync(STOP_REQUEST_PATH);
 }
 function clearStopRequest() {
   removeFile(STOP_REQUEST_PATH);
@@ -2905,7 +3114,21 @@ var usageKey2 = (tool, model) => `${tool}\0${model ?? ""}`;
 function addPendingUsage(state, u) {
   if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) return;
   let key = usageKey2(u.tool, u.model), bucket = state.pendingUsage.get(key) ?? { tool: u.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-  bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, state.pendingUsage.set(key, bucket);
+  bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, u.estimated && (bucket.estimated = !0), state.pendingUsage.set(key, bucket);
+}
+var MAX_TOOLS = 10;
+function buildTools(state, config, primary, now) {
+  let byTool = /* @__PURE__ */ new Map();
+  byTool.set(primary.tool, { tool: primary.tool, model: primary.model, projectAlias: primary.projectAlias });
+  let fresh = [...state.sourcesSeen.values()].filter((s) => now - s.lastSeenAt <= state.activeWindowMs).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  for (let s of fresh)
+    if (!byTool.has(s.tool) && (byTool.set(s.tool, {
+      tool: s.tool,
+      model: s.model,
+      projectAlias: resolveProjectAlias(s.cwd ?? null, config, s.projectHint ?? null)
+    }), byTool.size >= MAX_TOOLS))
+      break;
+  return [...byTool.values()];
 }
 function takePendingUsage(state) {
   let usage = [], tokensInputDelta = 0, tokensOutputDelta = 0;
@@ -3016,6 +3239,7 @@ async function tick(config, state) {
       tokensInputDelta: pending.tokensInputDelta,
       tokensOutputDelta: pending.tokensOutputDelta,
       usage: pending.usage,
+      tools: buildTools(state, config, { tool, model, projectAlias: alias }, now),
       occurredAt: nowIso
     }), state.lastActivityAt = now, writeStatus({
       status: "active",
@@ -3108,7 +3332,7 @@ function startDaemon(entryPath) {
     return;
   }
   ensureConfigDir(), clearStopRequest();
-  let logFd = fs5.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
+  let logFd = fs6.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
     detached: !0,
     stdio: ["ignore", logFd, logFd]
   });
@@ -3224,7 +3448,7 @@ program2.command("set <projectFolder> <alias>").description(`remap a project fol
   );
 });
 program2.command("start").description("poll for active coding-tool processes and send heartbeats").action(() => {
-  requireConfig(), startDaemon(path6.resolve(__filename));
+  requireConfig(), startDaemon(path7.resolve(__filename));
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {
   if (!readConfig()) {

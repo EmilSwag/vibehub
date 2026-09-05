@@ -247,6 +247,83 @@ async function main() {
   const refinedStats = await call("GET", `/users/${smokeUser}/stats`);
   check("refine: zero-token session folds without changing totals", refinedStats?.totalTokens === 1752, `totalTokens=${refinedStats?.totalTokens}`);
 
+  // --- round 6: multi-tool presence, quadcode, estimated usage ----------------------
+  // People sit in several tools at once, so presence reports the whole stack while
+  // hours and tokens still accrue only to the primary. `estimated: true` marks counts
+  // the tracker derived (Quadcode logs carry no token numbers); the server must accept
+  // the flag and must not let it change accounting.
+  const statsBeforeMulti = await call("GET", `/users/${smokeUser}/stats`);
+  const hbMulti = await call("POST", "/tracker/heartbeat", {
+    token: tokenRes?.token,
+    body: {
+      eventType: "heartbeat",
+      projectAlias: "smoke-multi",
+      tool: "quadcode",
+      model: "claude-fable-5-1",
+      tokensInputDelta: 40,
+      tokensOutputDelta: 60,
+      usage: [{ tool: "quadcode", model: "claude-fable-5-1", tokensInputDelta: 40, tokensOutputDelta: 60, estimated: true }],
+      tools: [
+        { tool: "quadcode", model: "claude-fable-5-1", projectAlias: "smoke-multi" },
+        { tool: "cursor", model: null, projectAlias: "smoke-multi" },
+        { tool: "claude-code", model: "claude-opus-5", projectAlias: null },
+      ],
+      occurredAt: new Date().toISOString(),
+    },
+  });
+  check("multi-tool: quadcode heartbeat opens an ACTIVE session", hbMulti?.status === "ACTIVE" && typeof hbMulti?.sessionId === "string", JSON.stringify(hbMulti));
+  const trackerMulti = await call("GET", "/users/me/tracker", { as: "smoke" });
+  check(
+    "quadcode session carries its model",
+    trackerMulti?.presence?.activity?.tool === "quadcode" && trackerMulti?.presence?.activity?.model === "claude-fable-5-1",
+    JSON.stringify(trackerMulti?.presence?.activity)
+  );
+  check(
+    "presence.tools lists every open tool, primary first",
+    JSON.stringify((trackerMulti?.presence?.tools ?? []).map((t) => t.tool)) === JSON.stringify(["quadcode", "cursor", "claude-code"]),
+    JSON.stringify(trackerMulti?.presence?.tools)
+  );
+  check(
+    "presence.tools keeps each tool's own model and project",
+    trackerMulti?.presence?.tools?.[1]?.model === null &&
+      trackerMulti?.presence?.tools?.[1]?.projectAlias === "smoke-multi" &&
+      trackerMulti?.presence?.tools?.[2]?.model === "claude-opus-5" &&
+      trackerMulti?.presence?.tools?.[2]?.projectAlias === null,
+    JSON.stringify(trackerMulti?.presence?.tools)
+  );
+  const presenceMulti = await call("GET", "/presence/friends", { as: "ada" });
+  const smokeMulti = presenceMulti?.presences?.find((p) => p.username === smokeUser);
+  check(
+    "friend view sees the same tool stack",
+    JSON.stringify((smokeMulti?.tools ?? []).map((t) => t.tool)) === JSON.stringify(["quadcode", "cursor", "claude-code"]),
+    JSON.stringify(smokeMulti)
+  );
+  const statsAfterMulti = await call("GET", `/users/${smokeUser}/stats`);
+  check(
+    "estimated usage is counted exactly like measured usage (flag changes nothing)",
+    statsAfterMulti?.totalTokens === (statsBeforeMulti?.totalTokens ?? 0) + 100,
+    `before=${statsBeforeMulti?.totalTokens} after=${statsAfterMulti?.totalTokens}`
+  );
+
+  // A tracker that predates tools[] opens a session without one: presence falls back
+  // to just the primary activity, never null.
+  await call("POST", "/tracker/heartbeat", {
+    token: tokenRes?.token,
+    body: { eventType: "heartbeat", projectAlias: "smoke-legacy", tool: "cursor", occurredAt: new Date().toISOString() },
+  });
+  const trackerLegacy = await call("GET", "/users/me/tracker", { as: "smoke" });
+  check(
+    "tracker without tools[] falls back to [activity]",
+    (trackerLegacy?.presence?.tools ?? []).length === 1 && trackerLegacy?.presence?.tools?.[0]?.tool === "cursor",
+    JSON.stringify(trackerLegacy?.presence?.tools)
+  );
+  await call("POST", "/tracker/heartbeat", {
+    token: tokenRes?.token,
+    body: { eventType: "session_end", projectAlias: "smoke-legacy", tool: "cursor", occurredAt: new Date().toISOString() },
+  });
+  const trackerOffline = await call("GET", "/users/me/tracker", { as: "smoke" });
+  check("offline presence reports an empty tool list, not null", Array.isArray(trackerOffline?.presence?.tools) && trackerOffline.presence.tools.length === 0, JSON.stringify(trackerOffline?.presence));
+
   const tokens = await call("GET", "/users/me/tracker-tokens", { as: "smoke" });
   check("token list hides raw token", tokens?.tokens?.length === 1 && !("token" in tokens.tokens[0]));
 

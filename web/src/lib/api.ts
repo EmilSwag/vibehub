@@ -2,6 +2,7 @@
 // Base URL from env (never hardcoded), httpOnly cookie auth via credentials: "include".
 
 import type {
+  Activity,
   Archetype,
   Friend,
   FriendRequest,
@@ -9,6 +10,7 @@ import type {
   LevelBreakdown,
   Project,
   Presence,
+  PresenceTool,
   RepoActivity,
   SuggestedUser,
   TrackerStatus,
@@ -246,3 +248,23 @@ export const statsApi = {
 export const presenceApi = {
   friends: () => request<{ presences: Presence[] }>("/api/v1/presence/friends"),
 };
+
+/**
+ * Every tool someone has open, primary first — the round 6 multi-tool presence read.
+ *
+ * Always use this instead of reading `presence.tools` directly: a server older than
+ * round 6 (or a session opened by an older tracker) sends no list, and the correct
+ * answer there is the single primary activity, not "nothing". Offline presence has
+ * no activity and yields `[]`.
+ *
+ * Accepts anything presence-shaped: a `Presence` from `/presence/friends`, the
+ * `presence` object inside `TrackerStatus`, or a `presence:update` WS event.
+ */
+export function toolsOf(
+  presence: { activity: Activity | null; tools?: PresenceTool[] } | null | undefined
+): PresenceTool[] {
+  if (!presence) return [];
+  if (presence.tools && presence.tools.length > 0) return presence.tools;
+  const primary = presence.activity;
+  return primary ? [{ tool: primary.tool, model: primary.model, projectAlias: primary.projectAlias }] : [];
+}

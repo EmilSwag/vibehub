@@ -19,11 +19,18 @@ export function normalizeModel(model: string | null | undefined): string | null 
 export class UsageAccumulator {
   private buckets = new Map<string, UsageDelta>();
 
-  add(model: string | null, tokensInputDelta: number, tokensOutputDelta: number): void {
+  /**
+   * `estimated` marks counts the adapter derived rather than read (Quadcode logs
+   * carry no token numbers). It is sticky per bucket: once any contribution to a
+   * (model) bucket is an estimate the whole bucket is reported as estimated,
+   * because the two cannot be told apart downstream.
+   */
+  add(model: string | null, tokensInputDelta: number, tokensOutputDelta: number, estimated = false): void {
     const key = model ?? "";
     const b = this.buckets.get(key) ?? { model, tokensInputDelta: 0, tokensOutputDelta: 0 };
     b.tokensInputDelta += tokensInputDelta;
     b.tokensOutputDelta += tokensOutputDelta;
+    if (estimated) b.estimated = true;
     this.buckets.set(key, b);
   }
 

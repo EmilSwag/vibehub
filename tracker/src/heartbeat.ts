@@ -6,7 +6,7 @@ import { enqueue, flushQueue } from "./queue";
 import type { SendResult } from "./queue";
 import { markAuthRejected, readStatus, writeOfflineStatus, writeStatus } from "./statusFile";
 import { clearStopRequest, isStopRequested } from "./stopRequest";
-import type { HeartbeatPayload, HeartbeatUsage, QueuedEvent, StatusSource, TrackerConfig } from "./types";
+import type { HeartbeatPayload, HeartbeatTool, HeartbeatUsage, QueuedEvent, StatusSource, TrackerConfig } from "./types";
 
 interface ActiveSession {
   projectAlias: string;
@@ -84,7 +84,46 @@ function addPendingUsage(state: LoopState, u: DetectionUsage): void {
   const bucket = state.pendingUsage.get(key) ?? { tool: u.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
   bucket.tokensInputDelta += u.tokensInputDelta;
   bucket.tokensOutputDelta += u.tokensOutputDelta;
+  if (u.estimated) bucket.estimated = true;
   state.pendingUsage.set(key, bucket);
+}
+
+/** Round 6 `tools[]` cap — the server's schema rejects more than this. */
+const MAX_TOOLS = 10;
+
+/**
+ * Every tool seen open right now, primary first, one entry per tool.
+ *
+ * Built from the same `sources` map `status` prints, narrowed to the active window
+ * so a tool closed ten minutes ago doesn't linger in presence. Within a tool the
+ * freshest entry wins, so a tool that switched models reports the current one.
+ * Each entry's project is resolved through `resolveProjectAlias`, exactly like the
+ * primary's, so user aliases apply; a project the user marked `hidden` yields a
+ * null alias — the tool still shows, its project name does not.
+ */
+function buildTools(
+  state: LoopState,
+  config: TrackerConfig,
+  primary: { tool: string; model: string | null; projectAlias: string },
+  now: number
+): HeartbeatTool[] {
+  const byTool = new Map<string, HeartbeatTool>();
+  byTool.set(primary.tool, { tool: primary.tool, model: primary.model, projectAlias: primary.projectAlias });
+
+  const fresh = [...state.sourcesSeen.values()]
+    .filter((s) => now - s.lastSeenAt <= state.activeWindowMs)
+    .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+
+  for (const s of fresh) {
+    if (byTool.has(s.tool)) continue;
+    byTool.set(s.tool, {
+      tool: s.tool,
+      model: s.model,
+      projectAlias: resolveProjectAlias(s.cwd ?? null, config, s.projectHint ?? null),
+    });
+    if (byTool.size >= MAX_TOOLS) break;
+  }
+  return [...byTool.values()];
 }
 
 /** Drains the pending map into a payload-ready list plus the legacy sums. */
@@ -322,6 +361,7 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
       tokensInputDelta: pending.tokensInputDelta,
       tokensOutputDelta: pending.tokensOutputDelta,
       usage: pending.usage,
+      tools: buildTools(state, config, { tool, model, projectAlias: alias }, now),
       occurredAt: nowIso,
     });
 

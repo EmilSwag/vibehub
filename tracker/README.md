@@ -110,7 +110,21 @@ job. `logout` runs the same `stop` before deleting `config.json`.
 - `model: null` inside `usage` means the tokens can't be attributed to a model —
   Claude Code's locally fabricated `"<synthetic>"` assistant lines, empty ids.
   Those never become the presence model either.
-- `session_start` / `session_end` carry presence only — no deltas, no `usage`.
+- `estimated: true` on a `usage` entry means the counts were **derived, not read**.
+  Quadcode chat logs carry no token numbers at all, so its adapter estimates from
+  character counts (~4 chars per token, tool-result transcript excluded). The flag
+  rides through to the server unchanged and never alters accounting — but anywhere
+  those numbers are shown, including `vibehub-tracker status`, they are labelled
+  **est.**. An estimate is never presented as measured.
+- `tools` lists **every tool seen open right now**, primary first (entry 0 always
+  matches the top-level `tool`/`model`), deduped, at most 10, e.g.
+  `[{"tool":"quadcode","model":"claude-fable-5-1","projectAlias":"vibehub"},
+  {"tool":"cursor","model":null,"projectAlias":"vibehub"}]`. People work in several
+  tools at once and presence should show that, but hours and tokens still accrue only
+  to the primary. `projectAlias` is `null` when unknown or when the project is hidden
+  by an alias override — the tool shows, its project name does not. Sent on
+  `heartbeat` only; a server that predates it ignores the field.
+- `session_start` / `session_end` carry presence only — no deltas, no `usage`, no `tools`.
 - Tokens seen while no session is open (or the project is hidden) accumulate
   per `(tool, model)` and ride on the next heartbeat, so spend is never lost and
   never re-attributed to whatever session opens next.
@@ -127,14 +141,26 @@ an extended offline stretch can't grow the file without bound.
 
 ## Detection adapters (`src/adapters/`, merged by `src/detector.ts`)
 
-Three sources feed one decision per tick. Log adapters win because they know
+Four sources feed one decision per tick. Log adapters win because they know
 *what* happened; the process adapter only knows something is *open*.
 
 | Adapter | Source | Gives |
 |---|---|---|
 | `claudeCode` | `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`) | project (from `cwd`), model, **real token counts per model** (input + cache read/creation, output), precise timestamps |
 | `codex` | `~/.codex/sessions/**/*.jsonl` (or `CODEX_HOME`) | project, model, token deltas from running `token_count` totals, attributed to the model of the latest `turn_context` |
+| `quadcode` | `<QuadcodeAI root>/apps/<Project>/.quadcodeai/.data/chats/*.files/*.jsonl` (or `QUADCODE_HOME`) | project (nearest git repo, else folder), model from `variations[].model_name`, **estimated** token counts — these logs contain no token numbers |
 | `processes` | Windows: one PowerShell `Get-Process` call (see below); macOS/Linux `ps` + `lsof` on the editor's integrated-terminal shell | tool is open (Cursor, VS Code, Windsurf, Zed, Quadcode AI, ChatGPT, Grok), project from `"file - project - Cursor"` titles; never any tokens |
+
+**Quadcode specifics.** The log's own timestamp is the turn *start* and the line is
+only appended once the turn ends (one observed record spanned 3h47m), so the **file
+append** is the activity signal, not the timestamp. Nothing is appended during a long
+turn — the `processes` adapter carries presence then. Estimation strips
+`<TOOL_RESULT>` spans (tool output) and keeps `<TOOL_RUN>` args (the model wrote
+those); on a real record 99.3% of the message was tool transcript, so counting it raw
+overstated output by ~138x. Media generation is not model-tagged: the log only ever
+names the chat model, and a media call names a meta-section id whose model lives in a
+file on disk. Logs embed base64 uploads inline, so appends over 8 MB and records over
+2 MB are skipped rather than read.
 
 **Windows process listing.** `tasklist /v` resolves every window title
 synchronously and was measured at ~54 s per call on a busy machine — longer than
@@ -215,6 +241,11 @@ is populated server-side from the GitHub API instead (ARCHITECTURE.md §2.12).
   the real logs.
 - `npx tsx scripts/local-title-model-check.ts` — pure-function checks for the
   window-title → project parsing.
+- `npx tsx scripts/local-quadcode-check.ts` — the Quadcode adapter end to end in a
+  throwaway `QUADCODE_HOME` (never reads your real chats): estimation and
+  `<TOOL_RESULT>` stripping, first-sighting priming (no replay), the append-not-
+  timestamp activity rule, the `estimated` flag, oversized-record skipping, a media
+  turn keeping the chat model, and all three project-alias cases.
 - `node scripts/local-attribution-check.js` — deterministic end-to-end
   attribution test with a fake Claude Code log (multiple models, `<synthetic>`)
   in isolated temp dirs; asserts `usage`, the legacy sums and the presence model,

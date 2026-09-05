@@ -464,7 +464,7 @@ router.get(
       tools: [...new Set(sessions.map((s) => s.tool))],
       tokenLastUsedAt,
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-      presence: { status: presence.status, activity: presence.activity },
+      presence: { status: presence.status, activity: presence.activity, tools: presence.tools },
       sources: [...sources.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()),
       devices: tokens.map((t) => ({ id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt })),
     });
