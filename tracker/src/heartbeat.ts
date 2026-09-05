@@ -114,7 +114,17 @@ function buildTools(
     .filter((s) => now - s.lastSeenAt <= state.activeWindowMs)
     .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
 
+  // One entry per tool. Within a tool, a sighting that knows the model wins over a
+  // bare one even if the bare one is a shade fresher: an open editor reported by the
+  // process scanner should not erase the model its own log established. The detector
+  // keeps that known identity fresh while the tool is open (see its seen-building).
+  const perTool = new Map<string, SeenSource>();
   for (const s of fresh) {
+    const chosen = perTool.get(s.tool);
+    if (!chosen || (chosen.model === null && s.model !== null)) perTool.set(s.tool, s);
+  }
+
+  for (const s of perTool.values()) {
     if (byTool.has(s.tool)) continue;
     byTool.set(s.tool, {
       tool: s.tool,

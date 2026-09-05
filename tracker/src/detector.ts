@@ -156,10 +156,34 @@ export class Detector {
         seen.set(key, { tool, model, lastSeenAt: at, cwd: where?.cwd ?? prev?.cwd, projectHint: where?.projectHint ?? prev?.projectHint });
       }
     };
+    const sightingOf = (o: Observation) => Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0);
     for (const o of all) {
       const where = { cwd: o.cwd, projectHint: o.projectHint };
-      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0), where);
+      note(o.tool, o.model, sightingOf(o), where);
       for (const u of o.usage) if (u.model !== o.model) note(o.tool, u.model, now, where);
+    }
+
+    // A tool can be plainly open while its own log is silent — Quadcode appends only
+    // at turn boundaries, so a multi-hour turn writes nothing and the only *fresh*
+    // sighting is the process one, which knows no model and no project. Left alone,
+    // the tool's model and project age out of `sources` (and therefore out of the
+    // heartbeat's tools[] and the `status` "Seeing:" line) while the user is still
+    // sitting in it.
+    //
+    // So for each tool whose freshest sighting lacks a model, re-note its best-known
+    // identity at *that sighting's* time. The timestamp is when the tool was last seen,
+    // not when the model line was written — which is exactly what "this tool is open,
+    // and this is what it is" should mean.
+    const freshestByTool = new Map<string, Observation>();
+    for (const o of all) {
+      const prev = freshestByTool.get(o.tool);
+      if (!prev || sightingOf(o) > sightingOf(prev)) freshestByTool.set(o.tool, o);
+    }
+    for (const [tool, freshest] of freshestByTool) {
+      if (freshest.model !== null) continue;
+      const identity = identityFor(freshest, all);
+      if (identity.model === null) continue;
+      note(tool, identity.model, sightingOf(freshest), { cwd: identity.cwd, projectHint: identity.projectHint });
     }
 
     // --- presence selection ------------------------------------------------

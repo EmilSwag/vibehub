@@ -299,6 +299,42 @@ async function partTwo() {
   check("seen list includes the idle Cursor as observed now", () =>
     assert.ok(r.seen.some((s) => s.tool === "cursor" && s.lastSeenAt === now))
   );
+
+  // Round 6: a tool can be plainly open while its own log is silent — Quadcode appends
+  // only at turn boundaries, so a long turn leaves the process sighting as the only
+  // fresh evidence and it knows neither model nor project. The tool must not lose its
+  // identity while the user is still sitting in it.
+  const quadcodeOpen = obs("quadcode", { lastActivityAt: now - 2_000, observedAt: now, confidence: "presence" });
+  const quadcodeLog = obs("quadcode", { cwd: "/repos/vibehub", model: "claude-fable-5-1", lastActivityAt: now - 45 * 60_000 });
+  const cursorNow = obs("cursor", { projectHint: "a", lastActivityAt: now - 1_000 });
+
+  r = await detect([quadcodeOpen, quadcodeLog, cursorNow], undefined);
+  check("mid-turn: Quadcode keeps its model in `seen`, timestamped by the fresh sighting", () =>
+    assert.ok(
+      r.seen.some((s) => s.tool === "quadcode" && s.model === "claude-fable-5-1" && s.lastSeenAt === now),
+      JSON.stringify(r.seen)
+    )
+  );
+  check("mid-turn: the re-noted identity carries the project too", () =>
+    assert.ok(
+      r.seen.some((s) => s.tool === "quadcode" && s.model === "claude-fable-5-1" && s.cwd === "/repos/vibehub"),
+      JSON.stringify(r.seen)
+    )
+  );
+
+  // And when Quadcode IS the pick, identityFor fills what the fresh sighting lacks.
+  r = await detect([quadcodeOpen, quadcodeLog], undefined);
+  check("mid-turn: a picked Quadcode reports its model and project, not nulls", () => {
+    assert.equal(r.tool, "quadcode");
+    assert.equal(r.model, "claude-fable-5-1");
+    assert.equal(r.cwd, "/repos/vibehub");
+  });
+
+  // A tool that never had a model stays null — nothing is invented.
+  r = await detect([obs("cursor", { projectHint: "a", lastActivityAt: now - 1_000 })], undefined);
+  check("a tool with no model anywhere stays null", () =>
+    assert.ok(r.seen.every((s) => s.tool !== "cursor" || s.model === null), JSON.stringify(r.seen))
+  );
 }
 
 async function partThree() {

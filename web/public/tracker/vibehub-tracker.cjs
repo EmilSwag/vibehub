@@ -2975,11 +2975,21 @@ var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex", "quadcod
     let seen = /* @__PURE__ */ new Map(), note = (tool, model, at, where) => {
       let key = usageKey(tool, model), prev = seen.get(key);
       (!prev || at > prev.lastSeenAt) && seen.set(key, { tool, model, lastSeenAt: at, cwd: where?.cwd ?? prev?.cwd, projectHint: where?.projectHint ?? prev?.projectHint });
-    };
+    }, sightingOf = (o) => Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0);
     for (let o of all) {
       let where = { cwd: o.cwd, projectHint: o.projectHint };
-      note(o.tool, o.model, Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0), where);
+      note(o.tool, o.model, sightingOf(o), where);
       for (let u of o.usage) u.model !== o.model && note(o.tool, u.model, now, where);
+    }
+    let freshestByTool = /* @__PURE__ */ new Map();
+    for (let o of all) {
+      let prev = freshestByTool.get(o.tool);
+      (!prev || sightingOf(o) > sightingOf(prev)) && freshestByTool.set(o.tool, o);
+    }
+    for (let [tool, freshest] of freshestByTool) {
+      if (freshest.model !== null) continue;
+      let identity2 = identityFor(freshest, all);
+      identity2.model !== null && note(tool, identity2.model, sightingOf(freshest), { cwd: identity2.cwd, projectHint: identity2.projectHint });
     }
     let fresh = (o) => now - o.lastActivityAt <= this.activeWindowMs, candidates = all.filter((o) => o.confidence === "activity" && fresh(o)), pick = null;
     if (current) {
@@ -3120,8 +3130,12 @@ var MAX_TOOLS = 10;
 function buildTools(state, config, primary, now) {
   let byTool = /* @__PURE__ */ new Map();
   byTool.set(primary.tool, { tool: primary.tool, model: primary.model, projectAlias: primary.projectAlias });
-  let fresh = [...state.sourcesSeen.values()].filter((s) => now - s.lastSeenAt <= state.activeWindowMs).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-  for (let s of fresh)
+  let fresh = [...state.sourcesSeen.values()].filter((s) => now - s.lastSeenAt <= state.activeWindowMs).sort((a, b) => b.lastSeenAt - a.lastSeenAt), perTool = /* @__PURE__ */ new Map();
+  for (let s of fresh) {
+    let chosen = perTool.get(s.tool);
+    (!chosen || chosen.model === null && s.model !== null) && perTool.set(s.tool, s);
+  }
+  for (let s of perTool.values())
     if (!byTool.has(s.tool) && (byTool.set(s.tool, {
       tool: s.tool,
       model: s.model,
