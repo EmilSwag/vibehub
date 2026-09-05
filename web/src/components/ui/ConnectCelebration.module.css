@@ -1,0 +1,191 @@
+/*
+ * The first-heartbeat celebration — a full-screen layer, not a dialog box: the
+ * fireworks need the whole viewport to read, and there is nothing behind it worth
+ * looking at at that moment.
+ *
+ * Keyframes are declared locally on purpose: CSS Modules hash animation names, so a
+ * module can never reference motion.css's global keyframes (see its header).
+ */
+
+@keyframes cc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cc-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Flex + margin:auto, not grid: the fireworks canvas is an absolutely positioned
+ * child, and inside a grid container its containing block collapses to the stage
+ * grid area — the bursts then only fill the text block instead of the screen.
+ * margin:auto also centres without clipping when the content is taller than the
+ * viewport, which place-items: center does not. */
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  overflow-y: auto;
+  background: var(--vh-bg);
+  animation: cc-fade-in var(--dur-enter) var(--ease-out) both;
+}
+
+/* Above the canvas, which is absolutely positioned across the whole layer. */
+.stage {
+  position: relative;
+  z-index: 1;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--vh-space-3);
+  width: 100%;
+  max-width: 520px;
+  padding: var(--vh-space-5) var(--vh-space-4);
+  text-align: center;
+}
+
+.title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.28em;
+  margin: 0;
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  font-size: 48px;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--vh-text);
+}
+
+.word {
+  display: inline-block;
+  animation: cc-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: calc(120ms + var(--i, 0) * 160ms);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--vh-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 6px 12px;
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+  animation: cc-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: calc(420ms + var(--i, 0) * 70ms);
+}
+
+/* The proof: two numbers that move while the person is looking at them. */
+.counter {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--vh-space-4);
+  margin-top: var(--vh-space-2);
+  animation: cc-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: 620ms;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 96px;
+}
+
+.metricValue {
+  font-family: var(--vh-font-mono);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  color: var(--vh-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.metricLabel {
+  font-family: var(--vh-font-sans);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vh-text-faint);
+}
+
+.metricRule {
+  width: 1px;
+  align-self: stretch;
+  background: var(--vh-border);
+}
+
+.models {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--vh-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  color: var(--vh-text-dim);
+  animation: cc-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: calc(760ms + var(--i, 0) * 60ms);
+}
+
+.modelGlyph {
+  flex: none;
+  color: var(--vh-text-faint);
+}
+
+.action {
+  margin-top: var(--vh-space-3);
+  animation: cc-fade-up var(--dur-reveal) var(--ease-out) both;
+  animation-delay: 940ms;
+}
+
+@media (max-width: 560px) {
+  .title {
+    font-size: 34px;
+  }
+  .metricValue {
+    font-size: 26px;
+  }
+  .counter {
+    gap: var(--vh-space-3);
+  }
+}
+
+/* Everything lands at once, nothing loops, no canvas is mounted at all. */
+@media (prefers-reduced-motion: reduce) {
+  .layer,
+  .word,
+  .chip,
+  .counter,
+  .model,
+  .action {
+    animation: none;
+  }
+}

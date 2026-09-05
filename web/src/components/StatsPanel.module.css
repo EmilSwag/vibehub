@@ -1,25 +1,18 @@
-/* Equal rows: a wrapping model name must not make one tile taller than the rest. */
+/* Equal rows: a wrapping model name must not make one tile taller than the rest.
+   The card holds nothing but these four tiles now — the per-model rows moved to
+   their own block (RecentModels.module.css), so there is no bottom margin to
+   separate them from. */
 .tiles {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-auto-rows: 1fr;
   gap: var(--vh-space-3);
-  margin-bottom: var(--vh-space-4);
 }
 
 @media (max-width: 640px) {
   .tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}
-
-/* The tool/model rows under the tiles live in ToolRows.module.css — this file
-   keeps only the tiles and the panel's own empty/error states. */
-
-.empty {
-  color: var(--vh-text-faint);
-  font-family: var(--vh-font-sans);
-  font-size: 13px;
 }
 
 .error {
@@ -30,4 +23,3 @@
   font-size: 13px;
   color: var(--vh-text-dim);
 }
-

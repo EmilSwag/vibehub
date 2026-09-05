@@ -4,10 +4,14 @@ import { useAuth } from "../context/AuthContext";
 import { projectsApi } from "../lib/api";
 import type { Project, User } from "../types";
 import { Avatar } from "../components/ui/Avatar";
+import { Card } from "../components/ui/Card";
 import { Icon } from "../components/ui/Icon";
+import { SectionTitle } from "../components/ui/SectionTitle";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
+import buttonStyles from "../components/ui/Button.module.css";
 import { ProjectGallery } from "../components/projects/ProjectGallery";
 import { ProjectCommits } from "../components/projects/ProjectCommits";
+import { RepoBrowser } from "../components/projects/RepoBrowser";
 import styles from "./ProjectPage.module.css";
 
 interface ProjectData {
@@ -15,6 +19,8 @@ interface ProjectData {
   owner: User;
   liked: boolean;
 }
+
+const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
 function hostOf(url: string): string {
   try {
@@ -66,6 +72,7 @@ export function ProjectPage() {
         </div>
         <Skeleton width={280} height={30} style={{ margin: "10px 0" }} />
         <SkeletonText lines={2} />
+        <Skeleton variant="pill" width={260} height={38} style={{ marginTop: 20 }} />
         <Skeleton variant="block" height={340} style={{ marginTop: 20 }} />
       </div>
     );
@@ -101,7 +108,7 @@ export function ProjectPage() {
           <h1 className={styles.title}>{project.name}</h1>
           <button
             type="button"
-            className={[styles.likeBtn, liked && styles.liked].filter(Boolean).join(" ")}
+            className={cx(styles.likeBtn, liked && styles.liked)}
             onClick={toggleLike}
             disabled={!me}
             aria-pressed={liked}
@@ -114,20 +121,30 @@ export function ProjectPage() {
 
         {project.description && <p className={styles.description}>{project.description}</p>}
 
-        {(project.repoUrl || project.liveUrl) && (
-          <div className={styles.links}>
-            {project.repoUrl && (
-              <a href={project.repoUrl} target="_blank" rel="noreferrer" className={styles.link}>
-                <Icon name={isGithub ? "github" : "link"} size={14} />
-                {isGithub
-                  ? project.repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\/$/, "")
-                  : hostOf(project.repoUrl)}
+        {/* One primary action: go see the thing. The repo is the secondary — its
+            contents are already on this page, below. */}
+        {(project.liveUrl || project.repoUrl) && (
+          <div className={styles.actions}>
+            {project.liveUrl && (
+              <a
+                href={project.liveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={cx(buttonStyles.btn, buttonStyles.primary)}
+              >
+                Open site
+                <Icon name="external" size={14} />
               </a>
             )}
-            {project.liveUrl && (
-              <a href={project.liveUrl} target="_blank" rel="noreferrer" className={styles.link}>
-                <Icon name="external" size={14} />
-                {hostOf(project.liveUrl)}
+            {project.repoUrl && (
+              <a
+                href={project.repoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={cx(buttonStyles.btn, buttonStyles.secondary)}
+              >
+                <Icon name={isGithub ? "github" : "link"} size={14} />
+                {isGithub ? "GitHub" : hostOf(project.repoUrl)}
               </a>
             )}
           </div>
@@ -140,10 +157,17 @@ export function ProjectPage() {
         </div>
       )}
 
-      {isGithub && (
-        <div className={styles.section}>
-          <ProjectCommits projectId={project.id} variant="page" limit={8} />
-        </div>
+      {/* The code: languages, README, the file tree — then the pushes, in one card.
+          Hidden entirely when the project has no GitHub repo, which leaves the page
+          on its title, owner, description and links rather than an empty shell. */}
+      {isGithub && project.repoUrl && (
+        <section className={styles.section}>
+          <SectionTitle icon="folder">Code</SectionTitle>
+          <Card className={styles.codeCard}>
+            <RepoBrowser projectId={project.id} repoUrl={project.repoUrl} />
+            <ProjectCommits projectId={project.id} variant="page" limit={8} />
+          </Card>
+        </section>
       )}
     </div>
   );

@@ -70,22 +70,19 @@
   margin: var(--vh-space-2) 0 0;
 }
 
-.links {
+/* The two ways out of the page: see it running, or read its code. Buttons, not
+ * text links — this is the whole point of opening someone else’s project. */
+.actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--vh-space-3);
+  gap: var(--vh-space-2);
   margin-top: var(--vh-space-3);
-  font-size: 13px;
 }
-.link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--vh-text-dim);
-  text-decoration: none;
-}
-.link:hover {
-  color: var(--vh-accent);
+
+@media (max-width: 480px) {
+  .actions > * {
+    flex: 1 1 100%;
+  }
 }
 
 .likeBtn {
@@ -126,6 +123,15 @@
 
 .section {
   margin-bottom: var(--vh-space-5);
+}
+
+/* One card for the whole code block: the browser, then the pushes strip, which
+ * draws its own hairline above itself. */
+.codeCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+  min-width: 0;
 }
 
 .empty {

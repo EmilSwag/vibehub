@@ -1,0 +1,251 @@
+/*
+ * RecentModels — Steam Recent Activity, one row per model.
+ *
+ * Three columns: the capsule (the model's face), the name + tools/tokens sub-line,
+ * and a right-aligned numbers column. Rows carry no box of their own — a hairline
+ * between them and one border on the Card, per the house rule against nesting cards.
+ *
+ * The revealed remainder ("View all N models") uses the same grid at a smaller
+ * capsule so the numbers stay in the same place whether the list is open or not.
+ *
+ * Nothing here animates layout: the extra rows fade+rise via the global `.stagger`
+ * utility applied from TSX (CSS Modules hash animation names, so a module can never
+ * reference motion.css keyframes — see the header of styles/motion.css).
+ */
+
+.head {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 20px;
+  margin-bottom: var(--vh-space-2);
+}
+
+.headMeta {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "capsule main right";
+  align-items: center;
+  column-gap: var(--vh-space-3);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+/* The model's face. 120x45 like a Steam capsule, filled with the panel tint so it
+ * reads as a well rather than a nested card. */
+.capsule {
+  grid-area: capsule;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 120px;
+  height: 45px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
+  color: var(--vh-text-dim);
+}
+
+.capsuleCompact {
+  width: 34px;
+  height: 34px;
+}
+
+.main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.name {
+  font-family: var(--vh-font-sans);
+  font-size: 14.5px;
+  line-height: 20px;
+  color: var(--vh-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowCompact .name {
+  font-size: 13.5px;
+}
+
+/* Tools first, tokens last and faintest: hours rank the list, tokens are fuel. */
+.sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-dim);
+}
+
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.toolGlyph {
+  flex: none;
+  color: var(--vh-text-faint);
+}
+
+.tokens {
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.right {
+  grid-area: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hours {
+  font-family: var(--vh-font-mono);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.last {
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
+}
+
+/* The single deliberate hue in the product, and the only one in this block. */
+.live {
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--vh-live);
+}
+
+/* ---- disclosure ---- */
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin-top: var(--vh-space-3);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.toggle:hover {
+  color: var(--vh-text);
+}
+
+.chevron {
+  transition: transform var(--dur-state) var(--ease-out);
+}
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* ---- empty / error ---- */
+
+.empty,
+.error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--vh-space-3);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-faint);
+}
+
+.error {
+  color: var(--vh-text-dim);
+}
+
+.emptyAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  color: var(--vh-text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color var(--dur-press) var(--ease-out), color var(--dur-press) var(--ease-out);
+}
+.emptyAction:hover {
+  border-color: var(--vh-border-strong);
+  color: var(--vh-text);
+}
+
+/* Narrow: the numbers move under the name instead of squeezing it to an ellipsis.
+ * The capsule spans both rows so the block still reads as one row. */
+@media (max-width: 620px) {
+  .row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "capsule main"
+      "capsule right";
+    row-gap: 2px;
+  }
+  .capsule {
+    width: 64px;
+    height: 44px;
+    align-self: start;
+  }
+  .capsuleCompact {
+    width: 34px;
+    height: 34px;
+  }
+  .right {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    text-align: left;
+    flex-wrap: wrap;
+  }
+}

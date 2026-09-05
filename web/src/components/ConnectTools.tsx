@@ -11,7 +11,7 @@ import {
   readStoredConnectToken,
 } from "../lib/connectToken";
 import type { StoredConnectToken } from "../lib/connectToken";
-import { formatShortDate, presenceLine } from "../lib/format";
+import { formatShortDate } from "../lib/format";
 import { useExitTransition } from "../lib/motion";
 import type { TrackerStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
@@ -20,7 +20,7 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
 import { Skeleton } from "./ui/Skeleton";
-import { ConnectSuccessModal } from "./ui/ConnectSuccessModal";
+import { ConnectCelebration } from "./ui/ConnectCelebration";
 import { DeviceList, TrackingStatus } from "./TrackingStatus";
 import { useNow } from "./ui/PresenceBlock";
 import styles from "./ConnectTools.module.css";
@@ -116,9 +116,11 @@ function ManualInstall({
         <span className={styles.manualLabel}>Run in your terminal</span>
         <Segment label="Operating system" options={OSES} value={os} onChange={onOs} />
       </div>
+      {/* Command and button stack on phones — side by side the button used to sit
+          on top of the command text (round-7 design QA). */}
       <div className={styles.cmdRow}>
         <code className={styles.cmd}>{command}</code>
-        <Button size="sm" variant="secondary" onClick={() => onCopy("command", command)}>
+        <Button size="sm" variant="secondary" className={styles.cmdCopy} onClick={() => onCopy("command", command)}>
           {copied === "command" ? "Copied" : "Copy"}
         </Button>
       </div>
@@ -142,18 +144,19 @@ interface Props {
   variant?: "compact" | "banner" | "full";
   /** Fires the first time we observe a live heartbeat. */
   onConnected?: () => void;
+  /** Fires when the celebration layer is dismissed — onboarding advances on it. */
+  onCelebrated?: () => void;
 }
 
 /**
- * One component, two states. Not connected → the connect card (one primary
- * path: pick a tool, copy the prompt, wait for the first heartbeat). Connected →
- * TrackingStatus (what got connected, is it tracking). This wrapper owns the
- * status poll (5s while waiting, 10s while the connected panel is on screen),
- * reacts instantly to the viewer's own presence pushes, mints the device token
- * exactly once per browser (lib/connectToken), and fires the one-time success
- * modal.
+ * One component, two states. Not connected → the connect card, whose whole job is
+ * one click: pick a tool, Copy, wait. Connected → TrackingStatus (what got
+ * connected, is it tracking). This wrapper owns the status poll (5s while waiting,
+ * 10s while the connected panel is on screen), reacts instantly to the viewer's own
+ * presence pushes, mints the device token exactly once per browser
+ * (lib/connectToken), and raises the first-heartbeat celebration.
  */
-export function ConnectTools({ variant = "compact", onConnected }: Props) {
+export function ConnectTools({ variant = "compact", onConnected, onCelebrated }: Props) {
   const { user } = useAuth();
   const { presences } = useRealtime();
   const userId = user?.id ?? null;
@@ -166,6 +169,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
   const [os, setOs] = useState<InstallOs>(detectOs);
   const [target, setTarget] = useState<ConnectPromptTarget>("claude-code");
   const [manual, setManual] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
   const [copied, setCopied] = useState<Copyable | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [celebrating, setCelebrating] = useState(false);
@@ -246,8 +250,8 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     void refresh();
   }, [me, refresh]);
 
-  // Success modal — once per session, on the flip (or on first landing while
-  // the explainer hasn't been seen yet).
+  // Celebration — once per session, on the flip (or on first landing while the
+  // explainer hasn't been seen yet).
   useEffect(() => {
     if (!connected) return;
     if (!sawFlipRef.current && userId && hasSeenTracking(userId)) return;
@@ -259,6 +263,11 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     }
     setCelebrating(true);
   }, [connected, userId]);
+
+  const closeCelebration = useCallback(() => {
+    setCelebrating(false);
+    onCelebrated?.();
+  }, [onCelebrated]);
 
   // Token minted once: reuse the stored one when the server still lists it as
   // never used, otherwise mint (revoking the user's other never-used tokens).
@@ -293,6 +302,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
     if (connected) {
       setConnectToken(null);
       setManual(false);
+      setShowPrompt(false);
     }
   }, [connected]);
 
@@ -353,17 +363,12 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
 
   const now = useNow(variant === "full" && phase === "waiting", 5000);
 
-  const celebrateBody =
-    status?.presence.status === "active" && status.presence.activity
-      ? presenceLine(status.presence.activity)
-      : me?.status === "active" && me.activity
-        ? presenceLine(me.activity)
-        : "Waiting for the first heartbeat.";
-
-  const modal = <ConnectSuccessModal open={celebrating} body={celebrateBody} onClose={() => setCelebrating(false)} />;
+  const celebration = (
+    <ConnectCelebration open={celebrating} status={status} onRefresh={refresh} onClose={closeCelebration} />
+  );
 
   if (phase === "loading") {
-    if (isBanner && seen) return modal;
+    if (isBanner && seen) return celebration;
     return (
       <>
         <TrackingStatus
@@ -371,7 +376,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
           status={null}
           className={cx(isBanner && styles.bannerSpacing)}
         />
-        {modal}
+        {celebration}
       </>
     );
   }
@@ -386,43 +391,51 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
           aria-busy={!connectToken}
         >
           <div className={styles.head}>
-            <span className={cx(styles.dot, cardClosing && styles.dotLive)} aria-hidden="true" />
-            <div className={styles.headText}>
-              <strong className={styles.title}>Connect your tools</strong>
-              <span className={styles.sub}>Paste one prompt into your AI tool. No terminal needed.</span>
-            </div>
+            <strong className={styles.title}>Connect your tools</strong>
+            <span className={styles.sub}>Paste one prompt into your AI tool. No terminal needed.</span>
           </div>
 
           <Segment label="AI tool" options={TARGETS} value={target} onChange={setTarget} />
 
+          {/* One primary action. The prompt itself is behind a disclosure — a
+              permanent code block inside the card was a card-inside-a-card, and
+              nobody reads it before pasting anyway (round-7 design QA). */}
           <div className={styles.promptBlock}>
-            <div className={styles.promptHead}>
-              <span className={styles.promptLabel}>Paste into {targetLabel}</span>
-              <Button size="sm" onClick={() => prompt && copy("prompt", prompt)} disabled={!prompt}>
-                <Icon name={copied === "prompt" ? "check" : "copy"} size={13} />
-                {copied === "prompt" ? "Copied" : "Copy"}
+            {connectToken ? (
+              <Button className={styles.copy} onClick={() => prompt && copy("prompt", prompt)} disabled={!prompt}>
+                <Icon name={copied === "prompt" ? "check" : "copy"} size={14} />
+                {copied === "prompt" ? `Copied — paste into ${targetLabel}` : `Copy prompt for ${targetLabel}`}
               </Button>
-            </div>
-            {prompt ? (
-              <pre className={styles.prompt}>{prompt}</pre>
             ) : (
-              <Skeleton variant="block" height={168} width="100%" />
+              <Skeleton variant="pill" height={38} width="100%" />
             )}
+            {showPrompt && prompt && <pre className={cx(styles.prompt, "fade-in")}>{prompt}</pre>}
           </div>
 
           <div className={styles.foot}>
             <span className={cx(styles.waiting, !prompt && styles.waitingMuted)}>
               <span className={styles.pulse} aria-hidden="true" /> Listening…
             </span>
-            <button
-              type="button"
-              className={styles.link}
-              aria-expanded={manual}
-              disabled={!connectToken}
-              onClick={() => setManual((v) => !v)}
-            >
-              {manual ? "Hide manual setup" : "Do it manually"}
-            </button>
+            <span className={styles.footLinks}>
+              <button
+                type="button"
+                className={styles.link}
+                aria-expanded={showPrompt}
+                disabled={!connectToken}
+                onClick={() => setShowPrompt((v) => !v)}
+              >
+                {showPrompt ? "Hide prompt" : "Show prompt"}
+              </button>
+              <button
+                type="button"
+                className={styles.link}
+                aria-expanded={manual}
+                disabled={!connectToken}
+                onClick={() => setManual((v) => !v)}
+              >
+                {manual ? "Hide manual setup" : "Do it manually"}
+              </button>
+            </span>
           </div>
 
           {manual && connectToken && (
@@ -465,7 +478,7 @@ export function ConnectTools({ variant = "compact", onConnected }: Props) {
         />
       )}
 
-      {modal}
+      {celebration}
     </>
   );
 }

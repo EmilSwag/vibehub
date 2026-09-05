@@ -19,6 +19,7 @@ import { LinkIcon } from "../components/LinkIcon";
 import { ProjectCard } from "../components/ProjectCard";
 import { WallComment } from "../components/WallComment";
 import { StatsPanel } from "../components/StatsPanel";
+import { RecentModels } from "../components/RecentModels";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
 import { LevelBadge } from "../components/ui/LevelBadge";
@@ -239,12 +240,20 @@ export function ProfilePage() {
         </Link>
       )}
 
+      {/* Two blocks, two questions: how much (Stats) and with what (Models). */}
       <section className={styles.section}>
         <SectionTitle icon="commit">Stats</SectionTitle>
         <Card>
           <StatsPanel username={username} />
         </Card>
       </section>
+
+      <RecentModels
+        username={username}
+        isSelf={isSelf}
+        presence={presence}
+        className={styles.section}
+      />
 
       <section className={styles.section}>
         <SectionTitle icon="image" count={projects.length}>

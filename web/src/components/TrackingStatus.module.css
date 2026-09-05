@@ -77,6 +77,31 @@
   color: var(--vh-text-faint);
 }
 
+/* ---- today counter ----
+ * The same two numbers the celebration layer shows, so the panel it leaves behind
+ * is already filled in. Tabular digits: the counter ticks while you watch it. */
+
+.counter {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.counterValue {
+  font-family: var(--vh-font-mono);
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--vh-text);
+}
+
+.counterUnit {
+  font-size: 13px;
+  color: var(--vh-text-faint);
+}
+
 /* ---- rows (sources, devices) ---- */
 
 .rows {

@@ -11,6 +11,10 @@ import { Logo } from "../../components/ui/Logo";
 import styles from "./Onboarding.module.css";
 
 const STEPS = ["identity", "role", "friends", "connect", "welcome"] as const;
+// The dots are the work still to do, and the onboarding budget is four of them
+// (skills/emil_design_eng §6). The celebration is the payoff, not a fifth step, so it
+// lands with every dot already done rather than adding one.
+const DOT_STEPS = STEPS.slice(0, -1);
 const STEP_KEY = "vh.onboarding.step";
 type Step = (typeof STEPS)[number];
 
@@ -62,8 +66,11 @@ export function OnboardingPage() {
         VibeHub
       </div>
 
-      <ol className={styles.dots} aria-label={`Step ${index + 1} of ${STEPS.length}`}>
-        {STEPS.map((s, i) => (
+      <ol
+        className={styles.dots}
+        aria-label={`Step ${Math.min(index + 1, DOT_STEPS.length)} of ${DOT_STEPS.length}`}
+      >
+        {DOT_STEPS.map((s, i) => (
           <li
             key={s}
             className={[styles.dot, i === index && styles.dotActive, i < index && styles.dotDone]

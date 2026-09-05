@@ -1,6 +1,6 @@
 /* The md wrap is a full-width cell in the hero's action column (it shares its
  * width with the Edit-profile button), so the ring is centred inside it while the
- * breakdown panel hangs off the column's right edge. */
+ * breakdown popover hangs off the column. */
 .wrap-md {
   position: relative;
   display: flex;
@@ -19,7 +19,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
   border-radius: var(--vh-radius-md);
   transition: opacity var(--dur-press) var(--ease-out);
@@ -38,7 +38,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .ring-md {
@@ -53,30 +53,108 @@
   color: var(--vh-text-dim);
 }
 
+/* One ring: the faint track it runs on, and the progress drawn over it. */
+.track {
+  stroke: var(--vh-border);
+}
+
 .arc {
-  color: var(--vh-text);
   transition: stroke-dashoffset var(--dur-reveal) var(--ease-out);
+}
+
+/* The band lives on the plate under the number — lightness only, never a second
+ * circle competing with the progress ring. */
+.plate-faint {
+  fill: var(--vh-surface-2);
+}
+.plate-soft {
+  fill: var(--vh-accent-soft);
+}
+.plate-ink,
+.plate-solid {
+  fill: var(--vh-accent);
+}
+
+.number {
+  fill: var(--vh-text);
+}
+.ring-sm .number {
+  fill: var(--vh-text);
+}
+.numberOnPlate {
+  fill: var(--vh-on-accent);
 }
 
 .caption {
   font-family: var(--vh-font-sans);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--vh-text-faint);
 }
 
+/* ---- Breakdown popover ----
+ * A real floating layer: solid surface, hairline, and the panel shadow so it never
+ * merges into the stats card the way the flat round-6 panel did. On desktop it
+ * opens sideways, into the page, so the stats grid below is never covered at all. */
 .panel {
   position: absolute;
-  top: calc(100% + var(--vh-space-2));
-  right: 0;
-  z-index: 20;
-  width: 176px;
-  padding: var(--vh-space-2) var(--vh-space-3);
+  top: 0;
+  right: calc(100% + var(--vh-space-3));
+  z-index: 40;
+  width: 208px;
+  padding: var(--vh-space-3);
   border: 1px solid var(--vh-border);
   border-radius: var(--vh-radius-md);
   background: var(--vh-surface);
-  box-shadow: var(--vh-shadow-pop);
+  box-shadow: var(--vh-shadow-panel);
+}
+.panel:focus {
+  outline: none;
+}
+.panel:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Sheet grip — only ever visible in the mobile bottom-sheet layout. */
+.grip {
+  display: none;
+}
+
+.next {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-bottom: var(--vh-space-2);
+}
+
+.nextLabel {
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--vh-text);
+}
+
+.bar {
+  display: block;
+  height: 4px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-border);
+  overflow: hidden;
+}
+
+/* scaleX, not width: layout properties are never animated (motion rules §4). */
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-text);
+  transform: scaleX(var(--pct, 0));
+  transform-origin: left center;
+  transition: transform var(--dur-reveal) var(--ease-out);
 }
 
 .row {
@@ -88,8 +166,6 @@
   font-family: var(--vh-font-sans);
   font-size: 12.5px;
   line-height: 16px;
-}
-.row + .row {
   border-top: 1px solid var(--vh-border);
 }
 .rowLabel {
@@ -101,15 +177,54 @@
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 640px) {
-  /* Anchored below the badge (top set inline, measured in JS) and full-width —
-   * .wrap is only as wide as the badge itself, too narrow to size a sheet against,
-   * so this escapes it via position: fixed instead of the usual absolute anchor. */
-  .panelMobile {
-    position: fixed;
-    top: auto;
-    left: var(--vh-space-4);
-    right: var(--vh-space-4);
-    width: auto;
+/* ---- phone: a real bottom sheet ----
+ * Applied by class, not by media query, because the sheet is portalled to <body>
+ * (see the component) and its scrim has to come with it. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.45);
+  animation: lb-scrim-in var(--dur-state) var(--ease-out) both;
+}
+
+/* Local keyframe: CSS Modules hash animation names, so a module can never reach
+ * motion.css by name (see its header). */
+@keyframes lb-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 61;
+  width: auto;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--vh-space-2) var(--vh-space-4) max(var(--vh-space-4), env(safe-area-inset-bottom));
+  border: none;
+  border-top: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg) var(--vh-radius-lg) 0 0;
+}
+
+.sheet .grip {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto var(--vh-space-3);
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-border-strong);
+}
+
+.sheet .row {
+  padding: 10px 0;
+  font-size: 13.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim {
+    animation: none;
   }
 }

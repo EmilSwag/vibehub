@@ -4,10 +4,7 @@ import { formatActiveTime, formatTokens, humanizeModel } from "../lib/format";
 import type { UserStats } from "../types";
 import { Button } from "./ui/Button";
 import { StatTile } from "./ui/StatTile";
-import { ToolRows, ToolRowsSkeleton } from "./ToolRows";
 import styles from "./StatsPanel.module.css";
-
-const SKELETON_ROWS = 3;
 
 function Tiles({ stats }: { stats: UserStats | null }) {
   const loading = stats === null;
@@ -21,6 +18,11 @@ function Tiles({ stats }: { stats: UserStats | null }) {
   );
 }
 
+/**
+ * The profile's overall numbers — four tiles, nothing else. The per-model breakdown
+ * is its own block now (`RecentModels`, round 7): one card answers "how much", the
+ * next answers "with what", and neither has to carry both.
+ */
 export function StatsPanel({ username }: { username: string }) {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -50,7 +52,6 @@ export function StatsPanel({ username }: { username: string }) {
     return (
       <div aria-busy="true">
         <Tiles stats={null} />
-        <ToolRowsSkeleton count={SKELETON_ROWS} />
       </div>
     );
   }
@@ -58,7 +59,7 @@ export function StatsPanel({ username }: { username: string }) {
   if (state === "error" || !stats) {
     return (
       <div className={styles.error} role="alert">
-        <span>Couldn't load stats.</span>
+        <span>Could not load stats.</span>
         <Button size="sm" variant="secondary" onClick={retry}>
           Retry
         </Button>
@@ -66,14 +67,5 @@ export function StatsPanel({ username }: { username: string }) {
     );
   }
 
-  return (
-    <div>
-      <Tiles stats={stats} />
-      {stats.byModel.length === 0 ? (
-        <div className={styles.empty}>No activity yet.</div>
-      ) : (
-        <ToolRows rows={stats.byModel} />
-      )}
-    </div>
-  );
+  return <Tiles stats={stats} />;
 }

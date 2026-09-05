@@ -12,6 +12,7 @@ import type {
   Presence,
   PresenceTool,
   RepoActivity,
+  RepoTree,
   SuggestedUser,
   TrackerStatus,
   TrackerToken,
@@ -219,6 +220,17 @@ export const projectsApi = {
   get: (id: string) =>
     request<{ project: Project; owner: User; liked: boolean }>(`/api/v1/projects/${id}`),
   commits: (id: string) => request<RepoActivity>(`/api/v1/projects/${id}/commits`),
+  /**
+   * One directory level of the project's GitHub repo (round 7). `path` is a repo
+   * subpath, "" for the root. Public projects answer signed-out, same gate as
+   * `GET /projects/:id`. Throws ApiError: 404 (no GitHub repo / private / bad
+   * path) or 503 `github_unavailable` — the browser shows a calm line for 503
+   * and hides itself for 404.
+   */
+  repo: (id: string, path = "") =>
+    request<RepoTree>(
+      `/api/v1/projects/${id}/repo${path ? `?path=${encodeURIComponent(path)}` : ""}`
+    ),
   update: (id: string, body: Partial<{ name: string; description: string; repoUrl: string; liveUrl: string; isPublic: boolean; imageUrls: string[]; coverImageUrl: string | null }>) =>
     request<{ project: Project }>(`/api/v1/projects/${id}`, {
       method: "PATCH",

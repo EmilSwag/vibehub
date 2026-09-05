@@ -1,0 +1,250 @@
+/*
+ * RepoBrowser — the code half of the project page. Sits inside the page's own
+ * Card, so nothing here draws a second box: sections are separated by hairlines
+ * and whitespace only.
+ *
+ * The language bar is the one place shares are drawn, and it is drawn in ink at
+ * descending opacity — strict monochrome, no hue and no chart palette.
+ */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+  min-width: 0;
+}
+
+.headSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- languages ---- */
+
+.languages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  border-radius: var(--vh-radius-pill);
+  overflow: hidden;
+}
+
+.band {
+  min-width: 3px;
+  background: var(--vh-text);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  color: var(--vh-text-dim);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vh-text);
+}
+
+.legendShare {
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- readme ---- */
+
+.readme {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: var(--vh-space-3);
+  border-top: 1px solid var(--vh-border);
+}
+
+.readmeText {
+  margin: 0;
+  max-width: 72ch;
+  font-family: var(--vh-font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--vh-text-dim);
+}
+
+.readmeLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--vh-text-dim);
+  text-decoration: none;
+}
+.readmeLink:hover {
+  color: var(--vh-text);
+}
+
+/* ---- breadcrumb ---- */
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: var(--vh-space-3);
+  border-top: 1px solid var(--vh-border);
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+}
+
+.crumbPart {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumb {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--vh-text-dim);
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.crumb:hover:not(:disabled) {
+  color: var(--vh-text);
+}
+.crumbCurrent,
+.crumb:disabled {
+  color: var(--vh-text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.crumbSep {
+  color: var(--vh-text-faint);
+}
+
+.branch {
+  margin-left: auto;
+  padding: 2px 9px;
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-pill);
+  font-family: var(--vh-font-mono);
+  font-size: 11.5px;
+  color: var(--vh-text-faint);
+}
+
+/* ---- entries ---- */
+
+.entries {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+
+.entriesBusy {
+  opacity: 0.45;
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 34px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  border-radius: var(--vh-radius-sm);
+  font-family: var(--vh-font-sans);
+  font-size: 13.5px;
+}
+
+.entry:hover {
+  background: var(--vh-surface-2);
+}
+
+.entryGlyph {
+  flex: none;
+  color: var(--vh-text-faint);
+}
+
+.entryName {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--vh-text);
+  text-decoration: none;
+}
+.entryName:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--vh-text-faint);
+  text-underline-offset: 3px;
+}
+
+.entryButton {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.entrySize {
+  font-family: var(--vh-font-mono);
+  font-size: 12px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- the calm degradations ---- */
+
+.calm {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 13.5px;
+  color: var(--vh-text-faint);
+}
+
+.calmLink {
+  color: var(--vh-text-dim);
+}
+.calmLink:hover {
+  color: var(--vh-text);
+}
+
+@media (max-width: 480px) {
+  .branch {
+    margin-left: 0;
+  }
+  .entry {
+    min-height: 40px;
+  }
+}

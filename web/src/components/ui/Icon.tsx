@@ -30,7 +30,9 @@ export type IconName =
   | "x"
   | "external"
   | "arrowLeft"
-  | "chevronDown";
+  | "chevronDown"
+  | "folder"
+  | "file";
 
 const PATHS: Record<IconName, JSX.Element> = {
   user: (
@@ -142,6 +144,13 @@ const PATHS: Record<IconName, JSX.Element> = {
     </>
   ),
   arrowLeft: <path d="M19 12H5M11 6l-6 6 6 6" />,
+  folder: <path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h3.4a1.5 1.5 0 0 1 1.2.6l1 1.4H19A1.5 1.5 0 0 1 20.5 9v8a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z" />,
+  file: (
+    <>
+      <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z" />
+      <path d="M13.5 3.5V8.5h5" />
+    </>
+  ),
   chevronDown: <path d="M6 9l6 6 6-6" />,
 };
 

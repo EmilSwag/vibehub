@@ -8,12 +8,6 @@
  * .reveal/.leave/.fade-in utilities applied from TSX.
  */
 
-@keyframes ct-pop {
-  0% { transform: scale(0.9); }
-  60% { transform: scale(1.04); }
-  100% { transform: scale(1); }
-}
-
 @keyframes ct-pulse {
   0%, 100% { transform: scale(0.8); opacity: 0.4; }
   50% { transform: scale(1); opacity: 1; }
@@ -32,16 +26,12 @@
   margin-bottom: 22px;
 }
 
-/* ---- header ---- */
+/* ---- header ----
+ * No status bubble: a hollow 10px circle next to the heading read as an empty
+ * radio button (round-7 design QA). The "Listening…" pulse in the foot is the
+ * one place this card reports its state. */
 
 .head {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-}
-
-.headText {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -59,27 +49,6 @@
   font-size: 13px;
   line-height: 1.45;
   color: var(--vh-text-dim);
-}
-
-/* Hollow while waiting; fills with the one live hue the moment the first
-   heartbeat lands (the card is already on its way out by then). */
-.dot {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  margin-top: 5px;
-  border-radius: 50%;
-  border: 1.5px solid var(--vh-text-faint);
-  background: transparent;
-  transition:
-    background-color var(--dur-state) var(--ease-out),
-    border-color var(--dur-state) var(--ease-out);
-}
-
-.dotLive {
-  border-color: var(--vh-live);
-  background: var(--vh-live);
-  animation: ct-pop var(--dur-enter) var(--ease-spring) both;
 }
 
 /* ---- segmented control (AI tool / OS) — same 36px shape as Settings ---- */
@@ -131,28 +100,21 @@
   color: var(--vh-bg);
 }
 
-/* ---- prompt ---- */
+/* ---- the one primary action ---- */
 
 .promptBlock {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
-.promptHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
+.copy {
+  align-self: stretch;
 }
 
-.promptLabel {
-  font-size: 13px;
-  color: var(--vh-text-dim);
-}
-
+/* Tinted well, no border — one border per block, so this is not a card inside a
+ * card. Only rendered when the visitor asks to see the prompt. */
 .prompt {
   margin: 0;
   padding: 12px 14px;
@@ -168,13 +130,20 @@
   color: var(--vh-text-dim);
 }
 
-/* ---- foot: listening pulse + manual link ---- */
+/* ---- foot: listening pulse + text links ---- */
 
 .foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.footLinks {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
@@ -266,6 +235,10 @@
   user-select: all;
 }
 
+.cmdCopy {
+  flex: none;
+}
+
 .tokenRow {
   display: flex;
   align-items: center;
@@ -320,9 +293,23 @@
   color: var(--vh-text);
 }
 
+/* Phones: the Copy button used to sit on top of the command it copies. Stack it,
+ * full width, the way every other control goes full width here (round-7 QA). */
+@media (max-width: 560px) {
+  .cmdRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cmdCopy {
+    width: 100%;
+  }
+  .foot {
+    align-items: flex-start;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .pulse,
-  .dotLive {
+  .pulse {
     animation: none;
   }
 }

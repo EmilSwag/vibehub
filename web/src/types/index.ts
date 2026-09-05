@@ -171,6 +171,43 @@ export interface RepoActivity {
   latestRelease: RepoRelease | null;
 }
 
+/** One row of `GET /projects/:id/repo` — a file or folder at the requested path. */
+export interface RepoEntry {
+  name: string;
+  type: "dir" | "file";
+  /** Byte size for files; null for directories. */
+  size: number | null;
+  /** github.com URL for the entry. */
+  url: string;
+}
+
+/** Language share of the repo, 0–1, biggest first. */
+export interface RepoLanguage {
+  name: string;
+  share: number;
+}
+
+/** README with markdown syntax stripped — plain text, ~600 chars. */
+export interface RepoReadme {
+  excerpt: string;
+  url: string;
+}
+
+/**
+ * GET /projects/:id/repo?path= — one directory level of the linked GitHub repo's
+ * default branch (round 7). `languages`/`readme` describe the whole repo and are
+ * only sent for the root listing (`path === ""`); they are null deeper in.
+ * Non-GitHub repo → 404, GitHub rate-limited/unreachable → 503.
+ */
+export interface RepoTree {
+  repo: { owner: string; repo: string };
+  defaultBranch: string;
+  path: string;
+  entries: RepoEntry[];
+  languages: RepoLanguage[] | null;
+  readme: RepoReadme | null;
+}
+
 /** GET /users/me/github/repos row — the signed-in user's own GitHub repos (repo picker). */
 export interface GithubRepoSummary {
   fullName: string;
@@ -226,6 +263,13 @@ export interface StatByModel {
   tokensInput: number;
   tokensOutput: number;
   activeSeconds: number;
+  /**
+   * Round 7: newest moment this (tool, model) pair was seen inside the range —
+   * ISO, day-granular for closed rollups. Optional because a server older than
+   * round 7 does not send it; `RecentModels` then sorts by hours and prints no
+   * "last used" date rather than inventing one.
+   */
+  lastActiveAt?: string | null;
 }
 
 export interface GithubCommitDay {

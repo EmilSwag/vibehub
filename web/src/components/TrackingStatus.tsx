@@ -2,10 +2,13 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { TrackerDevice, TrackerSource, TrackerStatus as TrackerStatusData } from "../types";
-import { formatTokens, humanizeModel, toolFamily, toolLabel } from "../lib/format";
+import { formatActiveTime, formatTokens, humanizeModel, modelFamily, toolFamily, toolLabel } from "../lib/format";
 import { stagger } from "../lib/motion";
+import { modelRowLabel } from "../lib/recentModels";
+import { sumToday } from "../lib/sources";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
+import { ModelGlyph } from "./ui/ModelGlyph";
 import { PresenceBlock, useNow } from "./ui/PresenceBlock";
 import { Skeleton } from "./ui/Skeleton";
 import { StatusDot } from "./ui/StatusDot";
@@ -73,21 +76,31 @@ export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
   );
 }
 
-/* ---- Sources ---- */
+/* ---- Models ---- */
 
+/** One (tool, model) the tracker has seen, led by the model — the same identity the
+ *  profile's Models block uses, so the two never disagree about what a model is. */
 function SourceRow({ source, now, index }: { source: TrackerSource; now: number; index: number }) {
-  const model = humanizeModel(source.model);
+  const label = modelRowLabel(source.tool, source.model);
+  const tool = toolLabel(source.tool);
+  const named = humanizeModel(source.model) !== null;
+
   return (
     <div className={cx(styles.row, styles.rowSource)} style={stagger(index)}>
       <span className={styles.rowMain}>
-        <ToolGlyph family={toolFamily(source.tool)} size={14} className={styles.rowGlyph} />
-        <span className={styles.rowTool}>{toolLabel(source.tool)}</span>
-        {model && (
+        <ModelGlyph
+          family={named ? modelFamily(source.model) : toolFamily(source.tool)}
+          size={14}
+          className={styles.rowGlyph}
+        />
+        <span className={styles.rowTool}>{label}</span>
+        {named && (
           <>
             <span className={styles.sep} aria-hidden="true">
               ·
             </span>
-            <span className={styles.rowModel}>{model}</span>
+            <ToolGlyph family={toolFamily(source.tool)} size={12} className={styles.rowGlyph} />
+            <span className={styles.rowModel}>{tool}</span>
           </>
         )}
       </span>
@@ -125,12 +138,15 @@ export interface TrackingStatusProps {
 }
 
 /**
- * "What got connected, and is it tracking?" — the connected half of ConnectTools.
+ * "What got connected, and is it tracking?" — the connected half of ConnectTools,
+ * and what the celebration layer leaves behind, showing the same two numbers so the
+ * panel is never a blank frame after the fireworks stop.
  *
  *   ● Tracking works                       ← green only here (dot + title)
  *     last heartbeat 12s ago · every 30s
+ *   Today          1.2k tokens · 34m active
  *   Now            Online · in vibehub · Claude Code · Claude Fable 5.1 · for 12m
- *   Seen this week ⌘ Claude Code · Claude Fable 5.1          160 today · 12s ago
+ *   Models         ✦ Claude Fable 5.1 · ⌘ Claude Code       160 today · 12s ago
  *   Devices        Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1)
  *   Leaves your machine: … Never code, prompts or diffs.     [Got it]
  *
@@ -161,11 +177,15 @@ export function TrackingStatus({
           </div>
         </div>
         <div className={styles.section}>
+          <Skeleton width={38} height={12} />
+          <Skeleton width={168} height={17} />
+        </div>
+        <div className={styles.section}>
           <Skeleton width={30} height={12} />
           <Skeleton width="55%" height={13} />
         </div>
         <div className={styles.section}>
-          <Skeleton width={92} height={12} />
+          <Skeleton width={54} height={12} />
           {[0, 1].map((i) => (
             <div key={i} className={styles.row}>
               <span className={styles.rowMain}>
@@ -186,6 +206,7 @@ export function TrackingStatus({
   const running = status.presence.status !== "offline" && status.presence.activity !== null;
   const showDevices = variant === "settings" || status.devices.length > 1;
   const heartbeat = status.lastSeenAt ? `last heartbeat ${agoShort(status.lastSeenAt, now)}` : "no heartbeat yet";
+  const today = sumToday(status.sources);
 
   return (
     <Card className={cx(styles.panel, className)} data-live={live || undefined}>
@@ -201,6 +222,24 @@ export function TrackingStatus({
         </div>
       </div>
 
+      {/* The same counter the celebration layer showed, so closing it reveals the
+          numbers already filled in rather than an empty panel. */}
+      <section className={styles.section} aria-label="Today">
+        <span className={styles.label}>Today</span>
+        <span className={styles.counter}>
+          <span className={styles.counterValue}>
+            {today.estimated ? "~" : ""}
+            {formatTokens(today.tokens)}
+          </span>
+          <span className={styles.counterUnit}>tokens</span>
+          <span className={styles.sep} aria-hidden="true">
+            ·
+          </span>
+          <span className={styles.counterValue}>{formatActiveTime(today.activeSeconds)}</span>
+          <span className={styles.counterUnit}>active</span>
+        </span>
+      </section>
+
       <section className={styles.section} aria-label="Now">
         <span className={styles.label}>Now</span>
         {running ? (
@@ -210,14 +249,14 @@ export function TrackingStatus({
         )}
       </section>
 
-      <section className={styles.section} aria-label="Seen this week">
-        <span className={styles.label}>Seen this week</span>
+      <section className={styles.section} aria-label="Models">
+        <span className={styles.label}>Models</span>
         {status.sources.length === 0 ? (
           <span className={styles.dim}>No activity yet — open your AI tool and start working.</span>
         ) : (
           <div className={cx(styles.rows, "stagger")}>
             {status.sources.map((s, i) => (
-              <SourceRow key={`${s.tool}|${s.model ?? ""}`} source={s} now={now} index={i} />
+              <SourceRow key={`${s.tool}|${s.model ?? "no-model"}`} source={s} now={now} index={i} />
             ))}
           </div>
         )}
