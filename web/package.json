@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/normalize-eol.mjs --fix && tsc -b && vite build && node scripts/normalize-eol.mjs --check",
     "preview": "vite preview --host --port 5173",
     "start": "serve -s dist -l ${PORT:-4173}"
   },
