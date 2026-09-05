@@ -43,6 +43,9 @@ pre-applied by the inline script in `web/index.html` so the first paint is alrea
 ## Shape & elevation
 - Radii: buttons/inputs 12px (`--vh-radius-md`), cards 16px (`--vh-radius-lg`), badges/avatars pill/circle.
 - Shadows: `--vh-shadow-card` (subtle) and `--vh-shadow-pop` (popovers). Never harsh.
+- `--vh-shadow-panel` — two stacked shadows (a tight contact shadow plus a wide soft one) for a
+  layer that floats *over* a card and must not read as part of it: the level breakdown popover and
+  its mobile sheet. Use `--vh-shadow-pop` when the popover sits on the page background instead.
 - Borders 1px `--vh-border` on every card; hairline dividers.
 
 ## Components
