@@ -54,15 +54,28 @@ export function ToolGlyphPath({ family }: { family: ToolFamily }) {
       // angular zigzag
       return <path d="M5 19L11 5l2 6 6-6-6 14-2-6-6 6z" strokeLinejoin="round" />;
     case "unknown":
+      return <NeutralGlyph />;
     default:
-      // neutral dot-in-circle
-      return (
-        <>
-          <circle cx="12" cy="12" r="8" />
-          <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
-        </>
-      );
+      return unglyphed(family);
   }
+}
+
+/** "a tool, unnamed" — dot-in-circle. */
+function NeutralGlyph() {
+  return (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </>
+  );
+}
+
+/** Every `ToolFamily` above must have a shape: a family added to format.ts without
+ * a case here is a type error at this call, not a tool that silently renders as a
+ * dot. The neutral glyph still comes back at runtime for anything that dodges the
+ * type (a raw id cast in, an older bundle). */
+function unglyphed(_family: never) {
+  return <NeutralGlyph />;
 }
 
 interface Props {

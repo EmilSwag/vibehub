@@ -78,6 +78,11 @@ const MODELS: [string | null | undefined, string | null][] = [
   ["deepseek-r1", "Deepseek R1"],
   ["DeepSeek-R1", "DeepSeek R1"],
   ["  UNKNOWN  ", null],
+  // round 6: every model the Quadcode adapter has actually seen in a chat log
+  // (plan Amendment 1 — 7 distinct values across 341 LLM records).
+  ["claude-fable-5", "Claude Fable 5"],
+  ["gemini-3.5-flash", "Gemini 3.5 Flash"],
+  ["grok-4.6", "Grok 4.6"],
 ];
 for (const [raw, expected] of MODELS) eq(`humanizeModel(${JSON.stringify(raw)})`, humanizeModel(raw), expected);
 
@@ -116,6 +121,7 @@ const TOOLS: [string | null | undefined, string][] = [
   ["visual-studio-code", "VS Code"],
   ["code", "VS Code"],
   ["genui", "Quadcode AI"],
+  ["quadcode ai", "Quadcode AI"],
   ["my-tool", "My Tool"],
 ];
 for (const [raw, expected] of TOOLS) eq(`toolLabel(${JSON.stringify(raw)})`, toolLabel(raw), expected);
@@ -124,11 +130,35 @@ eq("toolFamily(vscode)", toolFamily("vscode"), "vscode");
 eq("toolFamily(my-tool)", toolFamily("my-tool"), "unknown");
 eq("toolFamily(null)", toolFamily(null), "unknown");
 
+// Every tool id the tracker actually emits (tracker/src/adapters/processes.ts RULES)
+// must land on its own family — a family is what carries the glyph, so anything
+// falling through to "unknown" here renders as a nameless dot in presence.
+const TRACKER_TOOL_IDS = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "vscode",
+  "windsurf",
+  "zed",
+  "quadcode",
+  "chatgpt",
+  "grok",
+] as const;
+for (const id of TRACKER_TOOL_IDS) eq(`toolFamily(${id})`, toolFamily(id), id);
+// …including the process names those rules match on.
+eq("toolFamily(genui)", toolFamily("genui"), "quadcode");
+eq("toolFamily(quadcode ai)", toolFamily("quadcode ai"), "quadcode");
+eq("toolFamily(code)", toolFamily("code"), "vscode");
+
 // ---- modelWithTool ----
 eq("modelWithTool(claude-fable-5-1, claude-code)", modelWithTool("claude-fable-5-1", "claude-code"), "Claude Fable 5.1 · Claude Code");
 eq("modelWithTool(gpt-5-codex, codex)", modelWithTool("gpt-5-codex", "codex"), "GPT-5 Codex · Codex CLI");
 eq("modelWithTool(null, cursor)", modelWithTool(null, "cursor"), "Cursor");
 eq("modelWithTool(unknown, quadcode)", modelWithTool("unknown", "quadcode"), "Quadcode AI");
+// Round 6: `grok-4.6` is a *model under Quadcode*, distinct from the `grok` tool —
+// the pair needs no special case (plan Amendment 1).
+eq("modelWithTool(grok-4.6, quadcode)", modelWithTool("grok-4.6", "quadcode"), "Grok 4.6 · Quadcode AI");
+eq("modelWithTool(null, grok)", modelWithTool(null, "grok"), "Grok");
 eq("modelWithTool(<synthetic>, claude-code)", modelWithTool("<synthetic>", "claude-code"), "Claude Code");
 
 // ---- elapsedShort (fixed `now`) ----

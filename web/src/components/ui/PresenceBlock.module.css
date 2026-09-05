@@ -125,6 +125,23 @@
   color: var(--vh-text-faint);
 }
 
+/* ---- the tool stack: everything else the person has open ---- */
+
+.stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--vh-text-faint);
+  cursor: default;
+}
+
+.overflow {
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
 .elapsed {
   color: var(--vh-text-faint);
   font-variant-numeric: tabular-nums;

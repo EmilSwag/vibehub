@@ -13,76 +13,8 @@
   }
 }
 
-.modelList {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* Fixed numeric columns so every row's hours and tokens sit in the same place. */
-.modelRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 60px;
-  align-items: center;
-  column-gap: var(--vh-space-3);
-  min-height: 40px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--vh-border);
-}
-.modelRow:last-child {
-  border-bottom: none;
-}
-
-.modelLeft {
-  display: flex;
-  align-items: center;
-  gap: var(--vh-space-2);
-  min-width: 0;
-  font-family: var(--vh-font-sans);
-  font-size: 13.5px;
-  line-height: 20px;
-  color: var(--vh-text);
-}
-
-.modelIcon {
-  flex: none;
-  color: var(--vh-text-faint);
-}
-
-.modelName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sep,
-.modelTool {
-  color: var(--vh-text-faint);
-}
-
-.time,
-.tokens {
-  font-family: var(--vh-font-mono);
-  font-size: 12.5px;
-  line-height: 20px;
-  text-align: right;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.time {
-  color: var(--vh-text-dim);
-}
-.tokens {
-  color: var(--vh-text-faint);
-}
-
-.numSkeleton {
-  display: flex;
-  justify-content: flex-end;
-}
+/* The tool/model rows under the tiles live in ToolRows.module.css — this file
+   keeps only the tiles and the panel's own empty/error states. */
 
 .empty {
   color: var(--vh-text-faint);
@@ -99,10 +31,3 @@
   color: var(--vh-text-dim);
 }
 
-@media (max-width: 480px) {
-  /* Give the model name back the width the two number columns don't need. */
-  .modelRow {
-    grid-template-columns: minmax(0, 1fr) 60px 52px;
-    column-gap: var(--vh-space-2);
-  }
-}
