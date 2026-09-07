@@ -720,6 +720,50 @@ impossible case of a bucket with no contributing row.
 | Method | Path | Auth | Body → Response |
 |---|---|---|---|
 | POST | `/api/v1/tracker/heartbeat` | Bearer device token | see §4.3 |
+| GET | `/api/v1/tracker/me` | Bearer device token | — → see below |
+
+`GET /api/v1/tracker/me` is the read side of the device-token surface: everything the
+macOS menu-bar companion (`menubar-mac/`) renders, in one request. Same auth as the
+heartbeat — the app holds a tracker token in the Keychain and has no browser cookie, so
+a revoked token 401s here exactly as it does on ingest.
+
+```jsonc
+{
+  "user":     { "id": "…", "username": "emil", "displayName": "Emil|null",
+                "avatarUrl": "…|null", "level": 7 },
+  "presence": { "status": "active|idle|offline",
+                // null when offline; `model` is null for presence-only tools (§4.3)
+                "activity": { "project": "vibehub", "tool": "claude-code",
+                              "model": "claude-opus-5|null", "since": "ISO-8601" } },
+  "today":    { "activeSeconds": 8040, "tokens": 125000,
+                // start of the session open right now, or null
+                "sessionStartedAt": "ISO-8601|null" },
+  "tracker":  { "connected": true, "lastSeenAt": "ISO-8601|null",
+                "devices": [ { "name": "MacBook Pro", "lastSeenAt": "ISO-8601|null" } ] },
+  // `count` is every online friend; `sample` is capped at 4 — what the popover draws
+  "friendsOnline": { "count": 12,
+                     "sample": [ { "username": "ann", "displayName": "…|null",
+                                   "avatarUrl": "…|null", "status": "active|idle",
+                                   "activity": { … } | null } ] }
+}
+```
+
+Notes:
+
+- `tracker.connected` and `lastSeenAt` are **heartbeat-derived** (`presenceFor()`), never
+  `TrackerToken.lastUsedAt` — that column is bumped by `/tracker/verify` *and* by this
+  route's own middleware, so deriving connectedness from it reports a live tracker the
+  moment `login` runs (the Round 5 regression described at §5.2).
+- `today` folds DailyStat rows dated today plus any still-open session, bucketed by the
+  session's **start** day — the same day `foldIntoDailyStat` uses when it closes, so an
+  overnight session does not land on today. Elapsed is measured to `lastHeartbeatAt`, so
+  a dead tracker stops accruing time. `sessionStartedAt` is a display offset for a live
+  ticking clock, not something to add to `activeSeconds` server-side.
+- `friendsOnline` covers accepted friends only (§3), so the popover cannot leak a
+  stranger's activity.
+- Every timestamp is an ISO-8601 string with fractional seconds.
+- Shaping lives in `server/src/lib/tracker-me.ts` (Prisma-free) and is pinned by
+  `server/src/lib/__checks__/trackerMe.check.ts`.
 
 ### 5.9 WebSocket — `GET {VITE_WS_URL}` (dev default `ws://localhost:4000/ws`)
 

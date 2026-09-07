@@ -15,6 +15,10 @@ const ICON_MAP: Record<string, string> = {
   "discord.gg": "discord",
   "discord.com": "discord",
   "www.discord.com": "discord",
+  // t.me is the share/profile host people actually paste; telegram.org is the site.
+  "t.me": "telegram",
+  "telegram.org": "telegram",
+  "www.telegram.org": "telegram",
 };
 
 export function detectIcon(url: string): string {

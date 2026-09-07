@@ -2,10 +2,13 @@ import type { Session } from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../db";
 import { env } from "../env";
+import { friendIdsOf } from "../lib/friends";
 import { asyncHandler } from "../lib/http-error";
 import { toJsonArrayValue, toPayloadValue } from "../lib/json-field";
+import { computeLevel } from "../lib/level";
 import { heartbeatSchema } from "../lib/schemas";
 import { closeSession, foldUsageIntoDailyStat, normalizeModel, presenceFor, utcDay, type UsageEntry } from "../lib/sessions";
+import { buildTrackerMePayload, foldToday } from "../lib/tracker-me";
 import { requireTrackerToken } from "../middleware/auth";
 import { emitPresenceUpdate } from "../ws/hub";
 
@@ -29,6 +32,80 @@ router.get(
       select: { username: true },
     });
     res.json({ username: user.username });
+  })
+);
+
+/**
+ * Everything the macOS menu-bar companion (`menubar-mac/`) needs, in one request
+ * (ARCHITECTURE.md §5.9). Same Bearer device-token auth as the heartbeat — the app has
+ * a tracker token in its Keychain and no browser cookie, so `requireTrackerToken` is
+ * the only auth it can present, and a revoked token 401s here exactly as it does there.
+ *
+ * The shaping is in `lib/tracker-me.ts` so the wire contract can be asserted without a
+ * database (`lib/__checks__/trackerMe.check.ts`); this route only fetches rows.
+ *
+ * Friend presence fans out one `presenceFor()` per friend, the same way
+ * `GET /presence/friends` already does (routes/presence.ts) — and presence stays
+ * limited to accepted friends (§3), so the popover can never leak a stranger's activity.
+ */
+router.get(
+  "/tracker/me",
+  requireTrackerToken,
+  asyncHandler(async (req, res) => {
+    const userId = req.trackerUserId!;
+    const now = new Date();
+    const today = utcDay(now);
+
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { id: true, username: true, displayName: true, avatarUrl: true },
+    });
+
+    const [level, presence, dailyStats, openSessions, latestHeartbeat, devices, friendIds] = await Promise.all([
+      computeLevel(userId),
+      presenceFor(userId, user.username),
+      prisma.dailyStat.findMany({
+        where: { userId, date: today },
+        select: { date: true, tokensInput: true, tokensOutput: true, activeSeconds: true },
+      }),
+      prisma.session.findMany({
+        where: { userId, status: { not: "ENDED" } },
+        select: { startedAt: true, lastHeartbeatAt: true, tokensInput: true, tokensOutput: true },
+      }),
+      // Heartbeat-derived "last seen", across every session ever — NOT
+      // `TrackerToken.lastUsedAt`, which this route's own middleware just bumped.
+      prisma.session.findFirst({
+        where: { userId },
+        orderBy: { lastHeartbeatAt: "desc" },
+        select: { lastHeartbeatAt: true },
+      }),
+      prisma.trackerToken.findMany({
+        where: { userId, revokedAt: null },
+        select: { label: true, lastUsedAt: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      friendIdsOf(userId),
+    ]);
+
+    const friendUsers = await prisma.user.findMany({
+      where: { id: { in: friendIds } },
+      select: { id: true, username: true, displayName: true, avatarUrl: true },
+    });
+    const friends = await Promise.all(
+      friendUsers.map(async (friend) => ({ user: friend, presence: await presenceFor(friend.id, friend.username) }))
+    );
+
+    res.json(
+      buildTrackerMePayload({
+        user,
+        level: level.level,
+        presence,
+        today: foldToday(dailyStats, openSessions, today),
+        lastSeenAt: latestHeartbeat?.lastHeartbeatAt ?? null,
+        devices,
+        friends,
+      })
+    );
   })
 );
 
