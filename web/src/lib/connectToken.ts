@@ -12,11 +12,27 @@
 // with it) or revoked.
 
 import { usersApi } from "./api";
+import { formatShortDate } from "./format";
+import type { InstallOs } from "./connectPrompt";
 
 export interface StoredConnectToken {
   tokenId: string;
   token: string;
   createdAt: string;
+}
+
+/** Which install one-liner this machine needs. `navigator.platform` is deprecated but
+ *  still the most reliable Windows tell; the user agent is the fallback. */
+export function detectOs(): InstallOs {
+  return /Win/i.test(navigator.platform) || /Windows/i.test(navigator.userAgent) ? "windows" : "mac";
+}
+
+/** What a freshly minted token is called in the devices list — "Mac · Sep 7". Lives
+ *  here rather than in a component because two callers mint tokens (ConnectSheet for
+ *  the first device, ConnectTools for "Add another device") and a device named two
+ *  different ways would look like two products. */
+export function deviceLabel(os: InstallOs): string {
+  return `${os === "windows" ? "Windows" : "Mac"} · ${formatShortDate(new Date().toISOString())}`;
 }
 
 const TOKEN_PREFIX = "vh-connect-token:";

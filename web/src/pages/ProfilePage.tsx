@@ -8,7 +8,7 @@ import { safeHostname } from "../lib/format";
 import type { ExternalLink, LevelBreakdown, Project, User, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
-import { ArchetypeGlyph, archetypeLabel } from "../components/ui/ArchetypeGlyph";
+import { ArchetypeGlyph, archetypeBlurb, archetypeLabel } from "../components/ui/ArchetypeGlyph";
 import { PresenceBlock } from "../components/ui/PresenceBlock";
 import { Icon } from "../components/ui/Icon";
 import { Card } from "../components/ui/Card";
@@ -20,10 +20,12 @@ import { ProjectCard } from "../components/ProjectCard";
 import { WallComment } from "../components/WallComment";
 import { StatsPanel } from "../components/StatsPanel";
 import { RecentModels } from "../components/RecentModels";
+import type { ModelFocus } from "../components/RecentModels";
+import { ConnectSheet } from "../components/connect/ConnectSheet";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
 import { LevelBadge } from "../components/ui/LevelBadge";
-import { roleTitle } from "../components/ui/RoleGlyph";
+import { roleBlurb, roleTitle } from "../components/ui/RoleGlyph";
 import styles from "./ProfilePage.module.css";
 
 interface ProfileData {
@@ -63,6 +65,14 @@ export function ProfilePage() {
   const [newComment, setNewComment] = useState("");
   const [wallError, setWallError] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
+  /** Stats' "Top model" tile → the Models block below it. The nonce is what makes a
+   *  second click on the same tile land again after the block was collapsed. */
+  const [modelFocus, setModelFocus] = useState<ModelFocus | null>(null);
+  const focusModel = useCallback((label: string) => setModelFocus({ label, nonce: Date.now() }), []);
+  /** "Go online" from the presence hero. This page has no tracker component of its
+   *  own, so it renders the sheet itself — the sheet owns the token and the poll, so
+   *  two entry points cost nothing. */
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const isSelf = me?.username === username;
 
@@ -175,11 +185,15 @@ export function ProfilePage() {
             <>
               <div className={styles.nameRow}>
                 <h1 className={styles.displayName}>{profile.user.displayName}</h1>
+                {/* The badges say one word each; the tooltip says what that word
+                    means, which is the only thing round 8 changed up here. */}
                 {profile.user.roles.map((r) => (
-                  <Badge key={r}>{roleTitle(r)}</Badge>
+                  <Badge key={r} title={roleBlurb(r) ?? undefined}>
+                    {roleTitle(r)}
+                  </Badge>
                 ))}
                 {profile.user.archetype && (
-                  <Badge active>
+                  <Badge active title={archetypeBlurb(profile.user.archetype)}>
                     <ArchetypeGlyph archetype={profile.user.archetype} /> {archetypeLabel(profile.user.archetype)}
                   </Badge>
                 )}
@@ -189,7 +203,19 @@ export function ProfilePage() {
 
               {/* Only friends' presence is known to the client; anyone else gets no
                   status rather than a misleading "Offline". */}
-              {presence && <PresenceBlock presence={presence} variant="hero" className={styles.presence} />}
+              {presence && (
+                <div className={styles.presenceRow}>
+                  <PresenceBlock presence={presence} variant="hero" className={styles.presence} />
+                  {/* Round 8C: your own profile saying "Offline" is the most likely
+                      place to notice it, so it is the place that offers the fix. Idle
+                      says nothing — the tracker is still talking. */}
+                  {isSelf && presence.status === "offline" && (
+                    <Button size="sm" onClick={() => setConnectOpen(true)} className={styles.goOnline}>
+                      Go online
+                    </Button>
+                  )}
+                </div>
+              )}
 
               {profile.user.bio && <p className={styles.bio}>{profile.user.bio}</p>}
 
@@ -244,7 +270,7 @@ export function ProfilePage() {
       <section className={styles.section}>
         <SectionTitle icon="commit">Stats</SectionTitle>
         <Card>
-          <StatsPanel username={username} />
+          <StatsPanel username={username} onTopModel={focusModel} />
         </Card>
       </section>
 
@@ -252,6 +278,7 @@ export function ProfilePage() {
         username={username}
         isSelf={isSelf}
         presence={presence}
+        focus={modelFocus}
         className={styles.section}
       />
 
@@ -354,6 +381,8 @@ export function ProfilePage() {
           </Button>
         )}
       </section>
+
+      <ConnectSheet open={connectOpen} onClose={() => setConnectOpen(false)} />
     </div>
   );
 }

@@ -148,17 +148,20 @@ export function trackerTitle(status: TrackerStatusData): string {
 export interface TrackingStripProps {
   status: TrackerStatusData;
   settingsHref?: string;
+  /** Opens the connect sheet. Rendered only while offline — idle means the tracker is
+   *  still talking, so there is nothing to go and do (round 8C). */
+  onGoOnline?: () => void;
   className?: string;
 }
 
-export function TrackingStrip({ status, settingsHref, className }: TrackingStripProps) {
+export function TrackingStrip({ status, settingsHref, onGoOnline, className }: TrackingStripProps) {
   const now = useNow(true, 5000);
   const presence = status.presence;
   const live = presence.status === "active";
   const activity = presence.status !== "offline" ? presence.activity : null;
   const parts = activity ? presenceParts(activity, now) : null;
   const today = sumToday(status.sources);
-  const heartbeat = status.lastSeenAt ? `last heartbeat ${agoShort(status.lastSeenAt, now)}` : "no heartbeat yet";
+  const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
 
   return (
     <Card className={cx(styles.strip, className)} data-live={live || undefined} aria-label="Your tracker">
@@ -212,6 +215,11 @@ export function TrackingStrip({ status, settingsHref, className }: TrackingStrip
           <span className={styles.stripValue}>{formatActiveTime(today.activeSeconds)}</span>
           <span className={styles.counterUnit}>today</span>
         </span>
+        {onGoOnline && presence.status === "offline" && (
+          <Button size="sm" onClick={onGoOnline} className={styles.goOnline}>
+            Go online
+          </Button>
+        )}
         {settingsHref && (
           <Link to={settingsHref} className={styles.link}>
             Tracker settings
@@ -232,6 +240,9 @@ export interface TrackingStatusProps {
   status: TrackerStatusData | null;
   /** Home only — "Got it". */
   onDismiss?: () => void;
+  /** Opens the connect sheet. Rendered only while offline — idle means the tracker is
+   *  still talking, so there is nothing to go and do (round 8C). */
+  onGoOnline?: () => void;
   onRevoke?: (id: string) => Promise<void> | void;
   /** Mints a new device token; the wrapper then passes the install block as `addDeviceBlock`. */
   onAddDevice?: () => void;
@@ -263,6 +274,7 @@ export function TrackingStatus({
   variant,
   status,
   onDismiss,
+  onGoOnline,
   onRevoke,
   onAddDevice,
   addingDevice = false,
@@ -310,9 +322,10 @@ export function TrackingStatus({
   }
 
   const live = status.presence.status === "active";
-  const running = status.presence.status !== "offline" && status.presence.activity !== null;
+  const offline = status.presence.status === "offline";
+  const running = !offline && status.presence.activity !== null;
   const showDevices = variant === "settings" || status.devices.length > 1;
-  const heartbeat = status.lastSeenAt ? `last heartbeat ${agoShort(status.lastSeenAt, now)}` : "no heartbeat yet";
+  const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
   const today = sumToday(status.sources);
 
   return (
@@ -388,15 +401,27 @@ export function TrackingStatus({
         <p className={styles.privacy}>
           Leaves your machine: tool, model, project name, timestamps, token counts. Never code, prompts or diffs.
         </p>
-        {(onDismiss || settingsHref) && (
+        {(onDismiss || settingsHref || offline) && (
           <div className={styles.actions}>
             {settingsHref && (
               <Link to={settingsHref} className={styles.link}>
                 Tracker settings
               </Link>
             )}
+            {/* Offline is the one state with something to do about it, so it gets the
+                primary. "Got it" keeps it otherwise — the connected explainer is still
+                the thing being dismissed. */}
+            {offline && onGoOnline && (
+              <Button onClick={onGoOnline} className={styles.primary}>
+                Go online
+              </Button>
+            )}
             {onDismiss && (
-              <Button onClick={onDismiss} className={styles.primary}>
+              <Button
+                onClick={onDismiss}
+                variant={offline && onGoOnline ? "secondary" : "primary"}
+                className={styles.primary}
+              >
                 Got it
               </Button>
             )}

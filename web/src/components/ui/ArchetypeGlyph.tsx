@@ -10,6 +10,17 @@ const LABELS: Record<Archetype, string> = {
   GENERALIST: "Generalist",
 };
 
+/** What the badge cannot say in one word. Wording follows what the classifier
+ *  actually measures (server/src/jobs/archetype.ts): a 30-day window, recomputed at
+ *  UTC midnight, from commit density, how much the model writes versus the person,
+ *  and session length. */
+const BLURBS: Record<Archetype, string> = {
+  CODER: "Commits often and keeps a hand on the wheel. From your last 30 days.",
+  ARTIST: "Design-led work. From your last 30 days.",
+  DIRECTOR: "Long sessions, and lets the model run. From your last 30 days.",
+  GENERALIST: "No single pattern stands out yet. From your last 30 days.",
+};
+
 function GlyphPath({ archetype }: { archetype: Archetype }) {
   switch (archetype) {
     case "CODER":
@@ -66,4 +77,8 @@ export function ArchetypeGlyph({ archetype, size = 16 }: { archetype: Archetype;
 
 export function archetypeLabel(archetype: Archetype): string {
   return LABELS[archetype];
+}
+
+export function archetypeBlurb(archetype: Archetype): string {
+  return BLURBS[archetype];
 }

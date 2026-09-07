@@ -1,11 +1,16 @@
 // The text a user pastes straight into their AI tool to connect the VibeHub
 // tracker without touching a terminal themselves — see round-5 plan (meta/plans/
-// vibehub-round5-polish.md). `cursor` and `claude-code` are agentic coding tools
-// that can run shell commands on the user's behalf; `chatgpt` (the default
-// consumer product) can't, so it gets a walk-the-user-through-it version instead
-// of an instruction to run things itself.
+// vibehub-round5-polish.md). `cursor`, `claude-code`, `codex` and `quadcode` are
+// agentic coding tools that can run shell commands on the user's behalf; `chatgpt`
+// (the default consumer product) can't, so it gets a walk-the-user-through-it
+// version instead of an instruction to run things itself.
+//
+// Round 8C added `codex` and `quadcode` for the ConnectSheet's picker. `chatgpt` is
+// no longer offered there (the PO's five are Terminal, Cursor, Codex, Quadcode AI,
+// Claude Code) but stays in the type: it is the only non-agentic branch, and the
+// walk-through is the version to reach for if a plain chat target comes back.
 
-export type ConnectPromptTarget = "cursor" | "claude-code" | "chatgpt";
+export type ConnectPromptTarget = "cursor" | "claude-code" | "codex" | "quadcode" | "chatgpt";
 
 export type InstallOs = "mac" | "windows";
 

@@ -44,8 +44,22 @@
 }
 
 /* Hero presence: one size up from the row variant, under the name row. */
+/* Status and its remedy on one line: "Offline" is only useful next to the thing that
+ * fixes it. Wraps on narrow screens rather than squeezing the status line. */
+.presenceRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--vh-space-2) var(--vh-space-3);
+}
+
 .presence {
   margin-top: var(--vh-space-2);
+}
+
+.goOnline {
+  margin-top: var(--vh-space-2);
+  flex: none;
 }
 
 .bio {
@@ -76,11 +90,24 @@
   background: var(--vh-surface-2);
   padding: 0 12px;
   border-radius: var(--vh-radius-pill);
-  transition: color var(--dur-press) var(--ease-out);
+  transition:
+    color var(--dur-press) var(--ease-out),
+    background var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 
-.linkChip:hover {
+/* Hover and keyboard focus are the same state — the chip is a link, and the mark
+ * inside it inherits `color`, so the whole chip steps up in lightness together. The
+ * global :focus-visible ring in tokens.css still draws the outline. */
+.linkChip:hover,
+.linkChip:focus-visible {
   color: var(--vh-text);
+  background: var(--vh-accent-soft);
+}
+
+/* An <a> gets no pressed feedback from the global button rule in motion.css. */
+.linkChip:active {
+  transform: scale(0.98);
 }
 
 /* Touch: the chips are the only sub-40px targets in the hero. */

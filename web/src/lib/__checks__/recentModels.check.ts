@@ -51,6 +51,37 @@ eq("tools merge, most hours first", merged[1].tools, ["codex", "claude-code"]);
 eq("hours and tokens sum across tools", [merged[1].activeSeconds, merged[1].tokens], [10_800, 2300]);
 eq("lastActiveAt is the newest contributing bucket", merged[1].lastActiveAt, "2026-09-04T00:00:00.000Z");
 
+// ---- the merge keeps its parts: `byTool` is what the expanded row splits into ----
+eq(
+  "byTool keeps each tool's own numbers, hours desc",
+  merged[1].byTool,
+  [
+    { tool: "codex", tokens: 300, activeSeconds: 7200, lastActiveAt: "2026-09-02T00:00:00.000Z", estimated: false },
+    { tool: "claude-code", tokens: 2000, activeSeconds: 3600, lastActiveAt: "2026-09-04T00:00:00.000Z", estimated: false },
+  ]
+);
+eq("tools is byTool's ids, in the same order", merged[1].tools, merged[1].byTool.map((b) => b.tool));
+eq(
+  "byTool sums to the row",
+  [
+    merged[1].byTool.reduce((n, b) => n + b.activeSeconds, 0),
+    merged[1].byTool.reduce((n, b) => n + b.tokens, 0),
+  ],
+  [merged[1].activeSeconds, merged[1].tokens]
+);
+eq("a tool's estimate flag rides its own bucket", merged[0].byTool[0].estimated, true);
+
+// Two raw ids that humanize to one name are one row — and one tool bucket, summed.
+const oneTool = groupStatsByModel([
+  row("claude-code", "claude-sonnet-4.5", 100, 100, 600, "2026-09-01T00:00:00.000Z"),
+  row("claude-code", "claude-sonnet-4-5-20250929", 50, 50, 300, "2026-09-03T00:00:00.000Z"),
+]);
+eq(
+  "one bucket per tool, not per raw model id",
+  oneTool[0].byTool,
+  [{ tool: "claude-code", tokens: 300, activeSeconds: 900, lastActiveAt: "2026-09-03T00:00:00.000Z", estimated: false }]
+);
+
 // ---- Quadcode's estimated tokens are flagged, everyone else's are not ----
 eq("quadcode row is estimated", merged[0].estimated, true);
 eq("claude-code row is measured", merged[1].estimated, false);

@@ -12,9 +12,24 @@
   border-radius: var(--vh-radius-md);
 }
 
+/* A clickable tile is the same well with the same box — only the pointer, the hover
+ * lift in lightness and the pressed scale say it does something. Text stays left
+ * aligned because a button's default centring would move the value. */
+.action {
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-state) var(--ease-out), transform var(--dur-press) var(--ease-out);
+}
+.action:hover {
+  background: var(--vh-accent-soft);
+}
+
 .value {
   display: flex;
   align-items: center;
+  gap: 8px;
   min-width: 0;
   min-height: 32px;
   font-family: var(--vh-font-mono);
@@ -34,6 +49,13 @@
   letter-spacing: -0.01em;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* Sits on the value's baseline block, never shrinking below its own size. */
+.mark {
+  display: inline-flex;
+  flex: none;
+  color: var(--vh-text-dim);
 }
 
 .valueSkeleton {

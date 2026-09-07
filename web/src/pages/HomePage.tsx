@@ -11,6 +11,8 @@ import { PresenceBlock } from "../components/ui/PresenceBlock";
 import { StatusDot } from "../components/ui/StatusDot";
 import buttonStyles from "../components/ui/Button.module.css";
 import { ConnectTools } from "../components/ConnectTools";
+import { ConnectSheet } from "../components/connect/ConnectSheet";
+import { takeConnectDeepLink } from "../lib/connectDeepLink";
 import { FriendListItem, FriendListItemSkeleton } from "../components/FriendListItem";
 import { Skeleton } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
@@ -24,6 +26,15 @@ export function HomePage() {
   const { presences, incomingRequests } = useRealtime();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
+  /** `/?connect=1` from the menu-bar app. Home renders its own sheet rather than asking
+   *  ConnectTools to open its one: ConnectTools skips the sheet entirely while the
+   *  status is loading and once the strip has replaced the panel, and the deep link has
+   *  to work whatever the tracker phase. */
+  const [connectOpen, setConnectOpen] = useState(false);
+
+  useEffect(() => {
+    if (takeConnectDeepLink()) setConnectOpen(true);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -51,6 +62,7 @@ export function HomePage() {
           already-connected account on mount, not just a live flip, to fire the
           success modal (ConnectTools) reliably. Hides/shows itself. */}
       <ConnectTools variant="banner" />
+      <ConnectSheet open={connectOpen} onClose={() => setConnectOpen(false)} />
 
       <div className={styles.grid}>
         <section className={styles.section}>

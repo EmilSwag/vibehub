@@ -239,6 +239,13 @@
   white-space: nowrap;
 }
 
+/* The strip's row is baseline-aligned for its text; a button has no useful baseline,
+ * so it centres itself instead of hanging below the line. */
+.goOnline {
+  align-self: center;
+  flex: none;
+}
+
 .stripCounter {
   display: inline-flex;
   align-items: baseline;

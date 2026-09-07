@@ -11,6 +11,24 @@
 import { humanizeModel, toolFamily, toolLabel } from "./format";
 import type { StatByModel } from "../types";
 
+/**
+ * One tool's share of a model row — what the merge used to throw away.
+ *
+ * The row still reports the totals, because that is what the collapsed list shows;
+ * this is the same arithmetic kept un-summed so the expanded row can answer "and how
+ * much of that was Cursor?" without a second request (round 8).
+ */
+export interface RecentModelToolBucket {
+  /** Raw tool id, as the tracker reported it. */
+  tool: string;
+  tokens: number;
+  activeSeconds: number;
+  /** Newest moment this tool ran this model; null on a pre-round-7 server. */
+  lastActiveAt: string | null;
+  /** This tool's token figure is the tracker's estimate (see `isEstimatedTool`). */
+  estimated: boolean;
+}
+
 /** One model the person has used, with every tool that ran it merged in. */
 export interface RecentModelRow {
   /** Visible identity, and the group key: the model's display name, or the tool's
@@ -19,8 +37,12 @@ export interface RecentModelRow {
   /** One raw model id from this group — for ModelGlyph's family lookup, never shown.
    *  null when the row is a tool with no model at all. */
   model: string | null;
-  /** Raw tool ids that ran this model, most hours first. Never empty. */
+  /** Raw tool ids that ran this model, most hours first. Never empty.
+   *  Always `byTool.map((b) => b.tool)` — kept as its own field because the sub-line
+   *  and the glyph lookup only ever want the ids. */
   tools: string[];
+  /** The same tools un-merged, in the same order — the expanded row's detail line. */
+  byTool: RecentModelToolBucket[];
   tokens: number;
   activeSeconds: number;
   /** Newest moment any contributing bucket was seen; null on a pre-round-7 server. */
@@ -72,8 +94,9 @@ function byHours(a: RecentModelRow, b: RecentModelRow): number {
  */
 export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
   const groups = new Map<string, RecentModelRow>();
-  // Per row: raw tool id → seconds, so the sub-line can list tools by their own hours.
-  const toolSeconds = new Map<string, Map<string, number>>();
+  // Per row: raw tool id → that tool's own totals. The row's numbers are the sum of
+  // these; keeping the parts is what lets the expanded row split itself by tool.
+  const toolBuckets = new Map<string, Map<string, RecentModelToolBucket>>();
 
   for (const row of rows) {
     const label = modelRowLabel(row.tool, row.model);
@@ -83,31 +106,49 @@ export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
         label,
         model: humanizeModel(row.model) === null ? null : row.model,
         tools: [],
+        byTool: [],
         tokens: 0,
         activeSeconds: 0,
         lastActiveAt: null,
         estimated: false,
       };
       groups.set(label, group);
-      toolSeconds.set(label, new Map());
+      toolBuckets.set(label, new Map());
     }
 
-    group.tokens += row.tokensInput + row.tokensOutput;
-    group.activeSeconds += row.activeSeconds;
-    group.estimated ||= isEstimatedTool(row.tool);
-
+    const tokens = row.tokensInput + row.tokensOutput;
+    const estimated = isEstimatedTool(row.tool);
     const seen = row.lastActiveAt ?? null;
+
+    group.tokens += tokens;
+    group.activeSeconds += row.activeSeconds;
+    group.estimated ||= estimated;
     if (seen && (group.lastActiveAt === null || seen > group.lastActiveAt)) group.lastActiveAt = seen;
 
-    const tools = toolSeconds.get(label)!;
-    tools.set(row.tool, (tools.get(row.tool) ?? 0) + row.activeSeconds);
+    const buckets = toolBuckets.get(label)!;
+    const bucket = buckets.get(row.tool);
+    if (!bucket) {
+      buckets.set(row.tool, {
+        tool: row.tool,
+        tokens,
+        activeSeconds: row.activeSeconds,
+        lastActiveAt: seen,
+        estimated,
+      });
+    } else {
+      bucket.tokens += tokens;
+      bucket.activeSeconds += row.activeSeconds;
+      bucket.estimated ||= estimated;
+      if (seen && (bucket.lastActiveAt === null || seen > bucket.lastActiveAt)) bucket.lastActiveAt = seen;
+    }
   }
 
   const list = [...groups.values()];
   for (const group of list) {
-    group.tools = [...toolSeconds.get(group.label)!.entries()]
-      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
-      .map(([tool]) => tool);
+    group.byTool = [...toolBuckets.get(group.label)!.values()].sort(
+      (a, b) => b.activeSeconds - a.activeSeconds || (a.tool < b.tool ? -1 : 1),
+    );
+    group.tools = group.byTool.map((bucket) => bucket.tool);
   }
 
   // Recency first when the server knows it; hours otherwise. A bucket with no date

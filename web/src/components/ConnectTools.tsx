@@ -1,26 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE, usersApi } from "../lib/api";
-import { buildConnectPrompt, buildInstallCommand } from "../lib/connectPrompt";
-import type { ConnectPromptTarget, InstallOs } from "../lib/connectPrompt";
+import { buildInstallCommand } from "../lib/connectPrompt";
+import type { InstallOs } from "../lib/connectPrompt";
 import {
   clearStoredConnectToken,
+  deviceLabel,
+  detectOs,
   dropForeignConnectTokens,
-  ensureConnectToken,
   hasSeenTracking,
   markTrackingSeen,
   readStoredConnectToken,
 } from "../lib/connectToken";
-import type { StoredConnectToken } from "../lib/connectToken";
-import { formatShortDate } from "../lib/format";
 import { useExitTransition } from "../lib/motion";
 import type { TrackerStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
-import { Icon } from "./ui/Icon";
-import { Skeleton } from "./ui/Skeleton";
 import { ConnectCelebration } from "./ui/ConnectCelebration";
+import { ConnectSheet } from "./connect/ConnectSheet";
 import { DeviceList, TrackingStatus, TrackingStrip } from "./TrackingStatus";
 import { useNow } from "./ui/PresenceBlock";
 import styles from "./ConnectTools.module.css";
@@ -38,33 +36,18 @@ const POLL_WAITING_MS = 5_000;
 const POLL_CONNECTED_MS = 10_000;
 const EXIT_MS = 260;
 
-/** The three targets `buildConnectPrompt` knows how to write for. */
-const TARGETS: { id: ConnectPromptTarget; label: string }[] = [
-  { id: "claude-code", label: "Claude Code" },
-  { id: "cursor", label: "Cursor" },
-  { id: "chatgpt", label: "ChatGPT" },
-];
-
 const OSES: { id: InstallOs; label: string }[] = [
   { id: "mac", label: "macOS / Linux" },
   { id: "windows", label: "Windows" },
 ];
 
-type Copyable = "prompt" | "command" | "token";
+type Copyable = "command" | "token";
 /** "offline" = this account has heartbeated before but its tracker is silent now.
  *  It must not fall back to the connect card: that reads as "not connected" and
  *  mints tokens nobody needs. It gets the status panel/strip saying so instead. */
 type Phase = "loading" | "waiting" | "connected" | "offline";
 
-function detectOs(): InstallOs {
-  return /Win/i.test(navigator.platform) || /Windows/i.test(navigator.userAgent) ? "windows" : "mac";
-}
-
-function deviceLabel(os: InstallOs): string {
-  return `${os === "windows" ? "Windows" : "Mac"} · ${formatShortDate(new Date().toISOString())}`;
-}
-
-const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
+const cx =(...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
 /* ---- Segmented control (target / OS) ---- */
 
@@ -166,13 +149,12 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
   const isBanner = variant === "banner";
 
   const [status, setStatus] = useState<TrackerStatus | null>(null);
-  const [connectToken, setConnectToken] = useState<StoredConnectToken | null>(null);
   const [deviceToken, setDeviceToken] = useState<string | null>(null);
   const [addingDevice, setAddingDevice] = useState(false);
   const [os, setOs] = useState<InstallOs>(detectOs);
-  const [target, setTarget] = useState<ConnectPromptTarget>("claude-code");
-  const [manual, setManual] = useState(false);
-  const [showPrompt, setShowPrompt] = useState(false);
+  /** Round 8C: the picker, the copy and the wait all live in ConnectSheet now. This
+   *  card's whole job is to open it. */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [copied, setCopied] = useState<Copyable | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [celebrating, setCelebrating] = useState(false);
@@ -281,25 +263,6 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     onCelebrated?.();
   }, [onCelebrated]);
 
-  // Token minted once: reuse the stored one when the server still lists it as
-  // never used, otherwise mint (revoking the user's other never-used tokens).
-  // ensureConnectToken dedupes in-flight calls, so StrictMode's double effect
-  // and a Home → Settings hop share one mint.
-  useEffect(() => {
-    if (!userId || phase !== "waiting" || connectToken) return;
-    let cancelled = false;
-    ensureConnectToken(userId, deviceLabel(detectOs()))
-      .then((t) => {
-        if (!cancelled) setConnectToken(t);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not create a token");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, phase, connectToken]);
-
   // Once the tracker has used the stored token, forget it — the next connect
   // card (if ever) starts from a fresh one instead of a token already in use.
   useEffect(() => {
@@ -311,17 +274,8 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
   }, [userId, status]);
 
   useEffect(() => {
-    if (connected) {
-      setConnectToken(null);
-      setManual(false);
-      setShowPrompt(false);
-    }
+    if (connected) setSheetOpen(false);
   }, [connected]);
-
-  const prompt = useMemo(
-    () => (connectToken ? buildConnectPrompt(target, connectToken.token, API_BASE, WEB_URL) : null),
-    [connectToken, target]
-  );
 
   const copy = async (what: Copyable, text: string) => {
     try {
@@ -337,10 +291,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     setError(null);
     try {
       await usersApi.revokeTrackerToken(id);
-      if (userId && readStoredConnectToken(userId)?.tokenId === id) {
-        clearStoredConnectToken(userId);
-        setConnectToken(null);
-      }
+      if (userId && readStoredConnectToken(userId)?.tokenId === id) clearStoredConnectToken(userId);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke that device");
@@ -397,71 +348,32 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     );
   }
 
-  const targetLabel = TARGETS.find((t) => t.id === target)?.label ?? "your tool";
-
   return (
     <>
       {renderCard && (
-        <Card
-          className={cx(styles.card, isBanner && styles.bannerSpacing, cardClosing ? "leave" : "reveal")}
-          aria-busy={!connectToken}
-        >
+        <Card className={cx(styles.card, isBanner && styles.bannerSpacing, cardClosing ? "leave" : "reveal")}>
           {/* Onboarding's step already carries the title and the one-line
               explainer above this card; repeating them here is the redundant
               label the design rules forbid (round-7 live pass). */}
           {variant !== "compact" && (
             <div className={styles.head}>
               <strong className={styles.title}>Connect your tools</strong>
-              <span className={styles.sub}>Paste one prompt into your AI tool. No terminal needed.</span>
+              <span className={styles.sub}>Nothing is being tracked yet.</span>
             </div>
           )}
 
-          <Segment label="AI tool" options={TARGETS} value={target} onChange={setTarget} />
-
-          {/* One primary action. The prompt itself is behind a disclosure — a
-              permanent code block inside the card was a card-inside-a-card, and
-              nobody reads it before pasting anyway (round-7 design QA). */}
-          <div className={styles.promptBlock}>
-            {connectToken ? (
-              <Button className={styles.copy} onClick={() => prompt && copy("prompt", prompt)} disabled={!prompt}>
-                <Icon name={copied === "prompt" ? "check" : "copy"} size={14} />
-                {copied === "prompt" ? `Copied — paste into ${targetLabel}` : `Copy prompt for ${targetLabel}`}
-              </Button>
-            ) : (
-              <Skeleton variant="pill" height={38} width="100%" />
-            )}
-            {showPrompt && prompt && <pre className={cx(styles.prompt, "fade-in")}>{prompt}</pre>}
-          </div>
+          {/* One action. Everything that used to be inlined here — picker, prompt,
+              manual install, the wait — is the sheet's job now, so there is exactly
+              one copy of that logic in the app. */}
+          <Button className={styles.copy} onClick={() => setSheetOpen(true)}>
+            Connect
+          </Button>
 
           <div className={styles.foot}>
-            <span className={cx(styles.waiting, !prompt && styles.waitingMuted)}>
+            <span className={styles.waiting}>
               <span className={styles.pulse} aria-hidden="true" /> Listening…
             </span>
-            <span className={styles.footLinks}>
-              <button
-                type="button"
-                className={styles.link}
-                aria-expanded={showPrompt}
-                disabled={!connectToken}
-                onClick={() => setShowPrompt((v) => !v)}
-              >
-                {showPrompt ? "Hide prompt" : "Show prompt"}
-              </button>
-              <button
-                type="button"
-                className={styles.link}
-                aria-expanded={manual}
-                disabled={!connectToken}
-                onClick={() => setManual((v) => !v)}
-              >
-                {manual ? "Hide manual setup" : "Do it manually"}
-              </button>
-            </span>
           </div>
-
-          {manual && connectToken && (
-            <ManualInstall token={connectToken.token} os={os} onOs={setOs} copied={copied} onCopy={copy} />
-          )}
 
           {variant === "full" && status && (
             <>
@@ -486,6 +398,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
           status={status}
           className={cx(isBanner && styles.bannerSpacing, panelClosing ? "leave" : "reveal")}
           onDismiss={isBanner ? dismiss : undefined}
+          onGoOnline={() => setSheetOpen(true)}
           settingsHref={isBanner ? "/settings#tracker" : undefined}
           onRevoke={revoke}
           onAddDevice={variant === "full" ? addDevice : undefined}
@@ -500,9 +413,15 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
       )}
 
       {showStrip && status && (
-        <TrackingStrip status={status} settingsHref="/settings#tracker" className={cx(styles.bannerSpacing, "reveal")} />
+        <TrackingStrip
+          status={status}
+          settingsHref="/settings#tracker"
+          onGoOnline={() => setSheetOpen(true)}
+          className={cx(styles.bannerSpacing, "reveal")}
+        />
       )}
 
+      <ConnectSheet open={sheetOpen} onClose={() => setSheetOpen(false)} />
       {celebration}
     </>
   );

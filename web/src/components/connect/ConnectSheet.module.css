@@ -1,0 +1,383 @@
+/*
+ * ConnectSheet — "Go online". Bottom sheet on phones, centered dialog on desktop.
+ *
+ * Keyframes are declared locally: CSS Modules hash animation names, so a module can
+ * never reference motion.css's globals by name. Durations still come from the shared
+ * tokens, so the reduced-motion override in motion.css zeroes these too — and every
+ * end state below is the resting state, so zeroing an animation lands somewhere
+ * correct rather than mid-slide.
+ */
+
+@keyframes cs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cs-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes cs-fall {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(10px); }
+}
+
+/* Left to right, then out — an indeterminate wait, not a measured one. Ends at rest
+ * as a full faint line so a zeroed animation is still a sensible thing to look at. */
+@keyframes cs-sweep {
+  0% { transform: scaleX(0); transform-origin: left; opacity: 1; }
+  50% { transform: scaleX(1); transform-origin: left; opacity: 1; }
+  51% { transform: scaleX(1); transform-origin: right; opacity: 1; }
+  100% { transform: scaleX(0); transform-origin: right; opacity: 1; }
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.42);
+  animation: cs-fade-in var(--dur-state) var(--ease-out) both;
+}
+.scrimOut {
+  animation: cs-fade-in var(--dur-state) var(--ease-out) reverse both;
+}
+
+.wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 61;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.sheet {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 92vh;
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-bottom: 0;
+  border-radius: var(--vh-radius-lg) var(--vh-radius-lg) 0 0;
+  box-shadow: var(--vh-shadow-panel);
+}
+.sheet:focus {
+  outline: none;
+}
+
+.sheetIn {
+  animation: cs-rise var(--dur-enter) var(--ease-out) both;
+}
+.sheetOut {
+  animation: cs-fall var(--dur-state) var(--ease-out) both;
+}
+
+/* Desktop: a centered dialog, not a sheet stuck to the bottom edge. */
+@media (min-width: 640px) {
+  .wrap {
+    align-items: center;
+    padding: 24px;
+  }
+  .sheet {
+    max-width: 560px;
+    max-height: 86vh;
+    border-bottom: 1px solid var(--vh-border);
+    border-radius: var(--vh-radius-lg);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vh-space-3);
+  padding: 18px 20px 12px;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--vh-font-serif);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 26px;
+  color: var(--vh-text);
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 0;
+  border-radius: var(--vh-radius-md);
+  background: transparent;
+  color: var(--vh-text-dim);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
+}
+.close:hover {
+  background: var(--vh-surface-2);
+  color: var(--vh-text);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 0 20px 24px;
+  overflow-y: auto;
+}
+
+/* ---- a step ---- */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  /* Step 2 arrives after Copy; 160ms, fade and a short rise. */
+  animation: cs-rise 160ms var(--ease-out) both;
+}
+
+.stepTitle {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--vh-text);
+}
+
+/* ---- picker (same shape as ConnectTools' segmented control) ---- */
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+}
+
+.segBtn {
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: var(--vh-radius-pill);
+  background: transparent;
+  color: var(--vh-text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-state) var(--ease-out),
+    color var(--dur-state) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+.segBtn:hover {
+  color: var(--vh-text);
+}
+.segBtn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.segBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+}
+.segBtnOn,
+.segBtnOn:hover {
+  background: var(--vh-text);
+  color: var(--vh-bg);
+}
+
+/* Two lines at most — the rule, and the reason there is no paragraph here. */
+.explain {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--vh-text-dim);
+}
+
+.osRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px var(--vh-space-3);
+}
+
+.note {
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  color: var(--vh-text-faint);
+}
+
+/* Tinted well, no border — one border per block, so this is not a card in a card. */
+.text {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 200px;
+  overflow: auto;
+  border-radius: var(--vh-radius-md);
+  background: var(--vh-surface-2);
+  font-family: var(--vh-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--vh-text-dim);
+}
+
+.copy {
+  align-self: stretch;
+}
+
+/* ---- progress ---- */
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pstep {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 0 9px;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
+  transition:
+    color 160ms var(--ease-out),
+    opacity 160ms var(--ease-out);
+}
+.pstepDone {
+  color: var(--vh-text-dim);
+}
+.pstepActive {
+  color: var(--vh-text);
+}
+
+.pmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  flex: none;
+  color: currentColor;
+}
+
+/* Pending steps get a hollow dot, so the column reads as a list before it reads as
+ * progress. No spinner anywhere — the line below is the only motion. */
+.pdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0.6;
+}
+.pstepActive .pdot {
+  background: currentColor;
+  opacity: 1;
+}
+
+.plabel {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+/* Fixed width and tabular figures: it ticks once a second and must not reflow. */
+.elapsed {
+  min-width: 5ch;
+  font-family: var(--vh-font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vh-text-faint);
+}
+
+.stepMeta {
+  font-size: 12.5px;
+  color: var(--vh-text-faint);
+}
+
+/* 1px, monochrome, indeterminate — under the active step only. */
+.pline {
+  position: absolute;
+  left: 26px;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--vh-text);
+  opacity: 0.55;
+  animation: cs-sweep 1400ms var(--ease-out) infinite;
+}
+
+/* ---- the 90s disclosure. Text only: this is not an error and never reads as one. ---- */
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.helpToggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--vh-text-faint);
+  text-decoration: underline;
+  text-decoration-color: var(--vh-border-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.helpToggle:hover {
+  color: var(--vh-text-dim);
+  text-decoration-color: currentColor;
+}
+
+.helpList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
+}
+
+/* Errors read as ink (DESIGN.md) — there is no error hue in this product. */
+.error {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  color: var(--vh-text-dim);
+}

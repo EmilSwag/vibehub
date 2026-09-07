@@ -28,6 +28,12 @@ export function roleTitle(role: UserRole | null | undefined): string | null {
   return ROLES.find((r) => r.id === role)?.title ?? null;
 }
 
+/** The onboarding card's own sentence, reused as the profile badge's tooltip — the
+ *  badge shows the title, so the tooltip has to add the thing the title left out. */
+export function roleBlurb(role: UserRole | null | undefined): string | null {
+  return ROLES.find((r) => r.id === role)?.blurb ?? null;
+}
+
 /**
  * Line-art glyphs, 1.5px stroke, currentColor only — monochrome by construction.
  * Sized by the parent via `size`.

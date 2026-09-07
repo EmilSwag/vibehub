@@ -61,6 +61,42 @@ pre-applied by the inline script in `web/index.html` so the first paint is alrea
 - **Wall comment**: `--vh-surface-2` bubble, radius-lg, author avatar left.
 - **Charts (tokens per model, time per tool)**: bar charts in `--vh-accent` + neutral grays only, flat fills — never per-series hue coding.
 
+## Brand marks
+
+Round 8 replaced the abstract model/tool glyphs with the real marks. The rule is no
+longer "abstract shapes only, no brand marks" — it is:
+
+**Monochrome brand marks, `currentColor`, never coloured, one size per slot.**
+
+- A product that has a mark gets its own mark: Claude, Claude Code, Cursor, Gemini,
+  OpenAI, Grok, Codex, VS Code, Windsurf, Zed, and the profile-header links (GitHub,
+  X, Telegram, YouTube, LinkedIn, Discord).
+- **Never coloured.** The mark carries no fill of its own — the `<svg>` is
+  `fill="currentColor"` and inherits whatever `--vh-*` ink the call site sets. A
+  brand's own palette never enters the product, in either theme.
+- **One size per slot**, and it is the same number everywhere that slot appears:
+  12 in a tool chip, 13 in a tracker row, 16 in a list or link chip, 18 in a stat
+  tile, 26 in a Models capsule. Mixing sizes inside one row is what makes a set of
+  marks look pasted in.
+- **Below 14px, some marks are redrawn.** A mark at 12px is a 12×12 bitmap, and one
+  whose meaning lives in its interior — Claude Code's legs, Codex's chevron, Zed's
+  nested Z, the globe's meridians — closes into a blob at that size. Those four swap to
+  simplified line art below 14 (`brand-mark-small.ts`); 16 and up are always the
+  published mark. Judge this on the proof sheet's magnifier, which rasterises at exactly
+  12 CSS px and blows the bitmap up 8×, never by eyeballing 12px on a retina screen.
+  A mark that still reads is never redrawn.
+- **Geometry is generated, not drawn.** `web/scripts/build-brand-marks.mjs` extracts
+  the paths (simple-icons, CC0, first; a permissive AI-brand set for the marks it has
+  dropped) into `web/src/components/ui/brand-mark-paths.ts` — banner-marked, never
+  hand-edited. The handful with no third-party source (Quadcode AI's Q, LinkedIn's
+  "in", the website globe, the neutral placeholder) live in `brand-mark-hand.ts`.
+  `web/scripts/brand-marks-sheet.mjs` renders the proof sheet at 12/16/26/64 in both
+  themes.
+- **A mark is never shown alone.** It is `aria-hidden` and always sits beside the name
+  it belongs to, so it decorates a label rather than replacing one.
+- **Not everything is a brand.** `RoleGlyph` and `ArchetypeGlyph` stay abstract line
+  art on purpose — they name a *person*, and there is no mark to be faithful to.
+
 ## Layout
 - Top bar: white, hairline bottom border, logo mark left, nav sans, avatar right.
 - Content max-width ~1100px on `#FAF9F5`; sidebar panels ivory.

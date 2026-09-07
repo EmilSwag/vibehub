@@ -11,6 +11,16 @@ export function stagger(index: number): CSSProperties {
 }
 
 /**
+ * The reduced-motion preference, for the motion CSS cannot reach: `scrollIntoView`
+ * and friends take their `behavior` in JS, and the blanket override in motion.css
+ * only zeroes CSS durations. Read at call time, never cached — the OS setting can
+ * change while the tab is open.
+ */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
  * Keeps a conditionally-rendered block mounted long enough to play its exit
  * animation instead of vanishing instantly. Pair with the `.leave` utility
  * (styles/motion.css): `{render && <div className={closing ? "leave" : "reveal"}>}`.

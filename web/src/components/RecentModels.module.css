@@ -8,9 +8,15 @@
  * The revealed remainder ("View all N models") uses the same grid at a smaller
  * capsule so the numbers stay in the same place whether the list is open or not.
  *
- * Nothing here animates layout: the extra rows fade+rise via the global `.stagger`
- * utility applied from TSX (CSS Modules hash animation names, so a module can never
- * reference motion.css keyframes — see the header of styles/motion.css).
+ * Round 8 split the <li> in two: `.item` holds the clickable band (`.row`) and the
+ * per-tool detail (`.detail`) that opens under it.
+ *
+ * The extra rows fade+rise via the global `.stagger` utility applied from TSX (CSS
+ * Modules hash animation names, so a module can never reference motion.css keyframes
+ * — see the header of styles/motion.css). The one thing here that does animate a
+ * layout property is `.detail`, whose `grid-template-rows: 0fr → 1fr` is the only way
+ * to open to a height nobody has measured; it stays cheap because exactly one row is
+ * ever open and the transition is 200ms.
  */
 
 .head {
@@ -36,18 +42,81 @@
   list-style: none;
 }
 
+.item {
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.item:last-child {
+  border-bottom: none;
+}
+
+/* A filtered-out row stays readable — it is context, not disabled chrome.
+ *
+ * The fade lands on the row's children, never on the <li>: the list is a `.stagger`
+ * parent, so every <li> carries `vh-fade-up ... both`, and a filled animation beats
+ * any declarative opacity in the cascade. Setting it on the <li> silently does
+ * nothing — the class applies, the computed value stays 1. */
+.itemMuted > .row,
+.itemMuted > .detail {
+  opacity: 0.45;
+}
+
 .row {
+  transition: opacity var(--dur-state) var(--ease-out);
+}
+
+.row {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-areas: "capsule main right";
   align-items: center;
   column-gap: var(--vh-space-3);
   padding: 12px 0;
-  border-bottom: 1px solid var(--vh-border);
 }
 
-.row:last-child {
-  border-bottom: none;
+/* ---- the row as a control (round 8) ----
+ *
+ * `.rowHit` is a real button stretched over the whole band, sitting *behind* the
+ * row's content: it paints the hover/selected well and takes every click that is not
+ * a tool chip. A wrapper would have been simpler and is not allowed — the chips are
+ * buttons, and buttons cannot nest.
+ *
+ * The content is positioned (so it paints above the well) and inert to the pointer,
+ * so a click on the model's name still reaches the button underneath. The chips opt
+ * back in below.
+ *
+ * The well bleeds 10px into the Card's padding so a hovered row reads as a band
+ * across the block rather than a box drawn around the text.
+ */
+.rowHit {
+  position: absolute;
+  inset: 4px -10px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--vh-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--dur-state) var(--ease-out);
+}
+.rowHit:hover {
+  background: var(--vh-surface-2);
+}
+/* Press is a step darker, not a scale: a full-width well shrinking 2% reads as the
+ * layout twitching. The mark takes the scale instead — see `.capsule` below. */
+.rowHit:active:not(:disabled) {
+  transform: none;
+  background: var(--vh-accent-soft);
+}
+.rowSelected .rowHit {
+  background: var(--vh-accent-soft);
+}
+
+.row > .capsule,
+.row > .main,
+.row > .right {
+  position: relative;
+  pointer-events: none;
 }
 
 /* The model's face. 120x45 like a Steam capsule, filled with the panel tint so it
@@ -63,6 +132,17 @@
   border-radius: var(--vh-radius-sm);
   background: var(--vh-surface-2);
   color: var(--vh-text-dim);
+  transition: transform var(--dur-press) var(--ease-out), color var(--dur-state) var(--ease-out);
+}
+
+/* The mark is what the PO clicks, so the mark is what answers. It is the only thing
+ * in the row that moves, which keeps the press legible without shifting any text. */
+.rowHit:active:not(:disabled) + .capsule {
+  transform: scale(0.94);
+}
+.rowHit:hover + .capsule,
+.rowSelected .capsule {
+  color: var(--vh-text);
 }
 
 .capsuleCompact {
@@ -112,9 +192,44 @@
   white-space: nowrap;
 }
 
+/* The chip is the one thing inside the row that takes its own clicks. Negative
+ * margins give it a hit area without moving the sub-line a pixel. */
+.toolChip {
+  pointer-events: auto;
+  margin: -2px -7px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: var(--vh-radius-pill);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--dur-state) var(--ease-out), color var(--dur-state) var(--ease-out);
+}
+.toolChip:hover {
+  background: var(--vh-surface-2);
+  color: var(--vh-text);
+}
+.toolChip:hover .toolGlyph {
+  color: var(--vh-text);
+}
+
+/* On = inverted, the same way an active badge reads elsewhere. Ink and paper swap;
+ * no hue enters, and the filter is unmistakable at a glance across the list. */
+.toolChipOn,
+.toolChipOn:hover {
+  background: var(--vh-accent);
+  color: var(--vh-on-accent);
+}
+.toolChipOn .toolGlyph,
+.toolChipOn:hover .toolGlyph {
+  color: var(--vh-on-accent);
+}
+
 .toolGlyph {
   flex: none;
   color: var(--vh-text-faint);
+  transition: color var(--dur-state) var(--ease-out);
 }
 
 .tokens {
@@ -155,6 +270,92 @@
   line-height: 18px;
   font-weight: 500;
   color: var(--vh-live);
+}
+
+/* ---- the per-tool detail (round 8) ----
+ *
+ * `grid-template-rows: 0fr → 1fr` is the height animation: the content's natural
+ * height is never measured, so nothing has to be read back from the DOM and the row
+ * can hold any number of tools. The inner element carries the `overflow: hidden` and
+ * `min-height: 0` the trick needs; it also fades, so opening reads as a reveal rather
+ * than a wipe. Under `prefers-reduced-motion` the global override in motion.css zeroes
+ * both durations and it simply appears.
+ *
+ * A left rule instead of an indent matched to the capsule: the capsule is 120px on a
+ * preview row and 34px on a revealed one, and a detail that shifted sideways with it
+ * would look like two different components.
+ */
+.detail {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-state) var(--ease-out), opacity var(--dur-state) var(--ease-out);
+}
+.detailOpen {
+  grid-template-rows: 1fr;
+}
+
+.detailInner {
+  overflow: hidden;
+  min-height: 0;
+  opacity: 0;
+  transition: opacity var(--dur-press) var(--ease-out);
+}
+.detailOpen .detailInner {
+  opacity: 1;
+}
+
+.toolLines {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 14px;
+  border-left: 1px solid var(--vh-border);
+  list-style: none;
+}
+
+.toolLine {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px var(--vh-space-3);
+  padding: 5px 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-dim);
+}
+
+.toolLineName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--vh-text);
+}
+
+/* Right-aligned with a floor width so the three numbers line up down the block
+ * without a grid the mobile layout would have to undo. */
+.toolLineHours,
+.toolLineTokens,
+.toolLineLast {
+  flex: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.toolLineHours {
+  min-width: 66px;
+  font-family: var(--vh-font-mono);
+}
+
+.toolLineTokens {
+  min-width: 96px;
+  color: var(--vh-text-faint);
+}
+
+.toolLineLast {
+  min-width: 122px;
+  color: var(--vh-text-faint);
 }
 
 /* ---- disclosure ---- */
@@ -247,5 +448,15 @@
     gap: 8px;
     text-align: left;
     flex-wrap: wrap;
+  }
+  /* The three numbers stop reserving column widths and simply wrap under the tool. */
+  .toolLineHours,
+  .toolLineTokens,
+  .toolLineLast {
+    min-width: 0;
+    text-align: left;
+  }
+  .toolLineName {
+    flex: 1 0 100%;
   }
 }
