@@ -81,7 +81,11 @@
 .ring-sm .number {
   fill: var(--vh-text);
 }
-.numberOnPlate {
+/* Same specificity as `.ring-sm .number` and declared after it — otherwise the sm
+ * badge at ink/solid tiers painted the number in the plate's own colour and a
+ * level-40+ account read as a blank disc (prod, round 7 verify). */
+.numberOnPlate,
+.ring-sm .numberOnPlate {
   fill: var(--vh-on-accent);
 }
 

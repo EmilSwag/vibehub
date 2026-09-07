@@ -2,7 +2,15 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { TrackerDevice, TrackerSource, TrackerStatus as TrackerStatusData } from "../types";
-import { formatActiveTime, formatTokens, humanizeModel, modelFamily, toolFamily, toolLabel } from "../lib/format";
+import {
+  formatActiveTime,
+  formatTokens,
+  humanizeModel,
+  modelFamily,
+  presenceParts,
+  toolFamily,
+  toolLabel,
+} from "../lib/format";
 import { stagger } from "../lib/motion";
 import { modelRowLabel } from "../lib/recentModels";
 import { sumToday } from "../lib/sources";
@@ -115,6 +123,101 @@ function SourceRow({ source, now, index }: { source: TrackerSource; now: number;
   );
 }
 
+/* ---- Title ---- */
+
+/** One phrase for the state of *my* tracker. "Tracking works" is the only one
+ *  painted in --vh-live. An account that has heartbeated before but is silent now
+ *  reads "Tracker offline", not "waiting for activity" — the tracker is what
+ *  stopped, and that is what the person needs to know (round-7 prod pass). */
+export function trackerTitle(status: TrackerStatusData): string {
+  if (status.presence.status === "active") return "Tracking works";
+  if (status.presence.status === "idle") return "Connected — idle";
+  return status.lastSeenAt ? "Tracker offline" : "Connected — waiting for activity";
+}
+
+/* ---- Strip ----
+ * What Home keeps once the explainer has been dismissed: one line that answers
+ * "is anything being tracked right now?" without a click, so it never hides itself.
+ *
+ *   ● Tracking works    in vibehub · ⌥ Cursor · ✦ Claude Sonnet 5 · for 12m     1.6k tokens · 34m today   Tracker settings
+ *   ● Tracker offline   last heartbeat 2h ago                                   1.6k tokens · 34m today   Tracker settings
+ *
+ * Same dot, same title, same counter as the panel above — a smaller cut of the
+ * same thing, not a second design. Wraps to two rows under 640px. */
+
+export interface TrackingStripProps {
+  status: TrackerStatusData;
+  settingsHref?: string;
+  className?: string;
+}
+
+export function TrackingStrip({ status, settingsHref, className }: TrackingStripProps) {
+  const now = useNow(true, 5000);
+  const presence = status.presence;
+  const live = presence.status === "active";
+  const activity = presence.status !== "offline" ? presence.activity : null;
+  const parts = activity ? presenceParts(activity, now) : null;
+  const today = sumToday(status.sources);
+  const heartbeat = status.lastSeenAt ? `last heartbeat ${agoShort(status.lastSeenAt, now)}` : "no heartbeat yet";
+
+  return (
+    <Card className={cx(styles.strip, className)} data-live={live || undefined} aria-label="Your tracker">
+      <StatusDot status={presence.status} pulse={live} size={10} className={styles.stripDot} />
+
+      <div className={styles.stripMain}>
+        <strong className={cx(styles.title, live && styles.titleLive)}>{trackerTitle(status)}</strong>
+        {activity && parts ? (
+          <span className={styles.stripActivity}>
+            <span className={styles.stripIn}>in</span>
+            <span className={styles.stripProject}>{parts.project}</span>
+            <span className={styles.sep} aria-hidden="true">
+              ·
+            </span>
+            <ToolGlyph family={toolFamily(activity.tool)} size={13} className={styles.rowGlyph} />
+            <span>{parts.tool}</span>
+            {parts.model && (
+              <>
+                <span className={styles.sep} aria-hidden="true">
+                  ·
+                </span>
+                <ModelGlyph family={modelFamily(activity.model)} size={13} className={styles.rowGlyph} />
+                <span className={styles.stripModel}>{parts.model}</span>
+              </>
+            )}
+            {live && (
+              <span className={styles.stripElapsed}>
+                {parts.elapsed === "just now" ? "just now" : `for ${parts.elapsed}`}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className={styles.meta}>{heartbeat}</span>
+        )}
+      </div>
+
+      <span className={styles.stripRight}>
+        <span className={styles.stripCounter}>
+          <span className={styles.stripValue}>
+            {today.estimated ? "~" : ""}
+            {formatTokens(today.tokens)}
+          </span>
+          <span className={styles.counterUnit}>tokens</span>
+          <span className={styles.sep} aria-hidden="true">
+            ·
+          </span>
+          <span className={styles.stripValue}>{formatActiveTime(today.activeSeconds)}</span>
+          <span className={styles.counterUnit}>today</span>
+        </span>
+        {settingsHref && (
+          <Link to={settingsHref} className={styles.link}>
+            Tracker settings
+          </Link>
+        )}
+      </span>
+    </Card>
+  );
+}
+
 /* ---- Panel ---- */
 
 export interface TrackingStatusProps {
@@ -213,9 +316,7 @@ export function TrackingStatus({
       <div className={styles.head}>
         <StatusDot status={status.presence.status} pulse={live} size={10} className={styles.headDot} />
         <div className={styles.headText}>
-          <strong className={cx(styles.title, live && styles.titleLive)}>
-            {live ? "Tracking works" : "Connected — waiting for activity"}
-          </strong>
+          <strong className={cx(styles.title, live && styles.titleLive)}>{trackerTitle(status)}</strong>
           <span className={styles.meta}>
             {heartbeat} · {everyLabel(status.heartbeatIntervalMs)}
           </span>

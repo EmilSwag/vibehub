@@ -145,7 +145,9 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
         textAnchor="middle"
         fontFamily="var(--vh-font-mono)"
         fontWeight={600}
-        fontSize={22}
+        // Three digits at 22 span ~36 of the plate's 40 units and kiss its edge;
+        // 17 keeps "100" inside the plate with the same margin two digits get.
+        fontSize={level >= 100 ? 17 : 22}
       >
         {level}
       </text>

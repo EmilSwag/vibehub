@@ -164,6 +164,102 @@
   color: var(--vh-text-dim);
 }
 
+/* ---- strip ----
+ * The one-line cut of the panel Home keeps after "Got it". Same dot, title and
+ * counter sizes as above; details sit on the title's baseline row and the counter
+ * hugs the right edge. Under 640px the right column drops under the text. */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.stripDot {
+  flex: none;
+}
+
+.stripMain {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.stripActivity {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+.stripIn {
+  color: var(--vh-text-faint);
+}
+
+.stripProject {
+  font-weight: 500;
+  color: var(--vh-text);
+}
+
+.stripModel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stripElapsed {
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.stripRight {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 16px;
+  white-space: nowrap;
+}
+
+.stripCounter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stripValue {
+  font-family: var(--vh-font-mono);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--vh-text);
+}
+
+@media (max-width: 640px) {
+  .strip {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .stripMain {
+    flex-basis: calc(100% - 22px);
+  }
+  .stripRight {
+    flex-basis: 100%;
+    justify-content: space-between;
+    padding-left: 22px;
+  }
+}
+
 /* ---- footer ---- */
 
 .footer {

@@ -21,7 +21,7 @@ import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
 import { Skeleton } from "./ui/Skeleton";
 import { ConnectCelebration } from "./ui/ConnectCelebration";
-import { DeviceList, TrackingStatus } from "./TrackingStatus";
+import { DeviceList, TrackingStatus, TrackingStrip } from "./TrackingStatus";
 import { useNow } from "./ui/PresenceBlock";
 import styles from "./ConnectTools.module.css";
 
@@ -51,7 +51,10 @@ const OSES: { id: InstallOs; label: string }[] = [
 ];
 
 type Copyable = "prompt" | "command" | "token";
-type Phase = "loading" | "waiting" | "connected";
+/** "offline" = this account has heartbeated before but its tracker is silent now.
+ *  It must not fall back to the connect card: that reads as "not connected" and
+ *  mints tokens nobody needs. It gets the status panel/strip saying so instead. */
+type Phase = "loading" | "waiting" | "connected" | "offline";
 
 function detectOs(): InstallOs {
   return /Win/i.test(navigator.platform) || /Windows/i.test(navigator.userAgent) ? "windows" : "mac";
@@ -175,8 +178,16 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
   const [celebrating, setCelebrating] = useState(false);
   const [seen, setSeen] = useState(() => (userId ? hasSeenTracking(userId) : false));
 
-  const phase: Phase = status ? (status.connected ? "connected" : "waiting") : "loading";
+  const phase: Phase = !status
+    ? "loading"
+    : status.connected
+      ? "connected"
+      : status.lastSeenAt
+        ? "offline"
+        : "waiting";
   const connected = phase === "connected";
+  // Panel and strip show for anyone who has ever heartbeated; only a blank account gets the card.
+  const everConnected = connected || phase === "offline";
 
   const refresh = useCallback(async () => {
     try {
@@ -215,9 +226,10 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     return () => window.clearInterval(id);
   }, [phase, refresh]);
 
-  // Poll every 10s while connected and the panel is actually on screen (tab
-  // visible, not dismissed). A dismissed Home banner relies on realtime alone.
-  const panelVisible = connected && !(isBanner && seen);
+  // Poll every 10s while the panel or the Home strip is on screen and the tab is
+  // visible. Both show "last heartbeat" and today's counter, which realtime
+  // pushes alone would let drift.
+  const panelVisible = everConnected;
   useEffect(() => {
     if (!panelVisible) return;
     let id: number | undefined;
@@ -358,8 +370,12 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
   // Exit transitions: the card leaves first, then the panel reveals in its place.
   const showCard = phase === "waiting";
   const { render: renderCard, closing: cardClosing } = useExitTransition(showCard, EXIT_MS);
-  const showPanel = connected && !(isBanner && seen) && !renderCard;
+  const showPanel = everConnected && !(isBanner && seen) && !renderCard;
   const { render: renderPanel, closing: panelClosing } = useExitTransition(showPanel, EXIT_MS);
+  // Home never goes blank once a tracker has talked to us: after "Got it" the
+  // panel folds into a one-line strip that stays. That line is how the person
+  // knows, on every visit, whether anything is being tracked right now.
+  const showStrip = isBanner && everConnected && seen && !renderCard && !renderPanel;
 
   const now = useNow(variant === "full" && phase === "waiting", 5000);
 
@@ -481,6 +497,10 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
           }
           error={error}
         />
+      )}
+
+      {showStrip && status && (
+        <TrackingStrip status={status} settingsHref="/settings#tracker" className={cx(styles.bannerSpacing, "reveal")} />
       )}
 
       {celebration}
