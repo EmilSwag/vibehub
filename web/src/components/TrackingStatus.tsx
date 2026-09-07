@@ -173,15 +173,19 @@ export function TrackingStrip({ status, settingsHref, className }: TrackingStrip
             <span className={styles.sep} aria-hidden="true">
               ·
             </span>
-            <ToolGlyph family={toolFamily(activity.tool)} size={13} className={styles.rowGlyph} />
-            <span>{parts.tool}</span>
+            <span className={styles.stripPair}>
+              <ToolGlyph family={toolFamily(activity.tool)} size={13} className={styles.rowGlyph} />
+              <span>{parts.tool}</span>
+            </span>
             {parts.model && (
               <>
                 <span className={styles.sep} aria-hidden="true">
                   ·
                 </span>
-                <ModelGlyph family={modelFamily(activity.model)} size={13} className={styles.rowGlyph} />
-                <span className={styles.stripModel}>{parts.model}</span>
+                <span className={styles.stripPair}>
+                  <ModelGlyph family={modelFamily(activity.model)} size={13} className={styles.rowGlyph} />
+                  <span className={styles.stripModel}>{parts.model}</span>
+                </span>
               </>
             )}
             {live && (

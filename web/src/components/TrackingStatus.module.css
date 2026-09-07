@@ -201,6 +201,15 @@
   color: var(--vh-text-dim);
 }
 
+/* A glyph and its label move as one word — no orphaned glyph at a line's end. */
+.stripPair {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .stripIn {
   color: var(--vh-text-faint);
 }
@@ -248,7 +257,12 @@
 @media (max-width: 640px) {
   .strip {
     flex-wrap: wrap;
+    align-items: flex-start;
     row-gap: 8px;
+  }
+  /* Same offset as .headDot: the dot marks the title line, not the block's middle. */
+  .stripDot {
+    margin-top: 5px;
   }
   .stripMain {
     flex-basis: calc(100% - 22px);
