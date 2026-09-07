@@ -3,6 +3,7 @@ import { API_BASE, usersApi } from "../lib/api";
 import { buildInstallCommand } from "../lib/connectPrompt";
 import type { InstallOs } from "../lib/connectPrompt";
 import {
+  claimConnectCelebration,
   clearStoredConnectToken,
   deviceLabel,
   detectOs,
@@ -25,12 +26,12 @@ import styles from "./ConnectTools.module.css";
 
 const WEB_URL = window.location.origin;
 
-// Shown once per browser session, on either surface (Home banner or Settings) —
-// whichever notices the connection first. Level-triggered ("is connected and
-// hasn't been celebrated yet") so a connection made on another page still gets
-// its moment here; gated below so a returning, already-explained account isn't
-// congratulated again every new tab.
-const CELEBRATED_KEY = "vh-connect-celebrated";
+// The celebration shows once per user per tab, on whichever surface notices the
+// connection first (Home banner, Settings, or the sheet). Level-triggered ("is
+// connected and hasn't been celebrated yet") so a connection made on another page still
+// gets its moment here. The gate itself is `claimConnectCelebration` in lib/connectToken
+// — shared with ConnectSheet, and keyed by user id so switching accounts in one tab
+// still celebrates.
 
 const POLL_WAITING_MS = 5_000;
 const POLL_CONNECTED_MS = 10_000;
@@ -244,17 +245,13 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     void refresh();
   }, [me, refresh]);
 
-  // Celebration — once per session, on the flip (or on first landing while the
-  // explainer hasn't been seen yet).
+  // Celebration — once per user per tab, on the flip (or on first landing while the
+  // explainer hasn't been seen yet). No user id yet means auth is still loading; the
+  // effect re-runs when it arrives, so the moment is delayed rather than lost.
   useEffect(() => {
-    if (!connected) return;
-    if (!sawFlipRef.current && userId && hasSeenTracking(userId)) return;
-    try {
-      if (sessionStorage.getItem(CELEBRATED_KEY)) return;
-      sessionStorage.setItem(CELEBRATED_KEY, "1");
-    } catch {
-      /* private mode — still celebrate this once */
-    }
+    if (!connected || !userId) return;
+    if (!sawFlipRef.current && hasSeenTracking(userId)) return;
+    if (!claimConnectCelebration(userId)) return;
     setCelebrating(true);
   }, [connected, userId]);
 

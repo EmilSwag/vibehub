@@ -4,12 +4,20 @@ import { createPortal } from "react-dom";
 import { API_BASE } from "../../lib/api";
 import { buildConnectPrompt, buildInstallCommand } from "../../lib/connectPrompt";
 import type { ConnectPromptTarget, InstallOs } from "../../lib/connectPrompt";
-import { deviceLabel, detectOs, ensureConnectToken, readStoredConnectToken } from "../../lib/connectToken";
+import {
+  claimConnectCelebration,
+  deviceLabel,
+  detectOs,
+  ensureConnectToken,
+  readStoredConnectToken,
+} from "../../lib/connectToken";
 import type { StoredConnectToken } from "../../lib/connectToken";
 import { useExitTransition } from "../../lib/motion";
 import { formatElapsed, useTrackerPing } from "../../lib/useTrackerPing";
 import { toolLabel } from "../../lib/format";
 import { useAuth } from "../../context/AuthContext";
+import { agoShort } from "../TrackingStatus";
+import type { TrackerStatus } from "../../types";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
@@ -18,9 +26,6 @@ import styles from "./ConnectSheet.module.css";
 
 const WEB_URL = window.location.origin;
 const EXIT_MS = 200;
-
-/** Shared with ConnectTools so a connection made here is not congratulated twice. */
-const CELEBRATED_KEY = "vh-connect-celebrated";
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
@@ -95,6 +100,22 @@ function Segment<T extends string>({
       ))}
     </div>
   );
+}
+
+/**
+ * Offline on a machine that already has the tracker. Without this line the sheet reads
+ * as a first-time install, and the likeliest fix — open your editor — never gets
+ * suggested. Returns null for a genuinely new account, which sees exactly what it saw
+ * before: no devices, no line.
+ */
+function installedNote(status: TrackerStatus | null): string | null {
+  if (!status || status.presence.status !== "offline" || status.devices.length === 0) return null;
+  // The device that pinged last is the one they are looking at. A server that dated
+  // none leaves the first, which is still better than naming no machine at all.
+  const dated = status.devices.filter((d) => d.lastUsedAt).sort((a, b) => (a.lastUsedAt! < b.lastUsedAt! ? 1 : -1));
+  const device = (dated[0] ?? status.devices[0]).label;
+  const last = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt)}` : "no ping yet";
+  return `Already installed on ${device} — ${last}. Opening your editor usually brings it back — or reinstall below.`;
 }
 
 /* ---- step 2 ---- */
@@ -277,16 +298,12 @@ export function ConnectSheet({ open, onClose }: Props) {
   // to see it. That case rests on the finished step list instead.
   useEffect(() => {
     if (ping.stage !== "live" || ping.liveAtOpen) return;
-    try {
-      if (!sessionStorage.getItem(CELEBRATED_KEY)) {
-        sessionStorage.setItem(CELEBRATED_KEY, "1");
-        setCelebrating(true);
-      }
-    } catch {
-      setCelebrating(true);
-    }
+    // Shared, per-user gate: whichever surface sees the connection first celebrates, and
+    // the other does not repeat it. Closing is unconditional — the sheet is finished
+    // either way.
+    if (userId && claimConnectCelebration(userId)) setCelebrating(true);
     onClose();
-  }, [ping.stage, ping.liveAtOpen, onClose]);
+  }, [ping.stage, ping.liveAtOpen, userId, onClose]);
 
   // ---- modal mechanics ----
   useEffect(() => {
@@ -340,6 +357,7 @@ export function ConnectSheet({ open, onClose }: Props) {
   if (!render) return celebration;
 
   const showProgress = ping.stage !== "idle";
+  const installed = installedNote(ping.status);
 
   return createPortal(
     <>
@@ -364,6 +382,10 @@ export function ConnectSheet({ open, onClose }: Props) {
           </header>
 
           <div className={styles.body}>
+            {/* Context before the choice, not wedged between the step title and its
+                control. No box — one border per block, and this is a sentence. */}
+            {installed && <p className={styles.installed}>{installed}</p>}
+
             <div className={styles.step}>
               <h3 className={styles.stepTitle}>Pick how you work</h3>
               <Segment label="How you work" options={HOWS} value={how} onChange={setHow} />

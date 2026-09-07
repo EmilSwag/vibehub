@@ -37,6 +37,7 @@ export function deviceLabel(os: InstallOs): string {
 
 const TOKEN_PREFIX = "vh-connect-token:";
 const SEEN_PREFIX = "vh-tracking-seen:";
+const CELEBRATED_PREFIX = "vh-connect-celebrated:";
 
 function storage(): Storage | null {
   try {
@@ -172,4 +173,39 @@ export function hasSeenTracking(userId: string): boolean {
 
 export function markTrackingSeen(userId: string): void {
   write(SEEN_PREFIX + userId, "1");
+}
+
+/* ---- "Already celebrated this connection" gate (once per user, per tab) ---- */
+
+function sessionStore(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True the first time a given account's connection is observed in this tab, false
+ * afterwards — the gate on the "All connected." celebration.
+ *
+ * Keyed by user id: an unscoped key meant signing out and into a second account in the
+ * same tab silently swallowed that account's moment. Session-scoped, not local, because
+ * the celebration is a per-tab event; a new tab celebrating again is the intent.
+ *
+ * Both callers (ConnectTools' status watcher and ConnectSheet's completion) go through
+ * here, so the two gates cannot drift apart. When storage throws — private mode — it
+ * returns true, which keeps today's behaviour of celebrating once rather than never.
+ */
+export function claimConnectCelebration(userId: string): boolean {
+  const store = sessionStore();
+  if (!store) return true;
+  const key = CELEBRATED_PREFIX + userId;
+  try {
+    if (store.getItem(key) === "1") return false;
+    store.setItem(key, "1");
+    return true;
+  } catch {
+    return true;
+  }
 }

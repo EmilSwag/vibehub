@@ -136,6 +136,16 @@
   overflow-y: auto;
 }
 
+/* Offline on a machine that already has the tracker. Faint, no box, no icon — it is
+ * context for the choice below, not a warning about it. */
+.installed {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
+}
+
 /* ---- a step ---- */
 
 .step {
