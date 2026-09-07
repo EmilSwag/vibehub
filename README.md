@@ -44,7 +44,8 @@ vibehub/
 ├── server/         Express + Prisma API + WebSocket (Postgres, SQLite in dev)
 ├── web/            React + Vite SPA, monochrome design system
 ├── tracker/        vibehub-tracker — local CLI, Discord-Rich-Presence-style heartbeats
-├── macos/          Swift menu-bar companion app
+├── macos/          Swift menu-bar companion app (reads the tracker's local status.json)
+├── menubar-mac/    SwiftUI menu-bar app (reads the server — see "macOS menu bar" below)
 └── assets/branding/
 ```
 
@@ -101,6 +102,25 @@ For the macOS companion (WIP):
 cd macos
 swift run   # no Xcode project needed for local iteration
 ```
+
+## macOS menu bar
+
+[`menubar-mac/`](menubar-mac/) is a SwiftUI menu-bar app (macOS 13+, no dependencies)
+that shows your presence, today's active time, tokens and level, and which friends are
+online — polling `GET /api/v1/tracker/me` with a tracker token from the Keychain. It
+needs no local tracker daemon, so it works from any Mac.
+
+```bash
+cd menubar-mac
+swift run              # local iteration
+./scripts/bundle.sh    # signed .app + zip in dist/
+```
+
+Prebuilt zips come from the `menubar-mac` GitHub Actions workflow. See
+[`menubar-mac/README.md`](menubar-mac/README.md) for install and first-run steps.
+
+> Not to be confused with `macos/`, the earlier companion that reads the tracker's local
+> `~/.vibehub/status.json` instead of the server.
 
 ## Deploying to Railway
 

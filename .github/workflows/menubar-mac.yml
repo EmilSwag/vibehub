@@ -1,0 +1,71 @@
+name: menubar-mac
+
+# Path filter is repo-relative: this repo's root IS `vibehub`, so the folder is
+# `menubar-mac/`, not `vibehub/menubar-mac/`.
+#
+# Tag note: a `menubar-v*` tag only starts this workflow when the tagged commit also
+# touches one of the paths below. Cutting a release normally does (the version lives in
+# menubar-mac/Resources/Info.plist); if you ever tag an untouched commit, run the
+# workflow by hand with workflow_dispatch.
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'menubar-v*'
+    paths:
+      - 'menubar-mac/**'
+      - '.github/workflows/menubar-mac.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: menubar-mac
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Build and bundle
+        run: |
+          chmod +x scripts/bundle.sh
+          ./scripts/bundle.sh
+
+      - name: Verify the bundle
+        run: |
+          APP="dist/VibeHub MenuBar.app"
+          test -x "$APP/Contents/MacOS/VibeHubMenuBar"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          plutil -lint "$APP/Contents/Info.plist"
+          # LSUIElement is what keeps it out of the Dock — assert it survived bundling.
+          test "$(plutil -extract LSUIElement raw -o - "$APP/Contents/Info.plist")" = "true"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeHub-MenuBar-macOS
+          path: menubar-mac/dist/VibeHub-MenuBar-macOS.zip
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/menubar-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/VibeHub-MenuBar-macOS.zip" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "VibeHub menu-bar companion for macOS 13+.
+
+          Unzip, drag to /Applications, then right-click → Open the first time (the build is ad-hoc signed, not notarised)."
