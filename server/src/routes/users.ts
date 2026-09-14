@@ -345,6 +345,12 @@ const HEARTBEAT_INTERVAL_MS = 30_000; // tracker default HEARTBEAT_INTERVAL_MS (
 const SOURCE_WINDOW_DAYS = 7;
 const SOURCE_EVENT_LIMIT = 400;
 const TOOLS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * How long a revoked token's last rejected attempt counts as "a tracker is still
+ * running with it". 10 min = the presence offline threshold, and comfortably above
+ * the slowest tick observed in the wild (a 30 s loop taking 150 s on Windows).
+ */
+const STALE_TRACKER_WINDOW_MS = 10 * 60 * 1000;
 
 interface TrackerSource {
   tool: string;
@@ -368,7 +374,7 @@ router.get(
     const since7d = new Date(today.getTime() - (SOURCE_WINDOW_DAYS - 1) * 86_400_000);
     const since30d = new Date(now.getTime() - TOOLS_WINDOW_MS);
 
-    const [tokens, sessions, latestHeartbeat, dailyStats, events, presence] = await Promise.all([
+    const [tokens, sessions, latestHeartbeat, dailyStats, events, presence, staleToken] = await Promise.all([
       prisma.trackerToken.findMany({
         where: { userId, revokedAt: null },
         select: { id: true, label: true, lastUsedAt: true, createdAt: true },
@@ -393,6 +399,15 @@ router.get(
         select: { occurredAt: true, payload: true },
       }),
       presenceFor(userId, req.user!.username),
+      // A revoked token still being presented to /tracker/heartbeat (middleware/auth.ts
+      // records the attempt): a daemon somewhere kept running after the user rotated or
+      // revoked its token. Newest attempt wins; anything older than the window is a
+      // daemon that has since stopped or been re-logged.
+      prisma.trackerToken.findFirst({
+        where: { userId, revokedAt: { not: null }, lastRejectedAt: { gte: new Date(now.getTime() - STALE_TRACKER_WINDOW_MS) } },
+        select: { label: true, lastRejectedAt: true, revokedAt: true },
+        orderBy: { lastRejectedAt: "desc" },
+      }),
     ]);
 
     const tokenLastUsedAt = tokens.reduce<Date | null>(
@@ -467,6 +482,13 @@ router.get(
       presence: { status: presence.status, activity: presence.activity, tools: presence.tools },
       sources: [...sources.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()),
       devices: tokens.map((t) => ({ id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt })),
+      // Round 10: a daemon still heartbeating with a revoked token in the last 10 min.
+      // The web shows it only while `connected` is false — a second machine may
+      // legitimately hold an old token while this one is fine.
+      staleTracker:
+        staleToken && staleToken.lastRejectedAt && staleToken.revokedAt
+          ? { lastRejectedAt: staleToken.lastRejectedAt, label: staleToken.label, revokedAt: staleToken.revokedAt }
+          : null,
     });
   })
 );

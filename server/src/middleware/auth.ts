@@ -68,6 +68,9 @@ export const requireUserOrToken = asyncHandler(async (req: Request, _res: Respon
   next();
 });
 
+/** Revoked-token attempts are recorded at most this often per token (see below). */
+const REJECTED_WRITE_THROTTLE_MS = 60_000;
+
 export const requireTrackerToken = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
   const header = req.header("authorization");
   if (!header?.startsWith("Bearer ")) throw new HttpError(401, "Missing bearer token");
@@ -75,6 +78,19 @@ export const requireTrackerToken = asyncHandler(async (req: Request, _res: Respo
   const raw = header.slice("Bearer ".length).trim();
   const tokenHash = hashToken(raw);
   const token = await prisma.trackerToken.findUnique({ where: { tokenHash } });
+  if (token?.revokedAt) {
+    // A daemon still heartbeating with a token the user revoked. Without this the
+    // UI has nothing to show but "Offline" — every request is a 401 and no session
+    // is written. Recording the attempt lets /users/me/tracker say "a tracker on
+    // your machine still uses an old token" (round 10, live PO state). Throttled so
+    // a 30 s heartbeat doesn't become one write per beat; best-effort by design.
+    const stale = !token.lastRejectedAt || Date.now() - token.lastRejectedAt.getTime() > REJECTED_WRITE_THROTTLE_MS;
+    if (stale) {
+      await prisma.trackerToken
+        .update({ where: { id: token.id }, data: { lastRejectedAt: new Date() } })
+        .catch(() => undefined);
+    }
+  }
   if (!token || token.revokedAt) throw new HttpError(401, "Invalid or revoked tracker token");
 
   await prisma.trackerToken.update({ where: { id: token.id }, data: { lastUsedAt: new Date() } });

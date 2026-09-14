@@ -222,6 +222,8 @@ model TrackerToken {
   label      String
   lastUsedAt DateTime?
   revokedAt  DateTime?
+  /// Last time this token was presented to the heartbeat endpoint AFTER being revoked (a tracker still running with it).
+  lastRejectedAt DateTime?
   createdAt  DateTime  @default(now())
 
   @@map("tracker_tokens")
