@@ -2381,18 +2381,18 @@ var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(req
     } catch {
       return [];
     }
-    let known = this.offsets.get(file);
-    if (known === void 0)
+    let known2 = this.offsets.get(file);
+    if (known2 === void 0)
       return this.offsets.set(file, size), [];
-    if (size < known)
+    if (size < known2)
       return this.offsets.set(file, 0), this.partial.delete(file), this.readNewLines(file);
-    if (size === known) return [];
-    let length = size - known, maxChunk = this.options.maxChunkBytes ?? Number.POSITIVE_INFINITY;
+    if (size === known2) return [];
+    let length = size - known2, maxChunk = this.options.maxChunkBytes ?? Number.POSITIVE_INFINITY;
     if (length > maxChunk)
       return this.offsets.set(file, size), this.partial.delete(file), [];
     let buf = Buffer.alloc(length), fd = null;
     try {
-      fd = import_node_fs.default.openSync(file, "r"), import_node_fs.default.readSync(fd, buf, 0, length, known);
+      fd = import_node_fs.default.openSync(file, "r"), import_node_fs.default.readSync(fd, buf, 0, length, known2);
     } catch {
       return [];
     } finally {
@@ -3303,15 +3303,27 @@ function settleWithin(p, ms) {
     p.then(done, done);
   });
 }
-function runLoop(config, options = {}) {
-  let state = createLoopState(config), intervalMs = heartbeatIntervalMs(config), inFlight = null, stopRequestSeen = !1, checkStopRequest = () => stopRequestSeen ? !0 : isStopRequested() ? (stopRequestSeen = !0, console.log("tracker: stop requested (stop.request found)"), options.onStopRequest?.(), !0) : !1, safeTick = () => {
+var LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"];
+function refreshConfig(active, loaded) {
+  if (!loaded || typeof loaded.apiUrl != "string" || !loaded.apiUrl) return { config: active, changed: [] };
+  if (typeof loaded.deviceToken != "string" || !loaded.deviceToken) return { config: active, changed: [] };
+  let next = { ...loaded, projectAliases: loaded.projectAliases ?? {} }, changed = LIVE_FIELDS.filter(
+    (field) => field === "projectAliases" ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {}) : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : next[field] !== active[field]
+  );
+  return changed.length > 0 ? { config: next, changed: [...changed] } : { config: active, changed: [] };
+}
+function runLoop(initialConfig, options = {}) {
+  let loadConfig = options.loadConfig ?? readConfig, runTick = options.runTick ?? tick, config = initialConfig, state = createLoopState(config), intervalMs = heartbeatIntervalMs(config), inFlight = null, stopRequestSeen = !1, adoptCurrentConfig = () => {
+    let refreshed = refreshConfig(config, loadConfig());
+    return refreshed.changed.length > 0 && console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`), config = refreshed.config, config;
+  }, checkStopRequest = () => stopRequestSeen ? !0 : isStopRequested() ? (stopRequestSeen = !0, console.log("tracker: stop requested (stop.request found)"), options.onStopRequest?.(), !0) : !1, safeTick = () => {
     if (state.stopping || checkStopRequest()) return;
     if (inFlight) {
       console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
       return;
     }
     let startedAt = Date.now();
-    inFlight = tick(config, state).catch((err) => {
+    inFlight = runTick(adoptCurrentConfig(), state).catch((err) => {
       console.error("tracker: heartbeat tick failed:", err);
     }).finally(() => {
       inFlight = null;
@@ -3325,6 +3337,17 @@ function runLoop(config, options = {}) {
     clearInterval(interval), clearInterval(stopWatch), state.stopping = !0, inFlight && await settleWithin(inFlight, IN_FLIGHT_GRACE_MS), state.activeSession && (await endActiveSession(config, state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), state.activeSession = null), writeOfflineStatus(), clearStopRequest();
   } };
 }
+
+// src/staleDaemon.ts
+var known = (value) => typeof value == "number" && Number.isFinite(value);
+function isStaleDaemon(inputs) {
+  let { binMtimeMs, startedAtMs, configMtimeMs, authRejected } = inputs;
+  return known(startedAtMs) ? known(binMtimeMs) && binMtimeMs > startedAtMs ? "older-build" : authRejected && known(configMtimeMs) && configMtimeMs > startedAtMs ? "revoked-token" : null : null;
+}
+var STALE_DAEMON_EXPLANATION = {
+  "older-build": "it is running an older build of the tracker than the one installed on this machine",
+  "revoked-token": "the server is rejecting its token and it has never read the newer one in config.json"
+};
 
 // src/daemon.ts
 var STOP_WAIT_MS = 8e3, STOP_POLL_MS = 200, sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
@@ -3342,11 +3365,39 @@ function daemonStatus() {
   let pid = readPid();
   return pid === null ? { running: !1, pid: null } : { running: isProcessAlive(pid), pid };
 }
-function startDaemon(entryPath) {
+function fileMtimeMs(filePath) {
+  try {
+    return fs6.statSync(filePath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+function staleDaemonInputs(entryPath) {
+  let startedAt = readJson(PID_PATH)?.startedAt, startedAtMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  return {
+    binMtimeMs: fileMtimeMs(entryPath),
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : null,
+    configMtimeMs: fileMtimeMs(CONFIG_PATH),
+    authRejected: readStatus().authRejected === !0
+  };
+}
+function reportAlreadyRunning(pid) {
+  console.log(`Tracker is already running (pid ${pid}).`), readStatus().authRejected === !0 && (console.log("Connected: no - the server rejects its token."), console.log("  Fix: run the install command from VibeHub (Settings > Tracker) again, then `start`."));
+}
+async function startDaemon(entryPath) {
   let existing = daemonStatus();
   if (existing.running) {
-    console.log(`Tracker is already running (pid ${existing.pid}).`);
-    return;
+    let stale = isStaleDaemon(staleDaemonInputs(entryPath));
+    if (!stale) {
+      reportAlreadyRunning(existing.pid);
+      return;
+    }
+    console.log(`Tracker is running (pid ${existing.pid}), but ${STALE_DAEMON_EXPLANATION[stale]}.`), console.log("Replacing it."), await stopDaemon();
+    let after = daemonStatus();
+    if (after.running) {
+      console.error(`Could not stop the old tracker (pid ${after.pid}); it is still running. Nothing was changed.`);
+      return;
+    }
   }
   ensureConfigDir(), clearStopRequest();
   let pid = process.platform === "win32" ? spawnDetachedWindows(entryPath) : null;
@@ -3481,6 +3532,8 @@ program2.command("login <deviceToken>").description(`validate the token with the
     toolProcessNames: existing?.toolProcessNames
   };
   writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) \u2014 saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
+  let daemon = daemonStatus();
+  daemon.running && (console.log(`Tracker is running (pid ${daemon.pid}): it picks up this token within 30 s.`), console.log("Run `start` anyway - it replaces a tracker started from an older build."));
 });
 program2.command("set <projectFolder> <alias>").description(`remap a project folder's display alias, or hide it with the literal "${HIDDEN}"`).action((projectFolder, alias) => {
   let config = requireConfig();
@@ -3488,8 +3541,8 @@ program2.command("set <projectFolder> <alias>").description(`remap a project fol
     alias === HIDDEN ? `"${projectFolder}" will be hidden from presence.` : `"${projectFolder}" will be shown as "${alias}".`
   );
 });
-program2.command("start").description("poll for active coding-tool processes and send heartbeats").action(() => {
-  requireConfig(), startDaemon(path7.resolve(__filename));
+program2.command("start").description("poll for active coding-tool processes and send heartbeats").action(async () => {
+  requireConfig(), await startDaemon(path7.resolve(__filename));
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {
   if (!readConfig()) {

@@ -3,7 +3,9 @@ import { Console } from "node:console";
 import * as fs from "node:fs";
 import { readConfig } from "./config";
 import { runLoop, sendOrQueue } from "./heartbeat";
-import { ensureConfigDir, LOG_PATH, PID_PATH, readJson, removeFile, writeJsonAtomic } from "./paths";
+import { CONFIG_PATH, ensureConfigDir, LOG_PATH, PID_PATH, readJson, removeFile, writeJsonAtomic } from "./paths";
+import { isStaleDaemon, STALE_DAEMON_EXPLANATION } from "./staleDaemon";
+import type { StaleDaemonInputs } from "./staleDaemon";
 import { readStatus, writeOfflineStatus } from "./statusFile";
 import { clearStopRequest, requestStop } from "./stopRequest";
 import type { TrackerConfig } from "./types";
@@ -40,16 +42,70 @@ export function daemonStatus(): { running: boolean; pid: number | null } {
   return { running: isProcessAlive(pid), pid };
 }
 
+function fileMtimeMs(filePath: string): number | null {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/** Everything `isStaleDaemon` judges a running daemon by, read off this machine. */
+function staleDaemonInputs(entryPath: string): StaleDaemonInputs {
+  const startedAt = readJson<PidFile>(PID_PATH)?.startedAt;
+  const startedAtMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  return {
+    binMtimeMs: fileMtimeMs(entryPath),
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : null,
+    configMtimeMs: fileMtimeMs(CONFIG_PATH),
+    authRejected: readStatus().authRejected === true,
+  };
+}
+
+/**
+ * Round 10, T2: what `start` says about a healthy daemon it is leaving alone.
+ *
+ * "Already running" on its own was the end of the road for a user whose token had
+ * been revoked: the daemon was running, so `start` had nothing to add, and the
+ * failure lived only in `status`. If the server is rejecting the token the daemon
+ * is using, say so here — this is where the user is looking.
+ */
+function reportAlreadyRunning(pid: number | null): void {
+  console.log(`Tracker is already running (pid ${pid}).`);
+  if (readStatus().authRejected !== true) return;
+  // ASCII only: this lands in cp866/1252 consoles where an em dash or arrow prints as "?".
+  console.log("Connected: no - the server rejects its token.");
+  console.log("  Fix: run the install command from VibeHub (Settings > Tracker) again, then `start`.");
+}
+
 /**
  * Spawns a detached copy of the CLI running the hidden `run-loop` command,
  * which stays resident and performs the actual polling/heartbeat work. This
  * process (the `start` command) writes the pid file and returns immediately.
+ *
+ * Round 10, T3: a daemon that is already running is normally left strictly alone —
+ * except when it is demonstrably stale (older build, or rejecting a token config.json
+ * has already replaced; see staleDaemon.ts). Then it is stopped cooperatively and a
+ * fresh one takes its place, because the user typed `start` and a process that cannot
+ * do the job is not a reason to refuse. The installer gets no such power: it is
+ * setup-only by contract and never calls this.
  */
-export function startDaemon(entryPath: string): void {
+export async function startDaemon(entryPath: string): Promise<void> {
   const existing = daemonStatus();
   if (existing.running) {
-    console.log(`Tracker is already running (pid ${existing.pid}).`);
-    return;
+    const stale = isStaleDaemon(staleDaemonInputs(entryPath));
+    if (!stale) {
+      reportAlreadyRunning(existing.pid);
+      return;
+    }
+    console.log(`Tracker is running (pid ${existing.pid}), but ${STALE_DAEMON_EXPLANATION[stale]}.`);
+    console.log("Replacing it.");
+    await stopDaemon();
+    const after = daemonStatus();
+    if (after.running) {
+      console.error(`Could not stop the old tracker (pid ${after.pid}); it is still running. Nothing was changed.`);
+      return;
+    }
   }
 
   ensureConfigDir();

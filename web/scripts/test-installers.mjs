@@ -128,6 +128,36 @@ for (const [file, label, lifecycle, patterns] of [
 }
 
 // ---------------------------------------------------------------------------
+// 1b. install.ps1 encoding and first output (round 10, W1/W2).
+//
+// Both of these are invisible in a diff and both broke a real install:
+//   - the file shipped with a UTF-8 BOM, and the documented way to run it is
+//     `irm … | iex`, which hands PowerShell a string — the BOM arrives welded to
+//     the first token and every install opened with a red parser error.
+//   - nothing was printed until the download finished, so an agent terminal sat
+//     silent for ~6 s with no way to tell setup from a hang.
+// ---------------------------------------------------------------------------
+
+section("install.ps1 — encoding and first output");
+{
+  const raw = readFileSync(PS1);
+  check(!(raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf), "install.ps1: no UTF-8 BOM (`irm | iex` parses the first token)");
+  const nonAscii = raw.findIndex((b) => b > 0x7f);
+  check(
+    nonAscii === -1,
+    "install.ps1: pure ASCII (a BOM-less .ps1 is decoded through PS 5.1's codepage)",
+    nonAscii === -1 ? null : `byte 0x${raw[nonAscii].toString(16)} at offset ${nonAscii}`,
+  );
+  // "First statement" is the whole point: anything above it runs while the console
+  // is still blank.
+  const firstStatement = readFileSync(PS1, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l !== "" && !l.startsWith("#"));
+  check(/^Write-Host\b/.test(firstStatement ?? ""), "install.ps1: the very first statement prints something", `first statement: ${JSON.stringify(firstStatement)}`);
+}
+
+// ---------------------------------------------------------------------------
 // 2. Sandbox runs.
 // ---------------------------------------------------------------------------
 
@@ -208,7 +238,9 @@ const readLog = (log) =>
 // response the blocked event loop can never send.
 const run = (cmd, args, opts = {}) =>
   new Promise((resolve) => {
-    const child = spawn(cmd, args, { env: opts.env, windowsHide: true });
+    // opts.stdin defaults to "pipe" (left open) — every case above was written
+    // against that. "ignore" hands the child a closed stdin; see runPs1ViaIex.
+    const child = spawn(cmd, args, { env: opts.env, windowsHide: true, stdio: [opts.stdin ?? "pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -293,25 +325,77 @@ function runSh({ home, log }, { token = TOKEN, reject = false, pathOverride = nu
   })();
 }
 
-function runPs1({ home, log }, { token = TOKEN, reject = false, pathOverride = null } = {}) {
+function ps1Env({ home, log }, { token = TOKEN, reject = false, pathOverride = null } = {}) {
+  const env = {
+    ...process.env,
+    USERPROFILE: home,
+    HOMEDRIVE: home.slice(0, 2),
+    HOMEPATH: home.slice(2),
+    // PowerShell writes its own caches (ModuleAnalysisCache, PSReadLine history) under
+    // these. Left alone, the -Command cases drop a `Microsoft/Windows/PowerShell/`
+    // tree into whatever the cwd happens to be — i.e. into the repo. Point them at the
+    // throwaway HOME so the sandbox really does contain everything the run writes.
+    LOCALAPPDATA: join(home, "AppData", "Local"),
+    APPDATA: join(home, "AppData", "Roaming"),
+    VIBEHUB_TEST_LOG: log,
+    VIBEHUB_WEB_URL: ORIGIN,
+    VIBEHUB_API_URL: ORIGIN,
+  };
+  delete env.VIBEHUB_TOKEN;
+  if (token) env.VIBEHUB_TOKEN = token;
+  if (reject) env.VIBEHUB_TEST_REJECT = "1";
+  if (pathOverride) env.PATH = pathOverride;
+  return env;
+}
+
+/** Guard: never run the installer unless $HOME really points at the sandbox. */
+async function assertSandboxHome(env, home) {
+  const probe = (await run("powershell", ["-NoProfile", "-Command", "Write-Host -NoNewline $HOME"], { env })).stdout;
+  if (probe !== home) throw new Error(`sandbox HOME did not take effect (got ${probe}); refusing to run install.ps1`);
+}
+
+function runPs1(box, opts = {}) {
   return (async () => {
-    const env = {
-      ...process.env,
-      USERPROFILE: home,
-      HOMEDRIVE: home.slice(0, 2),
-      HOMEPATH: home.slice(2),
-      VIBEHUB_TEST_LOG: log,
-      VIBEHUB_WEB_URL: ORIGIN,
-      VIBEHUB_API_URL: ORIGIN,
-    };
-    delete env.VIBEHUB_TOKEN;
-    if (token) env.VIBEHUB_TOKEN = token;
-    if (reject) env.VIBEHUB_TEST_REJECT = "1";
-    if (pathOverride) env.PATH = pathOverride;
-    const probe = (await run("powershell", ["-NoProfile", "-Command", "Write-Host -NoNewline $HOME"], { env })).stdout;
-    if (probe !== home) throw new Error(`sandbox HOME did not take effect (got ${probe}); refusing to run install.ps1`);
+    const env = ps1Env(box, opts);
+    await assertSandboxHome(env, box.home);
     // -NoProfile -File only. No -ExecutionPolicy flag, by design.
     return run("powershell", ["-NoProfile", "-File", PS1], { env });
+  })();
+}
+
+/**
+ * install.ps1 the way the connect sheet actually tells people to run it:
+ * `irm <url>/tracker/install.ps1 | iex`.
+ *
+ * The decode is deliberate and load-bearing. Invoke-RestMethod hands PowerShell a
+ * *string*, and a UTF-8 BOM survives that decode as a literal U+FEFF welded to the
+ * first token. `Get-Content -Raw` would strip the BOM and make this test vacuous;
+ * reading the bytes and running them through UTF8.GetString reproduces what the
+ * network path produces, byte for byte.
+ *
+ * The error IDs are dumped afterwards because this machine class renders PowerShell
+ * errors in the user's display language — the rendered text is not something a test
+ * can match on. `FullyQualifiedErrorId` is not localised.
+ */
+function runPs1ViaIex(box, opts = {}) {
+  return (async () => {
+    const env = ps1Env(box, opts);
+    await assertSandboxHome(env, box.home);
+    const command = [
+      `$src = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes('${PS1.replace(/'/g, "''")}'));`,
+      "$Error.Clear();",
+      "Invoke-Expression $src;",
+      "foreach ($e in $Error) { [Console]::Error.WriteLine('VH_ERRID: ' + $e.FullyQualifiedErrorId) }",
+    ].join(" ");
+    // stdin closed, and that is not a detail. With a BOM, line 1 parses as a command
+    // whose `(PowerShell)` argument launches a NESTED PowerShell; given an open stdin
+    // pipe it waits for input forever, so the run times out with zero bytes on both
+    // streams and every assertion below — including the CommandNotFoundException one —
+    // passes vacuously on an empty string. A closed stdin gives the nested shell EOF,
+    // which is what the real `irm | iex` run does (the round-10 measurement: exit 0 in
+    // 7.2 s, install completes, red CommandNotFoundException first on stderr). Measured
+    // here: open stdin -> 45 s timeout, 0 bytes; closed stdin -> the real failure.
+    return run("powershell", ["-NoProfile", "-Command", command], { env, stdin: "ignore" });
   })();
 }
 
@@ -354,6 +438,18 @@ function assertFailedHonestly(label, box, res, { expectDownload = null, expectLo
     check(existsSync(trackerBin(box.home)) === expectDownload, `${label}: download ${expectDownload ? "happened" : "was not reached"}`);
   }
   check(readFileSync(join(box.home, ".vibehub", "tracker.pid"), "utf8") === "999999", `${label}: an already-running daemon is left untouched`);
+}
+
+/**
+ * The runtime half of W2: whatever else a run does, its first line of output is the
+ * banner — proving the print really is the first statement and not merely present
+ * somewhere in the file. Asserted on a successful run and on the earliest-failing
+ * one, so no branch can slip back to a silent start.
+ */
+const PS1_BANNER = /^->\s+VibeHub tracker setup$/;
+function assertAnnouncesItself(label, res) {
+  const firstLine = `${res.stdout}`.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
+  check(PS1_BANNER.test(firstLine.trim()), `${label}: announces itself before doing any work`, `first line of stdout: ${JSON.stringify(firstLine)}`);
 }
 
 /** Pull the start/status/stop commands out of what the installer printed. */
@@ -438,6 +534,7 @@ for (const [name, runInstaller, available, shell, noNodePath, shimKind] of [
   let box = freshSandbox();
   let res = await runInstaller(box);
   assertSetupOnly(`${name} happy path`, box, res);
+  if (name === "install.ps1") assertAnnouncesItself(`${name} happy path`, res);
   await assertPrintedCommandsRun(`${name} happy path`, box, res, shell);
 
   box = freshSandbox({ spaced: true });
@@ -471,7 +568,48 @@ for (const [name, runInstaller, available, shell, noNodePath, shimKind] of [
   check(/18\+ is required/.test(`${oldRes.stdout}${oldRes.stderr}`), `${name} node older than 18: says 18+ is required`, `${oldRes.stderr}`.trim().slice(0, 200));
 
   box = freshSandbox();
-  assertFailedHonestly(`${name} missing token`, box, await runInstaller(box, { token: "" }), { expectDownload: false });
+  const noTokenRes = await runInstaller(box, { token: "" });
+  assertFailedHonestly(`${name} missing token`, box, noTokenRes, { expectDownload: false });
+  // The earliest possible exit: if the banner is there too, nothing runs ahead of it.
+  if (name === "install.ps1") assertAnnouncesItself(`${name} missing token`, noTokenRes);
+}
+
+// ---------------------------------------------------------------------------
+// 3. install.ps1 through `iex` — the invocation the product actually ships.
+//
+// Everything above runs install.ps1 with `-NoProfile -File`, and -File is blind to
+// the defect this path has: PowerShell strips a UTF-8 BOM when it reads a script
+// *file*, so a BOM'd install.ps1 passed every -File case in this suite while every
+// real Windows user got, as their first line of output,
+//   ?# : The term "?#" is not recognized as the name of a cmdlet...
+// Measured on this machine, against install.ps1 with a BOM prepended:
+//   iex (irm-style decode)  -> CommandNotFoundException in stderr
+//   -File                   -> nothing
+// which is exactly why the round-10 BOM shipped for months. So the sheet's own
+// invocation gets its own case.
+//
+// Not gated on ps1Blocked: `iex` of a string is not a script file, so execution
+// policy does not apply to it — which is part of why the product ships this form.
+// ---------------------------------------------------------------------------
+
+section("install.ps1 — through `iex`, the way the connect sheet runs it");
+if (!pwshOk) {
+  console.log("  skip (no powershell on this machine)");
+} else {
+  serveMode = "tracker";
+  const box = freshSandbox();
+  const res = await runPs1ViaIex(box);
+  const stderr = `${res.stderr}`;
+  check(
+    !/CommandNotFoundException/.test(stderr),
+    "install.ps1 via iex: no CommandNotFoundException (a UTF-8 BOM produces one here, and only here)",
+    stderr.trim().slice(0, 300),
+  );
+  // assertSetupOnly covers the "OK Installed." line, exit 0, and the setup-only
+  // contract on this branch too — the pattern scan alone never executed it.
+  assertSetupOnly("install.ps1 via iex", box, res);
+  assertAnnouncesItself("install.ps1 via iex", res);
+  await assertPrintedCommandsRun("install.ps1 via iex", box, res, "powershell");
 }
 
 server.close();

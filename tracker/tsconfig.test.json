@@ -1,0 +1,10 @@
+{
+  // Typecheck the unit tests with the same strictness as the sources, without
+  // emitting them into dist/ (the shipped build is tsconfig.json's `include: ["src"]`).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src", "test"]
+}

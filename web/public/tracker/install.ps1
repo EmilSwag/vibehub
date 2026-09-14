@@ -1,4 +1,4 @@
-﻿# VibeHub tracker - setup-only install for Windows (PowerShell).
+# VibeHub tracker - setup-only install for Windows (PowerShell).
 #
 #   $env:VIBEHUB_TOKEN="<TRACKER_TOKEN>"; irm https://web-production-da778.up.railway.app/tracker/install.ps1 | iex
 #
@@ -17,6 +17,19 @@
 #
 # Once you do start it, the tracker reads only local AI-tool logs and window
 # titles; no code, prompts or diffs ever leave your machine.
+#
+# ENCODING: ASCII, no BOM, and it has to stay that way. This file is normally run
+# as `irm ... | iex`, which hands PowerShell a string, not a file - a UTF-8 BOM
+# arrives as U+FEFF glued to the first token and the parser opens with a red
+# `?# : The term "?#" is not recognized...` before anything else happens. Pure
+# ASCII is decoded identically under every Windows codepage, so the BOM that used
+# to be here (for em-dashes that are long gone) bought nothing and cost that.
+# web/scripts/normalize-eol.mjs --check fails the build if either rule is broken.
+
+# First statement on purpose: `irm | iex` prints nothing at all until this line
+# runs, and the download below takes seconds on a cold link. A silent console is
+# indistinguishable from a hung one - especially inside an AI agent's terminal.
+Write-Host "-> VibeHub tracker setup"
 $ErrorActionPreference = "Stop"
 
 $Token  = $env:VIBEHUB_TOKEN

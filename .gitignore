@@ -30,7 +30,7 @@ vite.config.ts.timestamp-*
 !/reports/round7-report.html
 
 # agent/IDE local state
-.claude/settings.local.json
+**/.claude/settings.local.json
 .quadcodeai/
 
 # macOS SwiftPM

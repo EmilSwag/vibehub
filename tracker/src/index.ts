@@ -81,6 +81,15 @@ program
       console.log(`Could not verify with the server right now (${verified.detail}) — saved anyway.`);
       console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected.");
     }
+
+    // Round 10, T2: a daemon that is already running is the case where a fresh
+    // token looks like it did nothing. Say what happens next instead of letting
+    // the user assume `login` was enough — or that it wasn't.
+    const daemon = daemonStatus();
+    if (daemon.running) {
+      console.log(`Tracker is running (pid ${daemon.pid}): it picks up this token within 30 s.`);
+      console.log("Run `start` anyway - it replaces a tracker started from an older build.");
+    }
   });
 
 program
@@ -100,9 +109,9 @@ program
 program
   .command("start")
   .description("poll for active coding-tool processes and send heartbeats")
-  .action(() => {
+  .action(async () => {
     requireConfig();
-    startDaemon(path.resolve(__filename));
+    await startDaemon(path.resolve(__filename));
   });
 
 program

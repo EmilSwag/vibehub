@@ -1,4 +1,4 @@
-import { heartbeatIntervalMs, idleThresholdMs } from "./config";
+import { heartbeatIntervalMs, idleThresholdMs, readConfig } from "./config";
 import { Detector } from "./detector";
 import type { Detection, DetectionUsage, SeenSource } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
@@ -453,6 +453,63 @@ export interface RunLoopOptions {
    * `stop()` and exit — see daemon.ts's runForeground.
    */
   onStopRequest?: () => void;
+  /**
+   * Reads `~/.vibehub/config.json` before every tick (round 10, T1). Defaults to the
+   * real reader; injected by tests so a config swap can be driven without touching a
+   * real home directory.
+   */
+  loadConfig?: () => TrackerConfig | null;
+  /** The per-tick work. Defaults to `tick`; injected by tests. */
+  runTick?: (config: TrackerConfig, state: LoopState) => Promise<void>;
+}
+
+/** What `refreshConfig` decided: the config to tick with, and what actually moved. */
+export interface ConfigRefresh {
+  config: TrackerConfig;
+  /** Names of the fields that changed, for the log line. Empty when nothing did. */
+  changed: string[];
+}
+
+/**
+ * Fields a live daemon adopts between ticks. These are exactly the ones `tick`
+ * re-reads from its `config` argument every time it runs; anything else
+ * (`heartbeatIntervalMs`, which set the interval timer, and the detector's active
+ * window, fixed when its adapters were constructed) still needs a restart, so
+ * claiming them here would be a lie.
+ */
+const LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"] as const;
+
+/**
+ * Round 10, T1. `runLoop(config)` used to close over the config it was handed at
+ * spawn, which made a running daemon unreachable: `login` wrote a fresh token to
+ * config.json and the daemon kept heartbeating the old one — 401 on every tick,
+ * "Offline" on the site, no way to fix it short of knowing to stop the daemon
+ * first. So the loop re-reads config.json before every tick and this decides what
+ * to do with what came back.
+ *
+ * A missing, unreadable, half-written or credential-less file is NOT a reason to
+ * start heartbeating with nothing: the last known-good config is kept and the next
+ * tick tries again. Otherwise the file wins wholesale — it is written whole by
+ * `writeConfig`, so a field dropped from it is meant to fall back to its default.
+ *
+ * Pure: takes the loaded value rather than reading the file, so the swap is unit
+ * tested (test/runLoopConfig.test.ts) rather than only reachable at runtime.
+ */
+export function refreshConfig(active: TrackerConfig, loaded: TrackerConfig | null): ConfigRefresh {
+  if (!loaded || typeof loaded.apiUrl !== "string" || !loaded.apiUrl) return { config: active, changed: [] };
+  if (typeof loaded.deviceToken !== "string" || !loaded.deviceToken) return { config: active, changed: [] };
+
+  const next: TrackerConfig = { ...loaded, projectAliases: loaded.projectAliases ?? {} };
+  const changed = LIVE_FIELDS.filter((field) =>
+    field === "projectAliases"
+      ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {})
+      : field === "idleThresholdMs"
+        ? idleThresholdMs(next) !== idleThresholdMs(active)
+        : next[field] !== active[field]
+  );
+  // Nothing moved: keep the object identity the loop already has, so a caller can
+  // tell "same config" from "same values, new object".
+  return changed.length > 0 ? { config: next, changed: [...changed] } : { config: active, changed: [] };
 }
 
 /**
@@ -463,12 +520,32 @@ export interface RunLoopOptions {
  * fires (a slow process listing), the new tick is skipped rather than stacked —
  * otherwise a 54 s poll on a 30 s interval piles up concurrent ticks that all send
  * stale-dated payloads.
+ *
+ * `initialConfig` is a starting point, not a snapshot: config.json is re-read before
+ * every tick, so a `login` run while this daemon is alive reaches it (see
+ * refreshConfig for which fields that covers, and which still need a restart).
  */
-export function runLoop(config: TrackerConfig, options: RunLoopOptions = {}): { stop: () => Promise<void> } {
+export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = {}): { stop: () => Promise<void> } {
+  const loadConfig = options.loadConfig ?? readConfig;
+  const runTick = options.runTick ?? tick;
+  // Not const: T1's whole point is that this is replaced, in place, by whatever
+  // config.json says before each tick.
+  let config = initialConfig;
   const state = createLoopState(config);
   const intervalMs = heartbeatIntervalMs(config);
   let inFlight: Promise<void> | null = null;
   let stopRequestSeen = false;
+
+  /** Re-reads config.json and adopts it for this tick. Never throws: readConfig returns null. */
+  const adoptCurrentConfig = (): TrackerConfig => {
+    const refreshed = refreshConfig(config, loadConfig());
+    if (refreshed.changed.length > 0) {
+      // Deliberately does not name the value: a device token must not reach the log.
+      console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`);
+    }
+    config = refreshed.config;
+    return config;
+  };
 
   const checkStopRequest = (): boolean => {
     if (stopRequestSeen) return true;
@@ -486,7 +563,7 @@ export function runLoop(config: TrackerConfig, options: RunLoopOptions = {}): { 
       return;
     }
     const startedAt = Date.now();
-    inFlight = tick(config, state)
+    inFlight = runTick(adoptCurrentConfig(), state)
       .catch((err) => {
         console.error("tracker: heartbeat tick failed:", err);
       })
