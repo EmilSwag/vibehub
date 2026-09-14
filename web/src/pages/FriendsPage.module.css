@@ -48,11 +48,15 @@
   min-width: 0;
 }
 
+ /* 8px here + 8px on .row = the same 16px gutter FriendListItem rows use, and
+  * it keeps the hover tint an inset rounded highlight rather than a full bleed. */
 .card {
-  padding: 0;
+  padding: var(--vh-space-2);
 }
-/* Divided friend rows: they own their padding; corners clip the hover tint. */
+/* Divided friend rows: they own their padding and bleed to the card edge;
+ * corners clip the hover tint. */
 .listCard {
+  padding: 0;
   overflow: hidden;
 }
 .cardHot {
@@ -80,7 +84,10 @@
 }
 
 .unfriendBtn {
-  padding: 0;
+  /* Negative margin keeps the 16px line box the row is laid out around while the
+   * hit area reaches 32px — the floor for a thumb. */
+  padding: 8px 4px;
+  margin: -8px -4px;
   background: none;
   border: none;
   color: var(--vh-text-faint);
@@ -100,7 +107,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 6px;
+  padding: 10px var(--vh-space-2);
   border-radius: var(--vh-radius-sm);
   border-bottom: 1px solid var(--vh-border);
   transition: background-color var(--dur-press) var(--ease-out);
@@ -120,8 +127,11 @@
   color: inherit;
   text-decoration: none;
 }
+ /* Must grow: without it the column is only as wide as the name, and .rowMeta's
+  * percentage cap below resolves against that instead of the row. */
 .rowText {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -134,10 +144,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Role suffix ellipsizes before the buttons do — the 96px is their reserve. */
+/* Role suffix ellipsizes before the buttons do; .rowActions is flex: none, so the
+ * buttons have already taken their width out of the row before this box is sized. */
 .rowMeta {
   display: block;
-  max-width: calc(100% - 96px);
+  max-width: 100%;
   font-size: 12.5px;
   color: var(--vh-text-muted);
   white-space: nowrap;
@@ -176,7 +187,9 @@
 }
 
 @media (max-width: 720px) {
+  /* Two sm buttons are 142px together — they fit next to an ellipsized name, and
+   * stacking them used to put Decline on top of Accept. */
   .rowActions {
-    flex-direction: column;
+    gap: 4px;
   }
 }

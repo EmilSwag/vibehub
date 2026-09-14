@@ -2,7 +2,7 @@
  * TrackingStatus — the connected half of ConnectTools: what is connected and
  * whether it is tracking. One ui/Card, hairline dividers between sections, no
  * boxes inside boxes. Two text sizes: 15px title, 13px everything else. The live
- * green (--vh-live) paints the dot (StatusDot) and the "Tracking works" title,
+ * green (--vh-live) paints the dot (StatusDot) and the "Connected" title,
  * nothing else. Enter/leave motion is the global .reveal/.leave utility applied
  * by the wrapper — nothing here names a motion.css keyframe (CSS Modules would
  * hash the reference and the animation would never play).
@@ -109,6 +109,24 @@
   flex-direction: column;
 }
 
+/* "+N more" under a capped Models list on Home. A quiet text control, sized for a
+ * thumb without adding a row's worth of height to the block. */
+.more {
+  align-self: flex-start;
+  padding: 8px 0;
+  margin-top: -2px;
+  background: none;
+  border: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  color: var(--vh-text-dim);
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.more:hover {
+  color: var(--vh-text);
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -131,7 +149,18 @@
   color: var(--vh-text-dim);
 }
 
+/* Despite the name this carries the *model* (SourceRow passes `modelRowLabel`), and a
+ * model name has no length limit — "Claude Opus 5 Preview Extended Thinking Maximum"
+ * is a real one. `white-space: nowrap` alone left it unshrinkable: a flex item's
+ * automatic minimum size is its max-content width, so at 390px it held 312px inside a
+ * 308px row, `.rowModel` next to it collapsed to zero, and the 12px tool mark between
+ * them hung 9px past the viewport — enough to scroll the whole page sideways.
+ * min-width: 0 is what actually lets it shrink; the ellipsis is what makes that
+ * readable. Same three properties `.rowModel` has always had. */
 .rowTool {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
   white-space: nowrap;
 }

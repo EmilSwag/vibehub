@@ -39,7 +39,7 @@ export function StepRole({ user, onSaved, onBack, onNext }: Props) {
   return (
     <div className={styles.step}>
       <h1 className={styles.title}>What do you make?</h1>
-      <p className={styles.lead}>Pick everything that fits — most of us wear a few hats.</p>
+      <p className={styles.lead}>Pick everything that fits.</p>
 
       <div className={[styles.roleGrid, "stagger"].join(" ")} role="group" aria-label="Roles">
         {ROLES.map((r, i) => {

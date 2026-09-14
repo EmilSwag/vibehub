@@ -62,6 +62,10 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  /* Centre the step in whatever height is left instead of pinning it to the top:
+   * every step is shorter than the screen, and the gap all landed underneath. */
+  justify-content: center;
+  padding-bottom: 40px;
 }
 
 .step {
@@ -106,8 +110,22 @@
   margin-top: 28px;
 }
 
+/* "Back" anchors left. On the connect step the forward action is also a text link,
+ * and with both pushed right the two read as one ambiguous pair. */
+.actions > .linkButton:first-child {
+  margin-right: auto;
+}
+
 .actionsCenter {
   justify-content: center;
+}
+
+/* Identity is the one step whose control is narrower than the stage (.field caps at
+ * 340px), so its button row has to share that column or it hangs 90px past the
+ * input's right edge. */
+.actionsField {
+  width: 100%;
+  max-width: 340px;
 }
 
 .linkButton {

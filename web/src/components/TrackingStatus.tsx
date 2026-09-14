@@ -41,6 +41,11 @@ export function agoShort(iso: string, now: number = Date.now()): string {
 
 const everyLabel = (ms: number) => `every ${Math.max(1, Math.round(ms / 1000))}s`;
 
+/** Rows the Home panel shows before "+N more" takes over. Settings is the full
+ *  explainer and always lists everything; Home is a banner, and an account with a
+ *  dozen (tool, model) pairs turned it into a page-long wall. */
+const HOME_SOURCE_ROWS = 5;
+
 /* ---- Devices (shared with the not-connected card in ConnectTools) ---- */
 
 interface DeviceListProps {
@@ -125,22 +130,22 @@ function SourceRow({ source, now, index }: { source: TrackerSource; now: number;
 
 /* ---- Title ---- */
 
-/** One phrase for the state of *my* tracker. "Tracking works" is the only one
- *  painted in --vh-live. An account that has heartbeated before but is silent now
- *  reads "Tracker offline", not "waiting for activity" — the tracker is what
- *  stopped, and that is what the person needs to know (round-7 prod pass). */
+/** One word per state, and the same word everywhere it appears. "Connected" is the
+ *  only one painted in --vh-live. An account that has heartbeated before but is silent
+ *  now reads "Offline", not "Waiting…" — the tracker is what stopped, and that is what
+ *  the person needs to know (round-7 prod pass). */
 export function trackerTitle(status: TrackerStatusData): string {
-  if (status.presence.status === "active") return "Tracking works";
-  if (status.presence.status === "idle") return "Connected — idle";
-  return status.lastSeenAt ? "Tracker offline" : "Connected — waiting for activity";
+  if (status.presence.status === "active") return "Connected";
+  if (status.presence.status === "idle") return "Idle";
+  return status.lastSeenAt ? "Offline" : "Waiting…";
 }
 
 /* ---- Strip ----
  * What Home keeps once the explainer has been dismissed: one line that answers
  * "is anything being tracked right now?" without a click, so it never hides itself.
  *
- *   ● Tracking works    in vibehub · ⌥ Cursor · ✦ Claude Sonnet 5 · for 12m     1.6k tokens · 34m today   Tracker settings
- *   ● Tracker offline   last heartbeat 2h ago                                   1.6k tokens · 34m today   Tracker settings
+ *   ● Connected   in vibehub · ⌥ Cursor · ✦ Claude Sonnet 5 · for 12m          1.6k tokens · 34m today   Tracker settings
+ *   ● Offline     last heartbeat 2h ago                                        1.6k tokens · 34m today   Tracker settings
  *
  * Same dot, same title, same counter as the panel above — a smaller cut of the
  * same thing, not a second design. Wraps to two rows under 640px. */
@@ -260,13 +265,13 @@ export interface TrackingStatusProps {
  * and what the celebration layer leaves behind, showing the same two numbers so the
  * panel is never a blank frame after the fireworks stop.
  *
- *   ● Tracking works                       ← green only here (dot + title)
+ *   ● Connected                            ← green only here (dot + title)
  *     last heartbeat 12s ago · every 30s
  *   Today          1.2k tokens · 34m active
  *   Now            Online · in vibehub · Claude Code · Claude Fable 5.1 · for 12m
  *   Models         ✦ Claude Fable 5.1 · ⌘ Claude Code       160 today · 12s ago
  *   Devices        Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1)
- *   Leaves your machine: … Never code, prompts or diffs.     [Got it]
+ *   Sends tool, model, project name … Never code, prompts or diffs.   [Got it]
  *
  * Relative times re-render every 5s. The wrapper owns polling and realtime.
  */
@@ -284,8 +289,12 @@ export function TrackingStatus({
   className,
 }: TrackingStatusProps) {
   const now = useNow(status !== null, 5000);
+  const [allSources, setAllSources] = useState(false);
 
   if (!status) {
+    // Shape-matched, section for section: head, Today, Now, a full Models list and
+    // the footer. Two rows and no footer left a ~440px jump when the status landed,
+    // and this panel is the first thing on Home — everything under it moved.
     return (
       <Card className={cx(styles.panel, className)} aria-busy="true">
         <div className={styles.head}>
@@ -302,10 +311,11 @@ export function TrackingStatus({
         <div className={styles.section}>
           <Skeleton width={30} height={12} />
           <Skeleton width="55%" height={13} />
+          <Skeleton width="40%" height={13} />
         </div>
         <div className={styles.section}>
           <Skeleton width={54} height={12} />
-          {[0, 1].map((i) => (
+          {Array.from({ length: HOME_SOURCE_ROWS }, (_, i) => (
             <div key={i} className={styles.row}>
               <span className={styles.rowMain}>
                 <Skeleton variant="circle" width={14} />
@@ -317,6 +327,27 @@ export function TrackingStatus({
             </div>
           ))}
         </div>
+        <div className={styles.section}>
+          <Skeleton width={54} height={12} />
+          {[0, 1].map((i) => (
+            <div key={i} className={styles.row}>
+              <span className={styles.rowMain}>
+                <Skeleton width="28%" height={13} />
+              </span>
+              <span className={styles.rowRight}>
+                <Skeleton width={82} height={12} />
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className={styles.footer}>
+          <div className={styles.privacy}>
+            <Skeleton width="82%" height={12} />
+          </div>
+          <div className={styles.actions}>
+            <Skeleton width={96} height={38} />
+          </div>
+        </div>
       </Card>
     );
   }
@@ -325,6 +356,8 @@ export function TrackingStatus({
   const offline = status.presence.status === "offline";
   const running = !offline && status.presence.activity !== null;
   const showDevices = variant === "settings" || status.devices.length > 1;
+  const capSources = variant === "home" && !allSources && status.sources.length > HOME_SOURCE_ROWS;
+  const sources = capSources ? status.sources.slice(0, HOME_SOURCE_ROWS) : status.sources;
   const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
   const today = sumToday(status.sources);
 
@@ -363,31 +396,40 @@ export function TrackingStatus({
         {running ? (
           <PresenceBlock presence={status.presence} variant="row" />
         ) : (
-          <span className={styles.dim}>Nothing running right now</span>
+          <span className={styles.dim}>Nothing running</span>
         )}
       </section>
 
       <section className={styles.section} aria-label="Models">
         <span className={styles.label}>Models</span>
         {status.sources.length === 0 ? (
-          <span className={styles.dim}>No activity yet — open your AI tool and start working.</span>
+          <span className={styles.dim}>No activity yet.</span>
         ) : (
-          <div className={cx(styles.rows, "stagger")}>
-            {status.sources.map((s, i) => (
-              <SourceRow key={`${s.tool}|${s.model ?? "no-model"}`} source={s} now={now} index={i} />
-            ))}
-          </div>
+          <>
+            <div className={cx(styles.rows, "stagger")}>
+              {sources.map((s, i) => (
+                <SourceRow key={`${s.tool}|${s.model ?? "no-model"}`} source={s} now={now} index={i} />
+              ))}
+            </div>
+            {variant === "home" && status.sources.length > HOME_SOURCE_ROWS && (
+              <button type="button" className={styles.more} onClick={() => setAllSources((v) => !v)}>
+                {capSources ? `${status.sources.length - HOME_SOURCE_ROWS} more` : "Show fewer"}
+              </button>
+            )}
+          </>
         )}
       </section>
 
       {showDevices && (
         <section className={styles.section} aria-label="Devices">
           <span className={styles.label}>Devices</span>
-          <DeviceList devices={status.devices} now={now} onRevoke={onRevoke} />
+          {/* Home lists devices so a second machine is visible, but revoking one is
+              destructive and belongs with the rest of the tracker controls. */}
+          <DeviceList devices={status.devices} now={now} onRevoke={variant === "settings" ? onRevoke : undefined} />
           {onAddDevice && !addDeviceBlock && (
             <div>
               <Button size="sm" variant="secondary" onClick={onAddDevice} disabled={addingDevice}>
-                {addingDevice ? "Creating…" : "Add another device"}
+                {addingDevice ? "Creating…" : "Add device"}
               </Button>
             </div>
           )}
@@ -399,7 +441,7 @@ export function TrackingStatus({
 
       <footer className={styles.footer}>
         <p className={styles.privacy}>
-          Leaves your machine: tool, model, project name, timestamps, token counts. Never code, prompts or diffs.
+          Sends tool, model, project name, timestamps and token counts. Never code, prompts or diffs.
         </p>
         {(onDismiss || settingsHref || offline) && (
           <div className={styles.actions}>
@@ -409,20 +451,21 @@ export function TrackingStatus({
               </Link>
             )}
             {/* Offline is the one state with something to do about it, so it gets the
-                primary. "Got it" keeps it otherwise — the connected explainer is still
-                the thing being dismissed. */}
-            {offline && onGoOnline && (
-              <Button onClick={onGoOnline} className={styles.primary}>
-                Go online
-              </Button>
-            )}
+                only filled button, and it goes last: rightmost on a desktop row, and
+                topmost once .actions reverses into a column on a phone. "Got it"
+                drops to a quiet ghost beside it rather than competing. */}
             {onDismiss && (
               <Button
                 onClick={onDismiss}
-                variant={offline && onGoOnline ? "secondary" : "primary"}
+                variant={offline && onGoOnline ? "ghost" : "primary"}
                 className={styles.primary}
               >
                 Got it
+              </Button>
+            )}
+            {offline && onGoOnline && (
+              <Button onClick={onGoOnline} className={styles.primary}>
+                Go online
               </Button>
             )}
           </div>

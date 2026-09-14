@@ -102,13 +102,17 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
             {project.repoUrl && (
               <a href={project.repoUrl} target="_blank" rel="noreferrer" className={styles.link}>
                 <Icon name={isGithub ? "github" : "link"} size={14} />
-                {isGithub ? project.repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\/$/, "") : hostOf(project.repoUrl)}
+                <span className={styles.linkLabel}>
+                  {isGithub
+                    ? project.repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\/$/, "")
+                    : hostOf(project.repoUrl)}
+                </span>
               </a>
             )}
             {project.liveUrl && (
               <a href={project.liveUrl} target="_blank" rel="noreferrer" className={styles.link}>
                 <Icon name="external" size={14} />
-                {hostOf(project.liveUrl)}
+                <span className={styles.linkLabel}>{hostOf(project.liveUrl)}</span>
               </a>
             )}
           </div>

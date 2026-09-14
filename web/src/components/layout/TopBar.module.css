@@ -156,8 +156,9 @@
 }
 
 .avatarButton:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 /* ---- Account menu ---- */
@@ -264,6 +265,14 @@
 @media (max-width: 640px) {
   .logoText {
     display: none;
+  }
+  /* With the wordmark gone the link shrinks to the 20px mark — half a thumb.
+   * Pad it out to 40px without moving the mark off the content gutter. */
+  .logo {
+    min-height: 40px;
+    min-width: 40px;
+    margin-left: -10px;
+    padding: 0 10px;
   }
   .inner {
     grid-template-columns: auto 1fr auto;

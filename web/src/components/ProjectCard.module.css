@@ -89,6 +89,14 @@
   background: var(--vh-surface-2);
 }
 
+/* Touch: the like is the card's only tap target and it was 23px tall. */
+@media (pointer: coarse) {
+  .likeBtn {
+    padding: 10px 10px;
+    margin: -6px -2px;
+  }
+}
+
 .liked {
   color: var(--vh-accent);
 }
@@ -198,8 +206,18 @@
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   transition: color var(--dur-press) var(--ease-out);
+}
+/* The glyph is a flex item: without this a long repo path shrank it to 0 wide.
+ * And `text-overflow` never reached the bare text node next to it — a flex
+ * container cannot ellipsize its own anonymous items, so the label needs a box. */
+.link > svg {
+  flex: none;
+}
+.linkLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .links {
   flex-wrap: wrap;

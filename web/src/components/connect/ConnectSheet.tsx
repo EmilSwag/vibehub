@@ -1,19 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { API_BASE } from "../../lib/api";
-import { buildConnectPrompt, buildInstallCommand } from "../../lib/connectPrompt";
+import {
+  BACKGROUND_START_MEANS,
+  buildConnectPrompt,
+  buildInstallCommand,
+  buildStartCommand,
+  buildStatusCommand,
+  buildStopCommand,
+} from "../../lib/connectPrompt";
 import type { ConnectPromptTarget, InstallOs } from "../../lib/connectPrompt";
 import {
   claimConnectCelebration,
   deviceLabel,
   detectOs,
   ensureConnectToken,
-  readStoredConnectToken,
 } from "../../lib/connectToken";
 import type { StoredConnectToken } from "../../lib/connectToken";
 import { useExitTransition } from "../../lib/motion";
 import { formatElapsed, useTrackerPing } from "../../lib/useTrackerPing";
+import { installedNote, shouldCelebrate } from "../../lib/trackerPing";
 import { toolLabel } from "../../lib/format";
 import { useAuth } from "../../context/AuthContext";
 import { agoShort } from "../TrackingStatus";
@@ -47,29 +54,34 @@ const OSES: { id: InstallOs; label: string }[] = [
   { id: "windows", label: "Windows" },
 ];
 
-/** Two lines, maximum. The first says what pasting it does; the second is only there
- *  when there is a real prerequisite. */
+/** One line: what pasting it does. Installing is not starting, and the sheet must not
+ *  promise otherwise. */
 const EXPLAIN: Record<How, string> = {
-  terminal: "Run this in your terminal — it installs the tracker on your machine and starts it",
-  cursor: "Paste this into Cursor's chat — it installs the tracker on your machine and starts it",
-  codex: "Paste this into Codex — it installs the tracker on your machine and starts it",
-  quadcode: "Paste this into Quadcode AI's chat — it installs the tracker on your machine and starts it",
-  "claude-code": "Paste this into Claude Code — it installs the tracker on your machine and starts it",
-  chatgpt: "Paste this into ChatGPT — it walks you through installing the tracker",
+  terminal: "Run in your terminal.",
+  cursor: "Paste into Cursor. It installs, then asks before starting.",
+  codex: "Paste into Codex. It installs, then asks before starting.",
+  quadcode: "Paste into Quadcode AI. It installs, then asks before starting.",
+  "claude-code": "Paste into Claude Code. It installs, then asks before starting.",
+  chatgpt: "Paste into ChatGPT. It walks you through install, then asks before starting.",
 };
 
-const STEPS = [
-  "Copied",
-  "Waiting for the tracker to start on your machine",
-  "First ping received",
-  "Tracking works",
-];
+/** Which command the clipboard last took. Never a claim that it was run. */
+type Copied = "install" | "start" | null;
 
-/** Step one claims the clipboard worked. Two cases where it did not: the browser
- *  refused the write (the command is on screen, the wait is running anyway), and the
- *  deep link arriving on a machine that is already set up and copied nothing. */
-const firstStep = (copied: boolean, liveAtOpen: boolean) =>
-  copied ? STEPS[0] : liveAtOpen ? "Already set up on this machine" : "Command ready — copy it from above";
+/**
+ * Row 0 reports what *this browser* did, and nothing more.
+ *
+ * Copying is not installing and not starting — the command may still be sitting
+ * unpasted in a terminal that was never opened — so the label names the command that
+ * was copied rather than implying it ran. When nothing was copied the browser refused
+ * the clipboard write; the command is on screen and the wait runs anyway.
+ *
+ * There is deliberately no "already set up" branch. This browser cannot know that:
+ * presence says something is pinging *now*, never that an install exists, and a
+ * stored token only proves a token was minted once.
+ */
+const firstStep = (copied: Copied) =>
+  copied === "install" ? "Install copied" : copied === "start" ? "Start copied" : "Copy the command above";
 
 /* ---- segmented picker (same markup and roles as ConnectTools') ---- */
 
@@ -102,22 +114,6 @@ function Segment<T extends string>({
   );
 }
 
-/**
- * Offline on a machine that already has the tracker. Without this line the sheet reads
- * as a first-time install, and the likeliest fix — open your editor — never gets
- * suggested. Returns null for a genuinely new account, which sees exactly what it saw
- * before: no devices, no line.
- */
-function installedNote(status: TrackerStatus | null): string | null {
-  if (!status || status.presence.status !== "offline" || status.devices.length === 0) return null;
-  // The device that pinged last is the one they are looking at. A server that dated
-  // none leaves the first, which is still better than naming no machine at all.
-  const dated = status.devices.filter((d) => d.lastUsedAt).sort((a, b) => (a.lastUsedAt! < b.lastUsedAt! ? 1 : -1));
-  const device = (dated[0] ?? status.devices[0]).label;
-  const last = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt)}` : "no ping yet";
-  return `Already installed on ${device} — ${last}. Opening your editor usually brings it back — or reinstall below.`;
-}
-
 /* ---- step 2 ---- */
 
 function Progress({
@@ -127,42 +123,49 @@ function Progress({
   device,
   tool,
   copied,
-  liveAtOpen,
+  anchor,
 }: {
   stage: "waiting" | "pinged" | "live";
   elapsedMs: number;
   stalled: boolean;
   device: string | null;
   tool: string | null;
-  copied: boolean;
-  liveAtOpen: boolean;
+  copied: Copied;
+  /** The sheet scrolls this into view the first time the block appears. */
+  anchor: RefObject<HTMLDivElement>;
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
-  // "Copied" is done the moment we get here; "First ping received" is done as soon as
-  // one arrives, which is what makes "Tracking works" the active step after it.
-  const done = stage === "waiting" ? 1 : stage === "pinged" ? 3 : STEPS.length;
+  // Three rows, not four: the old list spent two on the same fact (a ping arrived, and
+  // then that it counted). Row 0 is this browser's own business; rows 1 and 2 are the
+  // server's word — a ping the account actually received — never something inferred
+  // from a click.
+  const rows = [firstStep(copied), stage === "waiting" ? "Waiting for first ping…" : "First ping", "Connected"];
+  const done = stage === "waiting" ? 1 : stage === "pinged" ? 2 : 3;
   const active = stage === "live" ? -1 : done;
 
+  // The timer sits on row 1 while waiting; once a ping has landed the same row carries
+  // which device and tool it came from.
   const detail = (i: number) => {
-    if (i === 1 && stage === "waiting") {
+    if (i !== 1) return null;
+    if (stage === "waiting") {
       return (
         <span className={styles.elapsed} aria-label={`${formatElapsed(elapsedMs)} elapsed`}>
           {formatElapsed(elapsedMs)}
         </span>
       );
     }
-    if (i === 2 && device) {
+    if (device) {
       return <span className={styles.stepMeta}>{[device, tool && toolLabel(tool)].filter(Boolean).join(" · ")}</span>;
     }
     return null;
   };
 
   return (
-    <div className={styles.step}>
-      <h3 className={styles.stepTitle}>Pinging your machine</h3>
+    <div className={styles.step} ref={anchor}>
+      <h3 className={styles.stepTitle}>3 · Connecting</h3>
 
       <ol className={styles.progress}>
-        {STEPS.map((label, i) => (
+        {rows.map((label, i) => (
           <li
             key={label}
             className={cx(styles.pstep, i < done && styles.pstepDone, i === active && styles.pstepActive)}
@@ -171,7 +174,7 @@ function Progress({
               {i < done ? <Icon name="check" size={12} /> : <span className={styles.pdot} />}
             </span>
             <span className={styles.plabel}>
-              {i === 0 ? firstStep(copied, liveAtOpen) : label}
+              {label}
               {detail(i)}
             </span>
             {/* 1px indeterminate line, monochrome, only under the step in progress. */}
@@ -188,13 +191,15 @@ function Progress({
             aria-expanded={helpOpen}
             onClick={() => setHelpOpen((v) => !v)}
           >
-            Still waiting — check that the command finished. Common fixes
+            Still waiting? Common fixes
           </button>
           {helpOpen && (
             <ul className={cx(styles.helpList, "fade-in")}>
-              <li>Node.js 18+ has to be installed — the command needs it and stops without it.</li>
-              <li>The token got pasted twice. Run the command once, exactly as copied.</li>
-              <li>The terminal was closed before it finished. Open it again and re-run.</li>
+              {/* First, because it is the likeliest one: installing no longer starts
+                  anything, so a perfectly successful install waits here forever until
+                  step 2 is actually run. */}
+              <li>Step 2 hasn't run yet, or your agent is waiting for your yes.</li>
+              <li>Node.js 18+ missing, or the terminal closed early.</li>
             </ul>
           )}
         </div>
@@ -227,27 +232,66 @@ export function ConnectSheet({ open, onClose }: Props) {
 
   const [how, setHow] = useState<How>("terminal");
   const [os, setOs] = useState<InstallOs>(detectOs);
-  const [token, setToken] = useState<StoredConnectToken | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** The minted token *and* whose it is. Scoped because a token is per user and a
+   *  plain value would keep showing the previous account's token for the render
+   *  between a user change and the mint effect that replaces it. Matching on
+   *  userId at render time closes that window entirely rather than narrowing it. */
+  const [minted, setMinted] = useState<{ userId: string; token: StoredConnectToken } | null>(null);
+  const token = minted && minted.userId === userId ? minted.token : null;
+  const [copied, setCopied] = useState<Copied>(null);
+  /** Which block the message belongs under. A copy failure used to render as the last
+   *  child of the sheet body — under step 2, under the whole progress list, and under
+   *  the stalled help once that opened — about 400px from the button it was about,
+   *  while saying "the command above" with two commands above it. Errors go next to
+   *  their control (skills/emil_design_eng §5). */
+  const [error, setError] = useState<{ what: NonNullable<Copied>; message: string } | null>(null);
   const [celebrating, setCelebrating] = useState(false);
+  /** The reinstall caveat is disclosure-only — see installedNote. */
+  const [noteOpen, setNoteOpen] = useState(false);
+  /** Step 2 reference block, closed by default. */
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // Started = the person has done their part. Copy says so; so does arriving with a
-  // token already minted from an earlier visit, because the command is already out
-  // there and the only useful thing to show is whether it has landed.
+  // Started = this browser has begun watching for a ping, because the person took an
+  // action here. It is a reason to *look*, never a claim that anything was installed
+  // or started — every step past the first comes from the server.
+  //
+  // A token minted on an earlier visit used to set this on open. It no longer does: a
+  // token in localStorage says a token was created once, which is not evidence that
+  // the tracker was ever installed, let alone started, and showing "Waiting for the
+  // tracker to start" to someone who has done nothing this session is a lie the sheet
+  // then has to keep for 90 seconds. The already-live case does not need it — that
+  // rests on `liveAtOpen`, which useTrackerPing reads from presence.
   const [started, setStarted] = useState(false);
 
   const { render, closing } = useExitTransition(open, EXIT_MS);
   const ping = useTrackerPing(open, started);
+  const showProgress = ping.stage !== "idle";
 
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const progress = useRef<HTMLDivElement>(null);
+  /** Identity of what is currently on screen to copy. Bumped whenever the tool,
+   *  the OS, the user or the open state changes, so a clipboard promise that
+   *  resolves after one of those can tell that it is answering a stale question. */
+  const generation = useRef(0);
 
+  // Anything that changes what the buttons would put on the clipboard retires the
+  // "Copied" badge and any error under it — switching tool or OS rewrites the
+  // command, so a badge earned by the previous one is a claim about text that is
+  // no longer on screen. Bumping the generation also retires a clipboard write
+  // still in flight (see `copy`).
+  useEffect(() => {
+    generation.current += 1;
+    setCopied(null);
+    setError(null);
+  }, [how, os, userId, open]);
+
+  // A fresh open is a fresh attempt.
   useEffect(() => {
     if (!open) return;
-    setCopied(false);
-    setError(null);
-    setStarted(userId ? readStoredConnectToken(userId) !== null : false);
+    setStarted(false);
+    setNoteOpen(false);
+    setDetailsOpen(false);
   }, [open, userId]);
 
   // Mint once per browser; `ensureConnectToken` dedupes in-flight calls, so opening the
@@ -257,10 +301,11 @@ export function ConnectSheet({ open, onClose }: Props) {
     let cancelled = false;
     ensureConnectToken(userId, deviceLabel(detectOs()))
       .then((t) => {
-        if (!cancelled) setToken(t);
+        if (!cancelled) setMinted({ userId, token: t });
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not create a token");
+        if (!cancelled)
+          setError({ what: "install", message: err instanceof Error ? err.message : "Could not create a token" });
       });
     return () => {
       cancelled = true;
@@ -274,18 +319,35 @@ export function ConnectSheet({ open, onClose }: Props) {
       : buildConnectPrompt(how, token.token, API_BASE, WEB_URL);
   }, [token, how, os]);
 
-  const copy = async () => {
-    if (!text) return;
+  // Step 2's commands never carry the token — it is already in ~/.vibehub/config.json
+  // by the time any of these are run. Available before step 1 has been done, on
+  // purpose: this is also the way out when an agent refuses to start the daemon.
+  const startCmd = buildStartCommand(os);
+  const statusCmd = buildStatusCommand(os);
+  const stopCmd = buildStopCommand(os);
+
+  const copy = async (what: NonNullable<Copied>, value: string) => {
+    // Which command this call is about. `navigator.clipboard.writeText` can resolve a
+    // tick or several later — long enough for the reader to switch tool or OS, close
+    // the sheet, or for the account to change — and a result that lands after any of
+    // those would badge a command that is no longer the one on screen.
+    const mine = generation.current;
+    const stale = () => generation.current !== mine;
+
     // The wait starts either way. A clipboard the browser refused (permissions, an
     // insecure origin, an embedded webview) does not mean the command will not be run
     // — the text is on screen and the message says to select it. Withholding progress
     // in that case leaves the one person who most needs it watching nothing.
     setStarted(true);
+    setError(null);
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
+      await navigator.clipboard.writeText(value);
+      if (stale()) return;
+      setCopied(what);
     } catch {
-      setError("Copy failed — select the command above and copy it manually.");
+      if (stale()) return;
+      setCopied(null);
+      setError({ what, message: "Copy failed — select the command above." });
     }
   };
 
@@ -297,7 +359,7 @@ export function ConnectSheet({ open, onClose }: Props) {
   // to congratulate, and closing on it would slam the sheet shut on someone who asked
   // to see it. That case rests on the finished step list instead.
   useEffect(() => {
-    if (ping.stage !== "live" || ping.liveAtOpen) return;
+    if (!shouldCelebrate(ping.stage, ping.liveAtOpen)) return;
     // Shared, per-user gate: whichever surface sees the connection first celebrates, and
     // the other does not repeat it. Closing is unconditional — the sheet is finished
     // either way.
@@ -320,6 +382,23 @@ export function ConnectSheet({ open, onClose }: Props) {
     };
   }, [open]);
 
+  // Copy is at the top of the sheet and the step list it creates is at the bottom, so
+  // on a 900px window — and on every phone — the answer to "did that do anything?"
+  // appeared off-screen. Bring it into the body's view when it first appears.
+  useEffect(() => {
+    if (!showProgress) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Two frames, not one: the block mounts its three rows and the sweep line in the
+    // same commit, and a scroll measured before that settles lands ~36px short.
+    // `end` rather than `nearest` — the newest row is the one worth seeing.
+    const id = window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() =>
+        progress.current?.scrollIntoView({ block: "end", behavior: reduced ? "auto" : "smooth" })
+      )
+    );
+    return () => window.cancelAnimationFrame(id);
+  }, [showProgress]);
+
   const onKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (event.key === "Escape") {
@@ -334,10 +413,25 @@ export function ConnectSheet({ open, onClose }: Props) {
       if (!focusable || focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const active = document.activeElement;
+
+      // The dialog itself holds focus on open (tabIndex={-1}, focused so the sheet is
+      // announced without a control reading as already-chosen). It is not in
+      // `focusable`, so it matched neither boundary and Shift+Tab walked straight out
+      // of the sheet — the trap only ever caught the forward edge. Treat "focus is on
+      // the dialog, or has escaped it entirely" as being at whichever edge the reader
+      // is travelling towards.
+      const insideControl =
+        active instanceof HTMLElement && active !== dialog.current && dialog.current?.contains(active);
+      if (!insideControl) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
+      if (event.shiftKey && active === first) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && active === last) {
         event.preventDefault();
         first.focus();
       }
@@ -356,8 +450,8 @@ export function ConnectSheet({ open, onClose }: Props) {
 
   if (!render) return celebration;
 
-  const showProgress = ping.stage !== "idle";
-  const installed = installedNote(ping.status);
+
+  const installed = installedNote(ping.status, agoShort);
 
   return createPortal(
     <>
@@ -384,26 +478,43 @@ export function ConnectSheet({ open, onClose }: Props) {
           <div className={styles.body}>
             {/* Context before the choice, not wedged between the step title and its
                 control. No box — one border per block, and this is a sentence. */}
-            {installed && <p className={styles.installed}>{installed}</p>}
+            {installed && (
+              <div className={styles.installed}>
+                <p className={styles.installedLead}>{installed.lead}</p>
+                {installed.detail && (
+                  <>
+                    <button
+                      type="button"
+                      className={styles.helpToggle}
+                      aria-expanded={noteOpen}
+                      onClick={() => setNoteOpen((v) => !v)}
+                    >
+                      Already installed?
+                    </button>
+                    {noteOpen && <p className={cx(styles.installedDetail, "fade-in")}>{installed.detail}</p>}
+                  </>
+                )}
+              </div>
+            )}
 
             <div className={styles.step}>
-              <h3 className={styles.stepTitle}>Pick how you work</h3>
+              <h3 className={styles.stepTitle}>1 · Install</h3>
               <Segment label="How you work" options={HOWS} value={how} onChange={setHow} />
 
               <p className={styles.explain}>{EXPLAIN[how]}</p>
-              {how === "terminal" && (
-                <div className={styles.osRow}>
-                  <Segment label="Operating system" options={OSES} value={os} onChange={setOs} />
-                  <span className={styles.note}>Needs Node.js 18+.</span>
-                </div>
-              )}
+              {/* One OS picker for the whole sheet: it chooses the install one-liner
+                  only for Terminal, but it always chooses step 2's commands. */}
+              <div className={styles.osRow}>
+                <Segment label="Operating system" options={OSES} value={os} onChange={setOs} />
+                <span className={styles.note}>Needs Node.js 18+.</span>
+              </div>
 
               {text ? (
                 <>
                   <pre className={styles.text}>{text}</pre>
-                  <Button className={styles.copy} onClick={copy}>
-                    <Icon name={copied ? "check" : "copy"} size={14} />
-                    {copied ? "Copied" : "Copy"}
+                  <Button className={styles.copy} onClick={() => void copy("install", text)}>
+                    <Icon name={copied === "install" ? "check" : "copy"} size={14} />
+                    {copied === "install" ? "Copied" : "Copy"}
                   </Button>
                 </>
               ) : (
@@ -411,6 +522,67 @@ export function ConnectSheet({ open, onClose }: Props) {
                   <Skeleton variant="block" height={72} width="100%" />
                   <Skeleton variant="pill" height={38} width="100%" />
                 </>
+              )}
+              {/* Outside the ternary on purpose: a mint failure is exactly the case
+                  where `text` is null, and an error rendered only in the other branch
+                  would be the one error nobody ever sees. */}
+              {error?.what === "install" && (
+                <p className={styles.error} role="alert">
+                  {error.message}
+                </p>
+              )}
+
+              {/* Offered before anything has gone wrong, not after. An agent that
+                  refuses to start a background process is behaving correctly, and the
+                  person should never have to come back and ask the sheet for a way
+                  out — it is already on screen. */}
+              {how !== "terminal" && (
+                <button type="button" className={styles.helpToggle} onClick={() => setHow("terminal")}>
+                  Agent blocked it? Use Terminal
+                </button>
+              )}
+            </div>
+
+            <div className={styles.step}>
+              <h3 className={styles.stepTitle}>2 · Start</h3>
+              {/* Copying is all this page can do. The command runs on the reader's
+                  machine, when they choose to run it — the browser starts nothing. */}
+              <p className={styles.explain}>Run in your own terminal. Runs in the background until you stop it.</p>
+
+              <pre className={styles.text}>{startCmd}</pre>
+              <Button
+                variant="secondary"
+                className={styles.copy}
+                onClick={() => void copy("start", startCmd)}
+              >
+                <Icon name={copied === "start" ? "check" : "copy"} size={14} />
+                {copied === "start" ? "Copied" : "Copy"}
+              </Button>
+              {error?.what === "start" && (
+                <p className={styles.error} role="alert">
+                  {error.message}
+                </p>
+              )}
+
+              {/* The full consent sentence and the other two verbs are reference, not
+                  the thing to press — one disclosure rather than three paragraphs. */}
+              <button
+                type="button"
+                className={styles.helpToggle}
+                aria-expanded={detailsOpen}
+                onClick={() => setDetailsOpen((v) => !v)}
+              >
+                Details
+              </button>
+              {detailsOpen && (
+                <div className={cx(styles.stepDetails, "fade-in")}>
+                  <p className={styles.installedDetail}>{BACKGROUND_START_MEANS}</p>
+                  <p className={styles.note}>
+                    Status: <code className={styles.inlineCmd}>{statusCmd}</code>
+                    <br />
+                    Stop: <code className={styles.inlineCmd}>{stopCmd}</code>
+                  </p>
+                </div>
               )}
             </div>
 
@@ -422,11 +594,10 @@ export function ConnectSheet({ open, onClose }: Props) {
                 device={ping.device}
                 tool={ping.tool}
                 copied={copied}
-                liveAtOpen={ping.liveAtOpen}
+                anchor={progress}
               />
             )}
 
-            {error && <p className={styles.error}>{error}</p>}
           </div>
         </div>
       </div>

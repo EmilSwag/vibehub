@@ -31,9 +31,7 @@ export function StepConnect({ onBack, onNext, onConnected }: Props) {
   return (
     <div className={styles.step}>
       <h1 className={styles.title}>Connect your AI tools</h1>
-      <p className={styles.lead}>
-        Pick your tool, paste one prompt — status, hours and tokens, nothing else leaves your machine.
-      </p>
+      <p className={styles.lead}>Paste one prompt. Only status, hours and tokens leave your machine.</p>
 
       <ConnectTools onConnected={markConnected} onCelebrated={advance} />
 
@@ -47,7 +45,7 @@ export function StepConnect({ onBack, onNext, onConnected }: Props) {
           </Button>
         ) : (
           <button type="button" className={styles.linkButton} onClick={onNext}>
-            I'll do this later
+            Skip
           </button>
         )}
       </div>

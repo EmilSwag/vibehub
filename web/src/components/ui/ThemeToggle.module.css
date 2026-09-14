@@ -28,8 +28,9 @@
 }
 
 .btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 /* Both glyphs sit in the same 18px box; the inactive one is faded and turned

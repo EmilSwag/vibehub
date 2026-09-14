@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE, usersApi } from "../lib/api";
-import { buildInstallCommand } from "../lib/connectPrompt";
+import { buildInstallCommand, buildStartCommand } from "../lib/connectPrompt";
 import type { InstallOs } from "../lib/connectPrompt";
 import {
   claimConnectCelebration,
@@ -42,7 +42,7 @@ const OSES: { id: InstallOs; label: string }[] = [
   { id: "windows", label: "Windows" },
 ];
 
-type Copyable = "command" | "token";
+type Copyable = "command" | "start" | "token";
 /** "offline" = this account has heartbeated before but its tracker is silent now.
  *  It must not fall back to the connect card: that reads as "not connected" and
  *  mints tokens nobody needs. It gets the status panel/strip saying so instead. */
@@ -97,6 +97,10 @@ function ManualInstall({
   onCopy: (what: Copyable, text: string) => void;
 }) {
   const command = buildInstallCommand(os, token, API_BASE, WEB_URL);
+  // Installing sets the tracker up and starts nothing (2026-09-14). Without the
+  // second command this panel is a dead end: you run the one-liner, it succeeds, and
+  // nothing ever tracks. Token-free — it reads the one the install just saved.
+  const startCmd = buildStartCommand(os);
   return (
     <div className={cx(styles.manual, "fade-in")}>
       <div className={styles.osRow}>
@@ -109,6 +113,13 @@ function ManualInstall({
         <code className={styles.cmd}>{command}</code>
         <Button size="sm" variant="secondary" className={styles.cmdCopy} onClick={() => onCopy("command", command)}>
           {copied === "command" ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <span className={styles.hint}>Then start it — runs in the background until you stop it:</span>
+      <div className={styles.cmdRow}>
+        <code className={styles.cmd}>{startCmd}</code>
+        <Button size="sm" variant="secondary" className={styles.cmdCopy} onClick={() => onCopy("start", startCmd)}>
+          {copied === "start" ? "Copied" : "Copy"}
         </Button>
       </div>
       <div className={styles.tokenRow}>
@@ -280,7 +291,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
       setCopied(what);
       window.setTimeout(() => setCopied(null), 1600);
     } catch {
-      setError("Copy failed — select the text and copy it manually.");
+      setError("Copy failed — select the text above.");
     }
   };
 
@@ -355,7 +366,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
           {variant !== "compact" && (
             <div className={styles.head}>
               <strong className={styles.title}>Connect your tools</strong>
-              <span className={styles.sub}>Nothing is being tracked yet.</span>
+              <span className={styles.sub}>Nothing tracked yet.</span>
             </div>
           )}
 
@@ -368,15 +379,15 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
 
           <div className={styles.foot}>
             <span className={styles.waiting}>
-              <span className={styles.pulse} aria-hidden="true" /> Listening…
+              <span className={styles.pulse} aria-hidden="true" /> Waiting…
             </span>
           </div>
 
           {variant === "full" && status && (
             <>
               <p className={styles.privacy}>
-                Works with Claude Code, Codex CLI, Cursor, VS Code and Quadcode. Leaves your machine: tool, model,
-                project name, timestamps, token counts. Never code, prompts or diffs.
+                Works with Claude Code, Codex CLI, Cursor, VS Code and Quadcode. Sends tool, model, project name,
+                timestamps and token counts. Never code, prompts or diffs.
               </p>
               <div className={styles.devices}>
                 <span className={styles.label}>Devices</span>

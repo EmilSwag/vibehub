@@ -27,8 +27,12 @@
 }
 
 .btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+  /* A 35%-ink ring drawn on the edge of a filled ink button is invisible in both
+   * themes. An outline with an offset sits on the surface behind the control, which
+   * is the same treatment tokens.css gives everything else. */
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 .primary {

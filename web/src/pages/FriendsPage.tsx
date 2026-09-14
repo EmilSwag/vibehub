@@ -244,9 +244,11 @@ export function FriendsPage() {
                           </span>
                         </Link>
                         <LevelBadge level={u.level} size="sm" />
+                        {/* Row action, same weight as onboarding's: a column of filled
+                            pills has no hierarchy left to spend. */}
                         <Button
                           size="sm"
-                          variant={sent ? "secondary" : "primary"}
+                          variant={sent ? "ghost" : "secondary"}
                           onClick={() => invite(u.username)}
                           disabled={sent || busy === u.username}
                         >

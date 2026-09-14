@@ -75,6 +75,9 @@ export function ProfilePage() {
   const [connectOpen, setConnectOpen] = useState(false);
 
   const isSelf = me?.username === username;
+  /** The server only lets friends post (routes/wall.ts), and `presences` holds
+   *  exactly self + accepted friends, so it answers the same question here. */
+  const canPost = Boolean(me) && (isSelf || presences.has(username));
 
   useEffect(() => {
     let active = true;
@@ -210,7 +213,12 @@ export function ProfilePage() {
                       place to notice it, so it is the place that offers the fix. Idle
                       says nothing — the tracker is still talking. */}
                   {isSelf && presence.status === "offline" && (
-                    <Button size="sm" onClick={() => setConnectOpen(true)} className={styles.goOnline}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setConnectOpen(true)}
+                      className={styles.goOnline}
+                    >
                       Go online
                     </Button>
                   )}
@@ -326,7 +334,7 @@ export function ProfilePage() {
           Wall
         </SectionTitle>
 
-        {me && (
+        {canPost && (
           <Card className={styles.composer}>
             <form className={styles.postForm} onSubmit={handlePostComment}>
               <div className={styles.postRow}>

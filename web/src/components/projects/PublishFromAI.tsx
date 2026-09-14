@@ -82,7 +82,7 @@ export function PublishFromAI() {
             Publish from Claude, Codex or any AI
           </span>
           <span className={styles.sub}>
-            Paste one prompt into your agent — it posts the project for you, screenshots included.
+            Paste one prompt. Your agent posts the project, screenshots included.
           </span>
         </span>
         <Icon name="plus" size={16} className={[styles.chev, open && styles.chevOpen].filter(Boolean).join(" ")} />
@@ -130,7 +130,7 @@ export function PublishFromAI() {
                     {copied === "prompt" ? "Copied" : "Copy prompt"}
                   </Button>
                 </div>
-                {!token && <span className={styles.note}>Create the token first so it's filled in for you.</span>}
+                {!token && <span className={styles.note}>Create the token first.</span>}
               </div>
             </li>
             <li>
@@ -138,8 +138,8 @@ export function PublishFromAI() {
               <div className={styles.stepBody}>
                 <span className={styles.stepTitle}>Say “publish to VibeHub”</span>
                 <span className={styles.note}>
-                  The card appears here and on your profile; GitHub pushes show up automatically. Agents can
-                  create and edit posts — deleting stays here, in the app.
+                  The card appears here and on your profile. Agents can create and edit posts; deleting stays
+                  in the app.
                 </span>
               </div>
             </li>

@@ -66,7 +66,7 @@ export function StepFriends({ onInvited, onBack, onNext }: Props) {
   return (
     <div className={styles.step}>
       <h1 className={styles.title}>Add the people you know</h1>
-      <p className={styles.lead}>They'll see you're here and can accept in one tap.</p>
+      <p className={styles.lead}>They can accept in one tap.</p>
 
       <input
         className={[styles.input, styles.search].join(" ")}
@@ -100,9 +100,11 @@ export function StepFriends({ onInvited, onBack, onNext }: Props) {
                     </span>
                   </span>
                   <LevelBadge level={u.level} size="sm" className={styles.level} />
+                  {/* A row action, not the screen's primary: six filled pills used to
+                      shout over the one button that moves the flow on. */}
                   <Button
                     type="button"
-                    variant={done ? "secondary" : "primary"}
+                    variant={done ? "ghost" : "secondary"}
                     className={[styles.inviteButton, done && "pop"].filter(Boolean).join(" ")}
                     onClick={() => invite(u)}
                     disabled={done || busy}

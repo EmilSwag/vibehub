@@ -1,10 +1,3 @@
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--vh-space-5);
-}
-
 .title {
   font-family: var(--vh-font-serif);
   font-weight: 500;
@@ -13,25 +6,14 @@
   margin: 0;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: var(--vh-space-3);
-}
-
-.empty {
-  color: var(--vh-text-faint);
-  font-family: var(--vh-font-sans);
-  font-size: 14px;
-}
-
 .page {
   display: flex;
   flex-direction: column;
   gap: var(--vh-space-4);
 }
 .header {
-  margin-bottom: 0;
+  display: flex;
+  justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
 }
@@ -72,6 +54,8 @@
   gap: 10px;
   padding: 36px 20px;
   text-align: center;
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
   color: var(--vh-text-muted);
 }
 .empty p {
@@ -82,8 +66,10 @@
 }
 
 .grid {
+  display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: var(--vh-space-4);
+  /* Posts, not a table: a short card should not stretch to a long one's height. */
   align-items: start;
 }
 
@@ -103,6 +89,14 @@
 .iconBtn:hover {
   color: var(--vh-text);
   background: var(--vh-surface-2);
+}
+
+/* Touch: edit and delete are 30px boxes on a card footer. */
+@media (pointer: coarse) {
+  .iconBtn {
+    width: 40px;
+    height: 40px;
+  }
 }
 .iconBtnDanger:hover {
   color: var(--vh-danger, var(--vh-text));

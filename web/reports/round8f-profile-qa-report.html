@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Round 8 §F — production profile QA</title>
+<style>
+  :root{
+    --bg:#F5F5F5; --surface:#FFFFFF; --surface-2:#ECECEC; --border:#DCDCDC;
+    --text:#111111; --dim:#555555; --faint:#8A8A8A;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0F0F0F; --surface:#171717; --surface-2:#1F1F1F; --border:#2A2A2A;
+      --text:#F2F2F2; --dim:#B0B0B0; --faint:#8A8A8A;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0F0F0F; --surface:#171717; --surface-2:#1F1F1F; --border:#2A2A2A;
+    --text:#F2F2F2; --dim:#B0B0B0; --faint:#8A8A8A;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--sans);}
+  main{max-width:900px;margin:0 auto;padding:48px 24px 96px;}
+  h1,h2,h3{font-family:var(--serif);font-weight:500;line-height:1.2;letter-spacing:-.01em;}
+  h1{font-size:34px;margin:0 0 8px;}
+  h2{font-size:23px;margin:48px 0 14px;padding-top:20px;border-top:1px solid var(--border);}
+  h3{font-size:18px;margin:30px 0 10px;}
+  p,li{color:var(--dim);}
+  strong{color:var(--text);font-weight:600;}
+  a{color:var(--text);}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);
+       border-radius:5px;padding:1px 5px;color:var(--text);}
+  pre{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+      padding:14px 16px;overflow-x:auto;}
+  pre code{background:none;padding:0;font-size:12.5px;line-height:1.6;}
+  table{border-collapse:collapse;width:100%;margin:16px 0;display:block;overflow-x:auto;}
+  th,td{border:1px solid var(--border);padding:8px 11px;text-align:left;font-size:13.5px;
+        vertical-align:top;color:var(--dim);}
+  th{background:var(--surface-2);color:var(--text);font-weight:600;white-space:nowrap;}
+  blockquote{margin:0;padding-left:14px;border-left:2px solid var(--border);color:var(--faint);}
+  hr{border:0;border-top:1px solid var(--border);margin:36px 0;}
+  .meta{color:var(--faint);font-size:13px;margin-bottom:32px;}
+  .loading{color:var(--faint);font-family:var(--mono);font-size:13px;}
+</style>
+</head>
+<body>
+<main>
+  <div id="out"><p class="loading">Loading round8f-profile-qa-report.md …</p></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script>
+  fetch('round8f-profile-qa-report.md')
+    .then(function (r) { if (!r.ok) throw new Error(r.status + ' ' + r.statusText); return r.text(); })
+    .then(function (md) { document.getElementById('out').innerHTML = marked.parse(md); })
+    .catch(function (e) {
+      document.getElementById('out').innerHTML =
+        '<p class="loading">Could not load the markdown (' + e.message +
+        '). Read it directly: web/reports/round8f-profile-qa-report.md</p>';
+    });
+</script>
+</body>
+</html>

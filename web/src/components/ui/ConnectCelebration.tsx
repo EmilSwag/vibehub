@@ -19,6 +19,10 @@ const SHOW_MS = 5200;
 /** Poll cadence while the layer is up — the counter must move, not sit at zero. */
 const COUNTER_POLL_MS = 5000;
 
+/** Chips shown before the list becomes a "+N more" count. An account with a dozen
+ *  (tool, model) pairs turned the celebration's summary into six ragged rows. */
+const MODEL_CHIPS = 6;
+
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -59,7 +63,9 @@ export function ConnectCelebration({ open, status, onRefresh, onClose }: Props) 
 
   const sources = status?.sources ?? [];
   const today = useMemo(() => sumToday(sources), [sources]);
-  const models = useMemo(() => modelsOfSources(sources), [sources]);
+  const allModels = useMemo(() => modelsOfSources(sources), [sources]);
+  const models = allModels.slice(0, MODEL_CHIPS);
+  const moreModels = allModels.length - models.length;
 
   // What the person is in right now — presence when it is live, the most recently
   // seen source otherwise, so the chips are never empty on a fresh connection.
@@ -133,6 +139,11 @@ export function ConnectCelebration({ open, status, onRefresh, onClose }: Props) 
                 {m.label}
               </li>
             ))}
+            {moreModels > 0 && (
+              <li className={styles.model} style={{ "--i": models.length } as CSSProperties}>
+                +{moreModels} more
+              </li>
+            )}
           </ul>
         )}
 

@@ -380,6 +380,15 @@
   color: var(--vh-text);
 }
 
+/* Touch: same treatment ProfilePage gives its link chips — grow the target, not
+ * the type. Negative margin keeps the 17px line box the block is spaced around. */
+@media (pointer: coarse) {
+  .toggle {
+    padding: 10px 4px;
+    margin: var(--vh-space-2) -4px 0;
+  }
+}
+
 .chevron {
   transition: transform var(--dur-state) var(--ease-out);
 }

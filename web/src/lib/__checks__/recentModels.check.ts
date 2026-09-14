@@ -3,7 +3,17 @@
 // Exits non-zero (uncaught Error) when any expectation fails. Deliberately free of
 // node-only imports so it also type-checks under web/tsconfig.json (DOM lib only).
 
-import { formatHoursOnRecord, groupStatsByModel, isEstimatedTool, modelRowLabel } from "../recentModels";
+import {
+  collapseWouldDropFocus,
+  formatHoursOnRecord,
+  groupStatsByModel,
+  isEstimatedTool,
+  modelRowAria,
+  modelRowLabel,
+  NO_MODEL_SELECTION,
+  requestSelection,
+  selectionTickFor,
+} from "../recentModels";
 import type { StatByModel } from "../../types";
 
 let passed = 0;
@@ -149,6 +159,58 @@ const source = [row("cursor", "<synthetic>", 1, 2, 60, "2026-09-05T00:00:00.000Z
 const snapshot = JSON.stringify(source);
 groupStatsByModel(source);
 eq("input is not mutated", JSON.stringify(source), snapshot);
+
+// ---- regressions found on production, 2026-09-14 (plan section F) ----
+
+// A. The Stats "Top model" tile was dead on a repeat press: it re-picked a row that
+// was already picked, the row's prop never changed, and the effect that owns
+// scrollIntoView never re-ran. Reproduced on prod at scrollY 836 with the row 85px
+// above the viewport; the second press moved nothing. A repeat request must be a new
+// value, or the row cannot tell the two presses apart.
+const first = requestSelection(NO_MODEL_SELECTION, "Claude Sonnet 5");
+const repeat = requestSelection(first, "Claude Sonnet 5");
+eq("a repeat pick of the same row is a new tick", [first.tick === repeat.tick, first.label === repeat.label], [false, true]);
+eq(
+  "the picked row sees a different number on each press",
+  [selectionTickFor(first, "Claude Sonnet 5"), selectionTickFor(repeat, "Claude Sonnet 5")],
+  [1, 2]
+);
+eq("an unpicked row sees null", selectionTickFor(repeat, "Grok 4"), null);
+eq("clearing is also a request, so a re-pick after it still lands", [
+  requestSelection(repeat, null).label,
+  requestSelection(requestSelection(repeat, null), "Claude Sonnet 5").tick,
+], [null, 4]);
+eq("nothing is picked to start with", selectionTickFor(NO_MODEL_SELECTION, "Claude Sonnet 5"), null);
+
+// B. Escape-to-collapse dropped keyboard focus on <body> when focus sat on a row past
+// the preview, because that row unmounts. Reproduced on prod: focus on row 6 of 8,
+// one Escape, document.activeElement === document.body.
+eq(
+  "only a row past the preview loses its ground on collapse",
+  [0, 1, 2, 3, 5, 7].map((i) => collapseWouldDropFocus(i, 3)),
+  [false, false, false, true, true, true]
+);
+eq("focus outside the list (the toggle, on Show less) is left alone", collapseWouldDropFocus(-1, 3), false);
+
+// C. The per-tool detail collapses to 0fr, which hides it from the eye and not from a
+// screen reader: on prod a collapsed detail still returned its full innerText, with
+// visibility:visible and no aria-hidden. Both controls also carried aria-expanded with
+// no aria-controls naming the region they open.
+eq(
+  "collapsed list: the row press opens the list, and no detail is readable",
+  modelRowAria({ reveals: true, open: false, listId: "L", detailId: "D" }),
+  { expanded: false, controls: "L", detailHidden: true }
+);
+eq(
+  "open list, closed row: the press opens this row's detail, still hidden from AT",
+  modelRowAria({ reveals: false, open: false, listId: "L", detailId: "D" }),
+  { expanded: false, controls: "D", detailHidden: true }
+);
+eq(
+  "open row: the detail is the expanded region and is readable",
+  modelRowAria({ reveals: false, open: true, listId: "L", detailId: "D" }),
+  { expanded: true, controls: "D", detailHidden: false }
+);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`recentModels check failed: ${failures.join(", ")}`);

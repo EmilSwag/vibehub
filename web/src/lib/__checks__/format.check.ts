@@ -83,6 +83,13 @@ const MODELS: [string | null | undefined, string | null][] = [
   ["claude-fable-5", "Claude Fable 5"],
   ["gemini-3.5-flash", "Gemini 3.5 Flash"],
   ["grok-4.6", "Grok 4.6"],
+  // round 9: human-cased names with spaces (Cursor reports these) — seen live as
+  // "Claude Claude sonnet 5" in the connect modal before the fix.
+  ["Claude Sonnet 5", "Claude Sonnet 5"],
+  ["Claude Sonnet 4.5", "Claude Sonnet 4.5"],
+  ["GPT 5 Codex", "GPT-5 Codex"],
+  ["Gemini 2.5 Pro", "Gemini 2.5 Pro"],
+  ["Grok 4", "Grok 4"],
 ];
 for (const [raw, expected] of MODELS) eq(`humanizeModel(${JSON.stringify(raw)})`, humanizeModel(raw), expected);
 

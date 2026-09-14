@@ -117,6 +117,10 @@ function normalizeModelId(raw: string | null | undefined): string {
   return (raw ?? "")
     .trim()
     .toLowerCase()
+    // Human-cased names some tools report ("Claude Sonnet 5") must tokenize like
+    // ids, otherwise the whole name becomes one unknown token and the brand is
+    // prepended twice ("Claude Claude sonnet 5" — seen live in the connect modal).
+    .replace(/\s+/g, "-")
     .replace(/^(?:[a-z0-9_.-]+\/)+/, "")
     .replace(/^(?:[a-z]+\.)*anthropic\./, "")
     .replace(/\[\d+[mk]\]$/, "")

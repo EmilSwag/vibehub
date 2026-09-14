@@ -26,10 +26,10 @@
 /* Left to right, then out — an indeterminate wait, not a measured one. Ends at rest
  * as a full faint line so a zeroed animation is still a sensible thing to look at. */
 @keyframes cs-sweep {
-  0% { transform: scaleX(0); transform-origin: left; opacity: 1; }
-  50% { transform: scaleX(1); transform-origin: left; opacity: 1; }
-  51% { transform: scaleX(1); transform-origin: right; opacity: 1; }
-  100% { transform: scaleX(0); transform-origin: right; opacity: 1; }
+  0% { transform: translateX(-100%); opacity: 0; }
+  15% { opacity: 0.55; }
+  85% { opacity: 0.55; }
+  100% { transform: translateX(300%); opacity: 0; }
 }
 
 .scrim {
@@ -134,11 +134,33 @@
   gap: 24px;
   padding: 0 20px 24px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vh-border-strong) transparent;
+  /* Scroll shadows. Both scroll areas in this sheet cut their content flush against
+   * an edge with nothing to say there is more — opening "Details" read as a
+   * rendering bug — and an overlay scrollbar paints nothing at rest. Two cover
+   * gradients travel with the content (background-attachment: local) and two fixed
+   * shadows sit behind them, so the shade shows only while there is something past
+   * that edge and clears when you reach it. Black alpha only: no hue. */
+  background-color: var(--vh-surface);
+  background-image: linear-gradient(var(--vh-surface) 0 14px, rgba(0, 0, 0, 0) 24px),
+    linear-gradient(rgba(0, 0, 0, 0) 0, var(--vh-surface) 10px, var(--vh-surface) 24px),
+    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0));
+  background-repeat: no-repeat;
+  background-size: 100% 24px, 100% 24px, 100% 10px, 100% 10px;
+  background-position: 0 0, 0 100%, 0 0, 0 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 /* Offline on a machine that already has the tracker. Faint, no box, no icon — it is
  * context for the choice below, not a warning about it. */
+/* Was a single <p>; now a lead line plus an optional disclosure, so it stacks. */
 .installed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   margin: 0;
   font-family: var(--vh-font-sans);
   font-size: 12.5px;
@@ -202,8 +224,9 @@
   transform: scale(0.97);
 }
 .segBtn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--vh-focus-ring);
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: -2px;
+  box-shadow: none;
 }
 .segBtnOn,
 .segBtnOn:hover {
@@ -239,8 +262,20 @@
   padding: 12px 14px;
   max-height: 200px;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vh-border-strong) transparent;
   border-radius: var(--vh-radius-md);
-  background: var(--vh-surface-2);
+  /* Same scroll shadows as .body — the agent prompt is the taller of the two, and
+   * it used to end mid-instruction with no sign that it continued. */
+  background-color: var(--vh-surface-2);
+  background-image: linear-gradient(var(--vh-surface-2) 0 14px, rgba(0, 0, 0, 0) 22px),
+    linear-gradient(rgba(0, 0, 0, 0) 0, var(--vh-surface-2) 8px, var(--vh-surface-2) 22px),
+    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0));
+  background-repeat: no-repeat;
+  background-size: 100% 22px, 100% 22px, 100% 10px, 100% 10px;
+  background-position: 0 0, 0 100%, 0 0, 0 100%;
+  background-attachment: local, local, scroll, scroll;
   font-family: var(--vh-font-mono);
   font-size: 12px;
   line-height: 1.55;
@@ -338,9 +373,17 @@
   right: 0;
   bottom: 0;
   height: 1px;
+  overflow: hidden;
+}
+/* The dash, not the track: the track itself paints nothing. */
+.pline::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 33%;
   background: var(--vh-text);
   opacity: 0.55;
-  animation: cs-sweep 1400ms var(--ease-out) infinite;
+  animation: cs-sweep 1400ms var(--ease-in-out) infinite;
 }
 
 /* ---- the 90s disclosure. Text only: this is not an error and never reads as one. ---- */
@@ -390,4 +433,34 @@
   font-family: var(--vh-font-sans);
   font-size: 12.5px;
   color: var(--vh-text-dim);
+}
+
+/* Inline start/status/stop lines under step 2. Mono so they read as commands, but
+   quiet — they are reference, not the thing to press. `word-break` because the
+   Windows form carries a quoted path that must not widen the sheet on a phone. */
+.inlineCmd {
+  font-family: var(--vh-font-mono);
+  font-size: 11.5px;
+  color: var(--vh-text-dim);
+  word-break: break-all;
+}
+
+/* The offline/live note: one line, plus a disclosure carrying the reinstall caveat. */
+.installedLead {
+  margin: 0;
+}
+
+.installedDetail {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
+}
+
+/* Step 2's "Details" disclosure: the consent sentence plus the status/stop lines. */
+.stepDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }

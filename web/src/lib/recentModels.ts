@@ -169,3 +169,89 @@ export function formatHoursOnRecord(seconds: number): string {
   if (hours >= 0.1) return `${hours.toFixed(1)} hrs`;
   return `${Math.max(0, Math.round(seconds / 60))} min`;
 }
+
+// ---- the block's interaction contract (round 8, section F) ----
+//
+// The three helpers below are the parts of RecentModels that were wrong in
+// production and are worth pinning. They are pure on purpose: the component holds
+// them as state and props, and a plain assertion script can still check them.
+
+/**
+ * The picked row, as a value that changes on every *request* rather than only when
+ * the row changes.
+ *
+ * The Stats "Top model" tile can ask for a row that is already picked — pressed a
+ * second time after the reader scrolled away, it means "take me back there". A bare
+ * `string | null` cannot say that: React bails out of a state update to the same
+ * string, the row's prop never changes, and the effect that owns `scrollIntoView`
+ * never re-runs, so the second press does nothing at all. The tick makes every
+ * request a distinct value.
+ */
+export interface ModelSelection {
+  /** Label of the picked row, or null when nothing is picked. */
+  label: string | null;
+  /** Bumped on every request, including a repeat of the same label. */
+  tick: number;
+}
+
+export const NO_MODEL_SELECTION: ModelSelection = { label: null, tick: 0 };
+
+/** Pick `label`, or clear with null. Always a fresh tick, so a repeat still lands. */
+export function requestSelection(current: ModelSelection, label: string | null): ModelSelection {
+  return { label, tick: current.tick + 1 };
+}
+
+/**
+ * The value one row watches: the tick it was picked at, or null when it is not the
+ * picked row. Two requests for the same row hand it two different numbers, and that
+ * is what re-runs its scroll-into-view effect.
+ */
+export function selectionTickFor(selection: ModelSelection, label: string): number | null {
+  return selection.label === label ? selection.tick : null;
+}
+
+/**
+ * Does collapsing the list pull the ground out from under the keyboard?
+ *
+ * Only the first `previewRows` rows survive a collapse. A row past them unmounts, and
+ * if it held focus the browser drops focus on `<body>` — the next Tab restarts from
+ * the top of the document, which is where an Escape press used to leave a reader who
+ * had walked down to row 6. `focusedRow` is -1 when focus is not on a row at all.
+ */
+export function collapseWouldDropFocus(focusedRow: number, previewRows: number): boolean {
+  return focusedRow >= previewRows;
+}
+
+/** What a model row's button expands, and whether its detail can be read. */
+export interface ModelRowAria {
+  expanded: boolean;
+  /** Id of the region this press opens — the list, or this row's own detail. */
+  controls: string;
+  /** The detail is collapsed and must be kept out of the accessibility tree. */
+  detailHidden: boolean;
+}
+
+/**
+ * The row button means two different things depending on what the reader can see,
+ * and `aria-expanded` is only half the contract: it needs `aria-controls` naming the
+ * region it opens. Collapsed, that region is the whole list; expanded, it is this
+ * row's per-tool detail.
+ *
+ * The detail collapses with `grid-template-rows: 0fr`, which leaves it perfectly
+ * readable to a screen reader — height is not visibility — so it has to be hidden
+ * explicitly too, or all eight rows recite their per-tool breakdown at all times.
+ * `aria-hidden` is enough and `inert` is not used: the detail holds text, never a
+ * focusable element, so there is no tab stop to remove and nothing can be focused
+ * inside an aria-hidden subtree.
+ */
+export function modelRowAria(args: {
+  reveals: boolean;
+  open: boolean;
+  listId: string;
+  detailId: string;
+}): ModelRowAria {
+  const { reveals, open, listId, detailId } = args;
+  return reveals
+    ? { expanded: false, controls: listId, detailHidden: true }
+    : { expanded: open, controls: detailId, detailHidden: !open };
+}

@@ -77,7 +77,7 @@ export function HomePage() {
                 No friends yet — head to <Link to="/friends">Friends</Link> to add some.
               </div>
             ) : activeFriends.length === 0 ? (
-              <div className={styles.empty}>Nobody's actively coding right now.</div>
+              <div className={styles.empty}>Nobody's coding right now.</div>
             ) : (
               <div className="stagger">
                 {activeFriends.map((f, i) => (

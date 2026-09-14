@@ -165,7 +165,7 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
             maxLength={500}
             value={form.description}
             onChange={(e) => set("description", e.target.value)}
-            placeholder="One or two lines — what it is, what you used."
+            placeholder="What it is, what you used."
           />
           <span className={styles.counter}>{form.description.length}/500</span>
         </div>

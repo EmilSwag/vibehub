@@ -1,12 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { statsApi, toolsOf } from "../lib/api";
 import { formatShortDate, formatTokens, modelFamily, toolFamily, toolLabel } from "../lib/format";
 import type { ToolFamily } from "../lib/format";
 import { prefersReducedMotion, stagger } from "../lib/motion";
-import { formatHoursOnRecord, groupStatsByModel, modelRowLabel } from "../lib/recentModels";
-import type { RecentModelRow } from "../lib/recentModels";
+import {
+  collapseWouldDropFocus,
+  formatHoursOnRecord,
+  groupStatsByModel,
+  modelRowAria,
+  modelRowLabel,
+  NO_MODEL_SELECTION,
+  requestSelection,
+  selectionTickFor,
+} from "../lib/recentModels";
+import type { ModelSelection, RecentModelRow } from "../lib/recentModels";
 import type { UserStats } from "../types";
 import type { PresenceLike } from "./ui/PresenceBlock";
 import { Button } from "./ui/Button";
@@ -57,8 +66,10 @@ interface RowProps {
   dated: boolean;
   compact?: boolean;
   index: number;
-  /** Clicked, so it stays picked out of the list it just opened. */
-  selected: boolean;
+  /** The tick this row was picked at, or null when it is not the picked row. A number
+   *  rather than a boolean so a *repeat* pick of the same row is still a new value and
+   *  still scrolls it back into view (see ModelSelection). */
+  selectedAt: number | null;
   /** Its per-tool detail line is open. Only ever true once the list is expanded. */
   open: boolean;
   /** A tool filter is on and this row does not run that tool. */
@@ -69,6 +80,10 @@ interface RowProps {
   onSelect: (label: string) => void;
   activeTool: ToolFamily | null;
   onToolToggle: (tool: ToolFamily) => void;
+  /** The whole list — what this row's press opens while the list is still collapsed. */
+  listId: string;
+  /** This row's per-tool detail — what the press opens once the list is open. */
+  detailId: string;
 }
 
 function Row({
@@ -77,30 +92,38 @@ function Row({
   dated,
   compact,
   index,
-  selected,
+  selectedAt,
   open,
   muted,
   reveals,
   onSelect,
   activeTool,
   onToolToggle,
+  listId,
+  detailId,
 }: RowProps) {
   const glyph = row.model ? modelFamily(row.model) : toolFamily(row.tools[0]);
   const namedAfterTool = row.model === null && row.tools.length === 1;
   const item = useRef<HTMLLIElement>(null);
+  const selected = selectedAt !== null;
+  const aria = modelRowAria({ reveals, open, listId, detailId });
 
   // Bring the picked row into view — from a click here, or from the Stats tile
   // jumping in from above. `nearest` is deliberate: a row already on screen must not
   // be yanked to the middle of the viewport just because it was clicked.
+  //
+  // Keyed on the tick, not on a boolean: pressing "Top model" a second time after
+  // scrolling away re-picks a row that is already picked, and a boolean would not
+  // change, so the effect would not re-run and the press would do nothing.
   useEffect(() => {
-    if (!selected) return;
+    if (selectedAt === null) return;
     const node = item.current;
     if (!node) return;
     const frame = requestAnimationFrame(() =>
       node.scrollIntoView({ block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" }),
     );
     return () => cancelAnimationFrame(frame);
-  }, [selected]);
+  }, [selectedAt]);
 
   const action = reveals
     ? `${row.label} — show every model`
@@ -119,7 +142,8 @@ function Row({
           type="button"
           className={styles.rowHit}
           onClick={() => onSelect(row.label)}
-          aria-expanded={reveals ? false : open}
+          aria-expanded={aria.expanded}
+          aria-controls={aria.controls}
           aria-current={selected || undefined}
           aria-label={action}
         />
@@ -183,8 +207,17 @@ function Row({
 
       {/* The row's own arithmetic, un-merged: one line per tool that ran this model.
           `byTool` is already sorted by hours, so the tool that did most of the work
-          reads first. */}
-      <div className={cx(styles.detail, open && styles.detailOpen)}>
+          reads first.
+
+          Collapsed it is 0fr tall, which hides nothing from a screen reader — so it
+          is aria-hidden until it opens, or every row in the list recites its whole
+          breakdown. It holds text only, never a focusable element, so there is no
+          tab stop stranded inside the hidden subtree. */}
+      <div
+        id={detailId}
+        className={cx(styles.detail, open && styles.detailOpen)}
+        aria-hidden={aria.detailHidden || undefined}
+      >
         <div className={styles.detailInner}>
           <ul className={styles.toolLines}>
             {row.byTool.map((bucket) => (
@@ -270,8 +303,8 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
   const [fortnight, setFortnight] = useState<UserStats | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [expanded, setExpanded] = useState(false);
-  /** Label of the row that is picked out. */
-  const [selected, setSelected] = useState<string | null>(null);
+  /** The row that is picked out, plus the tick that says when it was asked for. */
+  const [selection, setSelection] = useState<ModelSelection>(NO_MODEL_SELECTION);
   /** Label of the row whose per-tool detail line is open. */
   const [openRow, setOpenRow] = useState<string | null>(null);
   /** Tool chip that is on: rows running that tool stay lit, the rest fade. */
@@ -279,13 +312,23 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
+  /** Pick a row, or clear with null. Always a new tick — see ModelSelection. */
+  const pick = useCallback((label: string | null) => {
+    setSelection((current) => requestSelection(current, label));
+  }, []);
+
+  const blockId = useId();
+  const listId = `${blockId}-list`;
+  const list = useRef<HTMLUListElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     let active = true;
     setState("loading");
     setLifetime(null);
     setFortnight(null);
     setExpanded(false);
-    setSelected(null);
+    setSelection(NO_MODEL_SELECTION);
     setOpenRow(null);
     setToolFilter(null);
     Promise.all([statsApi.get(username, "all"), statsApi.get(username, "14d")])
@@ -315,11 +358,22 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
 
   /** One undo for all three states — "Show less" and Escape's last step share it. */
   const collapse = useCallback(() => {
+    // Rows past the preview are about to unmount. If one of them holds focus — the
+    // reader walked down to row 6 and pressed Escape — the browser drops focus on
+    // <body> and the next Tab restarts at the top of the document. Hand it to the
+    // toggle instead, which is where the list now is. Clicking "Show less" already
+    // focuses the toggle, so that path measures as "not on a row" and nothing moves.
+    const items = list.current ? [...list.current.children] : [];
+    const focusedRow = items.findIndex((item) => item.contains(document.activeElement));
+    const rescueFocus = collapseWouldDropFocus(focusedRow, PREVIEW_ROWS);
+
     setExpanded(false);
-    setSelected(null);
+    pick(null);
     setOpenRow(null);
     setToolFilter(null);
-  }, []);
+
+    if (rescueFocus) requestAnimationFrame(() => toggle.current?.focus());
+  }, [pick]);
 
   /**
    * A row does one of two things, depending on what it can see.
@@ -329,7 +383,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
   const selectRow = useCallback(
     (label: string) => {
       const reveals = canExpand && !expanded;
-      setSelected(label);
+      pick(label);
       if (reveals) {
         setExpanded(true);
         setOpenRow(null);
@@ -337,7 +391,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
       }
       setOpenRow((current) => (current === label ? null : label));
     },
-    [canExpand, expanded],
+    [canExpand, expanded, pick],
   );
 
   /** A tool chip lights every row that ran that tool. It opens the list with it: a
@@ -345,24 +399,34 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
   const toggleTool = useCallback(
     (family: ToolFamily) => {
       setToolFilter((current) => (current === family ? null : family));
-      setSelected(null);
+      pick(null);
       setOpenRow(null);
       if (canExpand) setExpanded(true);
     },
-    [canExpand],
+    [canExpand, pick],
   );
+
+  /** The last `focus.nonce` acted on, so one press is honoured exactly once. */
+  const handledFocus = useRef<number | null>(null);
 
   // The Stats "Top model" tile lands here: open the list, pick that row out, and let
   // the row scroll itself into view. A label the list does not have is ignored rather
-  // than leaving a highlight nothing can explain.
+  // than leaving a highlight nothing can explain — and left unhandled, so it still
+  // lands if the rows are merely not loaded yet.
+  //
+  // Gated on the nonce because this effect also re-runs whenever `rows` changes: a
+  // Retry must not silently re-scroll to a model the reader asked about minutes ago,
+  // and a profile switch must not re-apply the previous profile's press.
   useEffect(() => {
     if (!focus) return;
+    if (handledFocus.current === focus.nonce) return;
     if (!rows.some((row) => row.label === focus.label)) return;
+    handledFocus.current = focus.nonce;
     setToolFilter(null);
     setOpenRow(null);
-    setSelected(focus.label);
+    pick(focus.label);
     if (canExpand) setExpanded(true);
-  }, [focus, rows, canExpand]);
+  }, [focus, rows, canExpand, pick]);
 
   const usesFilteredTool = (row: RecentModelRow) =>
     toolFilter === null || row.tools.some((tool) => toolFamily(tool) === toolFilter);
@@ -374,7 +438,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
     if (event.key !== "Escape") return;
     if (toolFilter !== null) setToolFilter(null);
     else if (openRow !== null) setOpenRow(null);
-    else if (selected !== null) setSelected(null);
+    else if (selection.label !== null) pick(null);
     else if (expanded) collapse();
     else return;
     event.stopPropagation();
@@ -417,7 +481,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
               <span className={styles.headMeta}>{pastTwoWeeks(fortnight?.totalActiveSeconds ?? 0)}</span>
             </div>
 
-            <ul className={cx(styles.list, "stagger")}>
+            <ul id={listId} ref={list} className={cx(styles.list, "stagger")}>
               {shown.map((row, i) => (
                 <Row
                   key={row.label}
@@ -426,13 +490,15 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
                   dated={dated}
                   compact={i >= PREVIEW_ROWS}
                   index={i}
-                  selected={selected === row.label}
+                  selectedAt={selectionTickFor(selection, row.label)}
                   open={openRow === row.label}
                   muted={!usesFilteredTool(row)}
                   reveals={canExpand && !expanded}
                   onSelect={selectRow}
                   activeTool={toolFilter}
                   onToolToggle={toggleTool}
+                  listId={listId}
+                  detailId={`${blockId}-detail-${i}`}
                 />
               ))}
             </ul>
@@ -440,9 +506,11 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
             {canExpand && (
               <button
                 type="button"
+                ref={toggle}
                 className={styles.toggle}
                 onClick={() => (expanded ? collapse() : setExpanded(true))}
                 aria-expanded={expanded}
+                aria-controls={listId}
               >
                 {expanded ? "Show less" : `View all ${rows.length} models`}
                 <Icon name="chevronDown" size={13} className={cx(styles.chevron, expanded && styles.chevronOpen)} />
