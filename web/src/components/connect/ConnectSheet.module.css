@@ -386,6 +386,18 @@
   animation: cs-sweep 1400ms var(--ease-in-out) infinite;
 }
 
+/* The "run them again" half of the stale-token hint; its first half has taken over the
+   waiting row in the list above. Aligned with the step labels (26px = mark + gap), and
+   at the same muted scale as every other helper here — this is a diagnosis, not an
+   error, and the steps it points back to are still right there above it. */
+.staleFix {
+  margin: 8px 0 0;
+  padding-left: 26px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--vh-text-faint);
+}
+
 /* ---- the 90s disclosure. Text only: this is not an error and never reads as one. ---- */
 
 .help {

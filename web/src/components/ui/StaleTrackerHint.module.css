@@ -1,0 +1,23 @@
+/* Muted helper scale — the same 13px / --vh-text-faint the meta lines use, so this
+   reads as a footnote to the status above it rather than a second status of its own.
+   No icon, no rule, no box: every surface it appears on already has the button. */
+.hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--vh-text-faint);
+}
+
+/* One shade up, so the fact is findable when the eye skims and the instruction reads
+   as the follow-on. Weight, not hue — there is no hue anywhere in this product. */
+.lead {
+  color: var(--vh-text-dim);
+  font-weight: 500;
+}
+
+/* The separator is a real space in the markup, not a margin here — see the component.
+   The two sentences sit on one line where there is room and wrap naturally where there
+   is not, so nothing has to know the container's width. */
+.fix {
+  /* Intentionally no margin-left. */
+}

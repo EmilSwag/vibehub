@@ -48,6 +48,21 @@ export interface TrackerDevice {
   createdAt: string;
 }
 
+/**
+ * A **revoked** token of this account was presented to the heartbeat endpoint within the
+ * last 10 minutes: some machine is still running a tracker whose token no longer works.
+ *
+ * Without this the site can only say "Offline", which is the same word it uses for a
+ * laptop that is shut — and it sends the person to start a tracker that is already
+ * running. `label` is the device the revoked token belonged to; it is carried for later
+ * and deliberately not rendered (see the round-10 web plan's non-goals).
+ */
+export interface StaleTracker {
+  lastRejectedAt: string;
+  label: string | null;
+  revokedAt: string;
+}
+
 /** GET /users/me/tracker (v2) — is the local tracker reporting for this account,
  * and from where? v1 fields are kept verbatim; the v2 additions are what the
  * Settings/Home connect blocks render. usersApi.trackerStatus fills v2 defaults
@@ -68,6 +83,12 @@ export interface TrackerStatus {
   /** Every (tool, model) pair seen in the last 7 days, most recently seen first. */
   sources: TrackerSource[];
   devices: TrackerDevice[];
+  /**
+   * Optional on purpose: a server that predates this omits the key entirely, and every
+   * caller must read correctly without it. `null` = nothing stale seen recently.
+   * `usersApi.trackerStatus` normalises the missing key to null.
+   */
+  staleTracker?: StaleTracker | null;
 }
 
 export interface LevelBreakdown {

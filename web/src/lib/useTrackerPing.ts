@@ -18,6 +18,12 @@ export interface TrackerPing {
   status: TrackerStatus | null;
   /** An existing connection is not a new connection to celebrate. */
   liveAtOpen: boolean;
+  /**
+   * When this attempt started waiting (epoch ms), or null if it has not. The sheet
+   * compares server timestamps against it to tell "this is happening now" from "this
+   * happened at some point today" — see staleSinceWaiting in trackerPing.ts.
+   */
+  waitingSince: number | null;
 }
 
 const POLL_MS = 3_000;
@@ -167,6 +173,7 @@ export function useTrackerPing(open: boolean, started: boolean): TrackerPing {
     tool,
     status,
     liveAtOpen,
+    waitingSince: startedAt,
   };
 }
 

@@ -155,6 +155,67 @@ export interface InstalledNote {
  *
  * `ago` is injected so this stays free of the component that formats it.
  */
+/* ---- a tracker running with a token the server has revoked ---- */
+
+/** The two sentences, defined once. Three surfaces render them; none owns the wording. */
+export const STALE_TRACKER_LEAD = "Tracker is running with an old token.";
+export const STALE_TRACKER_FIX = "Redo step 1 and step 2. Start replaces it.";
+
+/** Just the parts of TrackerStatus this rule reads, so it stays pure and testable. */
+export interface StaleStatus {
+  connected: boolean;
+  staleTracker?: { lastRejectedAt: string; label: string | null; revokedAt: string } | null;
+}
+
+export interface StaleTrackerHintCopy {
+  lead: string;
+  fix: string;
+  /** The server's timestamp, for the sheet's freshness gate. */
+  lastRejectedAt: string;
+}
+
+/**
+ * Should a surface say "a tracker here is running with a revoked token"?
+ *
+ * Both halves are required. `staleTracker` alone is not enough: a second machine's dead
+ * token being rejected while *this* one heartbeats fine would otherwise put a warning on
+ * a working setup. And `!connected` alone is the status quo — plain "Offline", which is
+ * the word that was failing to explain anything.
+ *
+ * Optional-by-design: a server that predates the field omits it, and this returns null,
+ * which is exactly the old behaviour.
+ */
+export function staleTrackerHint(status: StaleStatus | null): StaleTrackerHintCopy | null {
+  if (!status || status.connected) return null;
+  const stale = status.staleTracker;
+  if (!stale) return null;
+  return { lead: STALE_TRACKER_LEAD, fix: STALE_TRACKER_FIX, lastRejectedAt: stale.lastRejectedAt };
+}
+
+/**
+ * The connect sheet's extra gate: only speak while the rejection is newer than the moment
+ * this attempt started waiting.
+ *
+ * The sheet is a live, step-by-step surface — what it says is read as being about the
+ * command just run. A rejection from hours ago is a true fact about the account and a
+ * misleading one here: it would tell someone who just pasted a fresh token that their
+ * tracker is running with an old one. Home and Settings are ambient and have no such
+ * moment, so they use `staleTrackerHint` alone.
+ *
+ * Note the timestamps come from different clocks — `lastRejectedAt` is the server's,
+ * `waitingSince` is this browser's. Skew can only make this quieter or noisier by the
+ * size of the skew, never wrong about which case it is; the alternative (asking the
+ * server what time it thinks it is) buys accuracy nobody here needs.
+ */
+export function staleSinceWaiting(
+  hint: StaleTrackerHintCopy | null,
+  waitingSince: number | null,
+): boolean {
+  if (!hint || waitingSince === null) return false;
+  const rejectedAt = Date.parse(hint.lastRejectedAt);
+  return Number.isNaN(rejectedAt) ? false : rejectedAt > waitingSince;
+}
+
 export function installedNote(status: NoteStatus | null, ago: (iso: string) => string): InstalledNote | null {
   if (!status) return null;
 

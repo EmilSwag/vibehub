@@ -20,7 +20,8 @@ import {
 import type { StoredConnectToken } from "../../lib/connectToken";
 import { useExitTransition } from "../../lib/motion";
 import { formatElapsed, useTrackerPing } from "../../lib/useTrackerPing";
-import { installedNote, shouldCelebrate } from "../../lib/trackerPing";
+import { installedNote, shouldCelebrate, staleSinceWaiting, staleTrackerHint } from "../../lib/trackerPing";
+import type { StaleTrackerHintCopy } from "../../lib/trackerPing";
 import { toolLabel } from "../../lib/format";
 import { useAuth } from "../../context/AuthContext";
 import { agoShort } from "../TrackingStatus";
@@ -124,6 +125,7 @@ function Progress({
   tool,
   copied,
   anchor,
+  stale,
 }: {
   stage: "waiting" | "pinged" | "live";
   elapsedMs: number;
@@ -133,13 +135,22 @@ function Progress({
   copied: Copied;
   /** The sheet scrolls this into view the first time the block appears. */
   anchor: RefObject<HTMLDivElement>;
+  /**
+   * A revoked token was rejected *after* this attempt started waiting — already gated
+   * by staleSinceWaiting at the call site. It is the reason the ping is not arriving,
+   * so it takes the place of the neutral waiting line rather than sitting beside it:
+   * "Waiting for first ping…" next to "your tracker is failing to ping" reads as two
+   * unrelated facts, and the neutral one is the one that sounds like progress.
+   */
+  stale: StaleTrackerHintCopy | null;
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
   // Three rows, not four: the old list spent two on the same fact (a ping arrived, and
   // then that it counted). Row 0 is this browser's own business; rows 1 and 2 are the
   // server's word — a ping the account actually received — never something inferred
   // from a click.
-  const rows = [firstStep(copied), stage === "waiting" ? "Waiting for first ping…" : "First ping", "Connected"];
+  const waitingLabel = stage === "waiting" && stale ? stale.lead : "Waiting for first ping…";
+  const rows = [firstStep(copied), stage === "waiting" ? waitingLabel : "First ping", "Connected"];
   const done = stage === "waiting" ? 1 : stage === "pinged" ? 2 : 3;
   const active = stage === "live" ? -1 : done;
 
@@ -182,6 +193,10 @@ function Progress({
           </li>
         ))}
       </ol>
+
+      {/* The instruction half, under the list. Steps 1 and 2 are untouched above it —
+          this says to run them again, so it must not be in their way. */}
+      {stage === "waiting" && stale && <p className={styles.staleFix}>{stale.fix}</p>}
 
       {stalled && (
         <div className={styles.help}>
@@ -452,6 +467,12 @@ export function ConnectSheet({ open, onClose }: Props) {
 
 
   const installed = installedNote(ping.status, agoShort);
+  // Same rule as Home and Settings, plus one the ambient surfaces do not need: the sheet
+  // is read as a report on the command just run, so it only speaks when the rejection
+  // landed after this attempt began waiting. A revoked token rejected this morning is a
+  // true fact about the account and a lie about the paste that just happened.
+  const staleHint = staleTrackerHint(ping.status);
+  const staleNow = staleSinceWaiting(staleHint, ping.waitingSince);
 
   return createPortal(
     <>
@@ -595,6 +616,7 @@ export function ConnectSheet({ open, onClose }: Props) {
                 tool={ping.tool}
                 copied={copied}
                 anchor={progress}
+                stale={staleNow ? staleHint : null}
               />
             )}
 

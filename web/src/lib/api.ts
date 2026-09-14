@@ -127,6 +127,8 @@ export const usersApi = {
       presence: raw.presence ?? { status: raw.connected ? "active" : "offline", activity: null },
       sources: raw.sources ?? [],
       devices: raw.devices ?? [],
+      // Absent key and explicit null mean the same thing to every reader: nothing stale.
+      staleTracker: raw.staleTracker ?? null,
     };
   },
   updateMe: (body: { username?: string; displayName?: string; bio?: string; roles?: UserRole[] }) =>

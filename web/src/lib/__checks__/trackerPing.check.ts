@@ -22,9 +22,14 @@ import {
   pingStage,
   sessionKeyOf,
   shouldCelebrate,
+  staleSinceWaiting,
+  staleTrackerHint,
+  STALE_TRACKER_FIX,
+  STALE_TRACKER_LEAD,
   visibleSnapshot,
 } from "../trackerPing";
-import type { PingInputs } from "../trackerPing";
+import type { PingInputs, StaleStatus } from "../trackerPing";
+import type { StaleTracker, TrackerStatus } from "../../types";
 
 let passed = 0;
 const failures: string[] = [];
@@ -254,6 +259,73 @@ const staleObservation = visibleSnapshot({ session: 1, status: followingActive }
 eq("reopening discards baseline and initial-live together", staleObservation, null);
 eq("a reopened offline session cannot inherit an old live flag", observePing(staleObservation, { lastSeenAt: T1, presence: { status: "offline" } }).liveAtOpen, false);
 eq("updating an observation does not mutate its predecessor", initialOffline.tracker.presence.status, "offline");
+
+// ---- a tracker running with a revoked token (round 10, U1) ----
+//
+// The state these pin: a daemon on the person's machine heartbeats a token the server
+// revoked. Every heartbeat is a 401, presence never goes active, and the site said
+// "Offline" — the same word it uses for a closed laptop, which sends the person to start
+// a tracker that is already running.
+
+// Type pins. These are compile-time, not runtime: the check files sit inside
+// web/tsconfig.json's `include`, so `tsc -b` fails the build if `staleTracker` is
+// dropped from TrackerStatus, stops being optional, or changes shape. The runtime
+// assertions below only prove the pins were actually evaluated.
+const staleShape: StaleTracker = {
+  lastRejectedAt: "2026-09-14T10:04:00.000Z",
+  label: "Windows",
+  revokedAt: "2026-09-14T09:00:00.000Z",
+};
+const staleField: TrackerStatus["staleTracker"] = staleShape;
+/** A status object with no `staleTracker` key at all must still be a TrackerStatus — an
+ *  older server omits it entirely, and `?` is what keeps that a valid response. */
+const withoutStale: Omit<TrackerStatus, "staleTracker"> = {
+  connected: false,
+  lastSeenAt: T0,
+  activeTokens: 1,
+  tools: [],
+  tokenLastUsedAt: null,
+  heartbeatIntervalMs: 30_000,
+  presence: { status: "offline", activity: null },
+  sources: [],
+  devices: [],
+};
+const olderServerStatus: TrackerStatus = withoutStale;
+eq("staleTracker is typed and carries the server's three fields", Object.keys(staleShape).sort(), [
+  "label",
+  "lastRejectedAt",
+  "revokedAt",
+]);
+eq("staleTracker is optional — a status without the key is a valid TrackerStatus", "staleTracker" in olderServerStatus, false);
+eq("the typed field accepts the server's shape", staleField?.lastRejectedAt, "2026-09-14T10:04:00.000Z");
+
+const offlineAndStale: StaleStatus = { connected: false, staleTracker: staleShape };
+
+// The rule itself: both halves required.
+eq("offline with a revoked token still heartbeating → say so", staleTrackerHint(offlineAndStale)?.lead, STALE_TRACKER_LEAD);
+eq("and it carries the fix sentence", staleTrackerHint(offlineAndStale)?.fix, STALE_TRACKER_FIX);
+eq(
+  "connected → silent, even while some token of this account is being rejected",
+  staleTrackerHint({ connected: true, staleTracker: staleShape }),
+  null,
+);
+eq("offline with nothing stale → silent (plain Offline, as before)", staleTrackerHint({ connected: false, staleTracker: null }), null);
+eq("offline on a server that omits the field → silent", staleTrackerHint({ connected: false }), null);
+eq("no status at all → silent", staleTrackerHint(null), null);
+
+// The sheet's extra gate. T0 = 10:00, T1 = 10:05.
+const at = (iso: string) => Date.parse(iso);
+const hintAt = (iso: string) => staleTrackerHint({ connected: false, staleTracker: { ...staleShape, lastRejectedAt: iso } });
+
+eq("rejected after this attempt started waiting → the sheet speaks", staleSinceWaiting(hintAt(T1), at(T0)), true);
+eq("rejected before it started waiting → the sheet stays neutral", staleSinceWaiting(hintAt(T0), at(T1)), false);
+eq("rejected at the same instant is not newer", staleSinceWaiting(hintAt(T0), at(T0)), false);
+eq("not waiting yet → nothing to be newer than", staleSinceWaiting(hintAt(T1), null), false);
+eq("no hint → nothing to say regardless of timing", staleSinceWaiting(null, at(T0)), false);
+eq("an unparseable server timestamp is not evidence", staleSinceWaiting(hintAt("not-a-date"), at(T0)), false);
+// Home and Settings deliberately do not apply this gate: they are ambient, with no
+// "moment this attempt began" to compare against.
+eq("the ambient rule ignores timing entirely", staleTrackerHint(offlineAndStale) !== null, true);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`trackerPing check failed: ${failures.join(", ")}`);

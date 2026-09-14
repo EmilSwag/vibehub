@@ -19,6 +19,7 @@ import { Card } from "./ui/Card";
 import { ModelGlyph } from "./ui/ModelGlyph";
 import { PresenceBlock, useNow } from "./ui/PresenceBlock";
 import { Skeleton } from "./ui/Skeleton";
+import { StaleTrackerHint } from "./ui/StaleTrackerHint";
 import { StatusDot } from "./ui/StatusDot";
 import { ToolGlyph } from "./ui/ToolGlyph";
 import styles from "./TrackingStatus.module.css";
@@ -231,6 +232,12 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
           </Link>
         )}
       </span>
+
+      {/* Its own row under the strip — i.e. under "Go online", which is the thing it is
+          about. Renders nothing unless the tracker is offline *and* the server says a
+          revoked token is still heartbeating, so the one-line strip stays one line in
+          every other case. */}
+      <StaleTrackerHint status={status} className={styles.stripHint} />
     </Card>
   );
 }
@@ -370,6 +377,10 @@ export function TrackingStatus({
           <span className={styles.meta}>
             {heartbeat} · {everyLabel(status.heartbeatIntervalMs)}
           </span>
+          {/* Directly under the status word, because it is what "Offline" is failing to
+              explain. Shared by both variants: Settings' permanent panel and Home's
+              first-run explainer ask the same question, and only one is ever on screen. */}
+          <StaleTrackerHint status={status} className={styles.headHint} />
         </div>
       </div>
 

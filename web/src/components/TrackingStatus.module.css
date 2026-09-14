@@ -37,6 +37,12 @@
   min-width: 0;
 }
 
+/* The head's own gap is 3px — right for a title and its timestamp, too tight for a
+   sentence that is a separate thought. */
+.headHint {
+  margin-top: 6px;
+}
+
 .title {
   font-size: 15px;
   font-weight: 600;
@@ -205,6 +211,19 @@
   width: 100%;
   min-width: 0;
   text-align: left;
+  /* Wrap so the stale-token hint can take a row of its own. The row above is unchanged
+     by this: .stripMain shrinks to nothing before anything wraps (flex:1, min-width:0),
+     so dot + main + right stay on one line exactly as they did under nowrap — the only
+     new behaviour is that a right column too wide for the container now drops to its own
+     line instead of overflowing it. */
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+/* Aligned with the title, not the dot: 10px dot + 12px gap. */
+.stripHint {
+  flex-basis: 100%;
+  padding-left: 22px;
 }
 
 .stripDot {
@@ -307,6 +326,14 @@
     flex-basis: 100%;
     justify-content: space-between;
     padding-left: 22px;
+    /* Its three children — the token counter, "Go online", "Tracker settings" — total
+       more than a phone's width once the 22px indent is taken off, and the container
+       defaulted to flex-wrap: nowrap, so they ran off the right edge and took the page
+       with them (measured at 390px: 39px past the card, 23px of horizontal page scroll).
+       Predates the round-10 hint — the same overflow is there with no hint rendered.
+       The children keep their own white-space: nowrap, so each label stays intact. */
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
 }
 
