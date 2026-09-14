@@ -2338,7 +2338,7 @@ function idleThresholdMs(config) {
 }
 
 // src/daemon.ts
-var import_node_child_process2 = require("node:child_process"), fs6 = __toESM(require("node:fs"));
+var import_node_child_process2 = require("node:child_process"), import_node_console = require("node:console"), fs6 = __toESM(require("node:fs"));
 
 // src/adapters/claudeCode.ts
 var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path"));
@@ -3169,7 +3169,10 @@ async function postHeartbeat(apiUrl, deviceToken, payload) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${deviceToken}`
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        // A stalled connection must not freeze the loop (ticks never overlap);
+        // a timeout is a plain failure → queued and retried next tick.
+        signal: AbortSignal.timeout(15e3)
       }
     );
     return { ok: res.ok, authRejected: res.status === 401 };
@@ -3346,15 +3349,38 @@ function startDaemon(entryPath) {
     return;
   }
   ensureConfigDir(), clearStopRequest();
-  let logFd = fs6.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
-    detached: !0,
-    stdio: ["ignore", logFd, logFd]
-  });
-  if (child.unref(), !child.pid) {
+  let pid = process.platform === "win32" ? spawnDetachedWindows(entryPath) : null;
+  if (pid === null && (pid = spawnDetachedDirect(entryPath)), pid === null) {
     console.error("Failed to start tracker daemon.");
     return;
   }
-  writeJsonAtomic(PID_PATH, { pid: child.pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() }), console.log(`Tracker started (pid ${child.pid}). Logs: ${LOG_PATH}`);
+  writeJsonAtomic(PID_PATH, { pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() }), console.log(`Tracker started (pid ${pid}). Logs: ${LOG_PATH}`);
+}
+function spawnDetachedDirect(entryPath) {
+  let logFd = fs6.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
+    detached: !0,
+    stdio: ["ignore", logFd, logFd],
+    windowsHide: !0
+  });
+  return child.unref(), child.pid ?? null;
+}
+function spawnDetachedWindows(entryPath) {
+  let psQuote = (s) => `'${s.replace(/'/g, "''")}'`, script = `$p = Start-Process -FilePath ${psQuote(process.execPath)} -ArgumentList @(${psQuote(`"${entryPath}"`)}, 'run-loop') -WindowStyle Hidden -PassThru; $p.Id`;
+  try {
+    let result = (0, import_node_child_process2.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8",
+      windowsHide: !0,
+      timeout: 2e4
+    }), pid = Number.parseInt((result.stdout ?? "").trim(), 10);
+    return result.status !== 0 || !Number.isInteger(pid) || pid <= 0 ? null : isProcessAlive(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+function redirectConsoleToLog() {
+  ensureConfigDir();
+  let out = fs6.createWriteStream(LOG_PATH, { flags: "a" });
+  globalThis.console = new import_node_console.Console({ stdout: out, stderr: out });
 }
 async function endLingeringSession() {
   let status = readStatus();
@@ -3392,7 +3418,7 @@ async function stopDaemon() {
   removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
 }
 function runForeground(config) {
-  clearStopRequest();
+  redirectConsoleToLog(), clearStopRequest();
   let shuttingDown = !1, stopLoop = null, shutdown = (reason) => {
     shuttingDown || (shuttingDown = !0, console.log(`tracker: shutting down (${reason})`), (stopLoop ? stopLoop() : Promise.resolve()).catch((err) => console.error("tracker: error during shutdown:", err)).finally(() => {
       removeFile(PID_PATH), clearStopRequest(), process.exit(0);
@@ -3431,7 +3457,8 @@ program2.name("vibehub-tracker").description("VibeHub local activity tracker");
 async function verifyToken(apiUrl, deviceToken) {
   try {
     let res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/verify`, {
-      headers: { Authorization: `Bearer ${deviceToken}` }
+      headers: { Authorization: `Bearer ${deviceToken}` },
+      signal: AbortSignal.timeout(15e3)
     });
     if (res.ok) {
       let body = await res.json().catch(() => ({}));

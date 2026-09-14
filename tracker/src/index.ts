@@ -32,8 +32,10 @@ program.name("vibehub-tracker").description("VibeHub local activity tracker");
  */
 async function verifyToken(apiUrl: string, deviceToken: string): Promise<{ ok: boolean; rejected: boolean; detail: string }> {
   try {
+    // Bounded: a stalled network must fail fast (saved anyway below), never hang setup.
     const res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/verify`, {
       headers: { Authorization: `Bearer ${deviceToken}` },
+      signal: AbortSignal.timeout(15000),
     });
     if (res.ok) {
       const body = (await res.json().catch(() => ({}))) as { username?: string };

@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { Console } from "node:console";
 import * as fs from "node:fs";
 import { readConfig } from "./config";
 import { runLoop, sendOrQueue } from "./heartbeat";
@@ -53,20 +54,70 @@ export function startDaemon(entryPath: string): void {
 
   ensureConfigDir();
   clearStopRequest(); // a leftover request must not stop the daemon we're about to start
-  const logFd = fs.openSync(LOG_PATH, "a");
-  const child = spawn(process.execPath, [entryPath, "run-loop"], {
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
-  });
-  child.unref();
 
-  if (!child.pid) {
+  let pid: number | null = process.platform === "win32" ? spawnDetachedWindows(entryPath) : null;
+  if (pid === null) pid = spawnDetachedDirect(entryPath);
+
+  if (pid === null) {
     console.error("Failed to start tracker daemon.");
     return;
   }
 
-  writeJsonAtomic(PID_PATH, { pid: child.pid, startedAt: new Date().toISOString() });
-  console.log(`Tracker started (pid ${child.pid}). Logs: ${LOG_PATH}`);
+  writeJsonAtomic(PID_PATH, { pid, startedAt: new Date().toISOString() });
+  console.log(`Tracker started (pid ${pid}). Logs: ${LOG_PATH}`);
+}
+
+/** Plain detached spawn. Correct on macOS/Linux (libuv marks fds close-on-exec). */
+function spawnDetachedDirect(entryPath: string): number | null {
+  const logFd = fs.openSync(LOG_PATH, "a");
+  const child = spawn(process.execPath, [entryPath, "run-loop"], {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    windowsHide: true,
+  });
+  child.unref();
+  return child.pid ?? null;
+}
+
+/**
+ * Windows: a detached child inherits every inheritable handle of this process,
+ * including the stdout/stderr PIPE an AI agent (Claude Code, Cursor) or CI runner
+ * gave us. The agent then waits for EOF until the daemon exits, so `start` looks
+ * frozen forever with no output. PowerShell's Start-Process goes through
+ * ShellExecute, which creates the daemon with a clean handle table (measured:
+ * the caller's pipe closes in ~1 s instead of the daemon's lifetime). The daemon
+ * writes its own log (see runForeground), so no redirection is needed here.
+ */
+function spawnDetachedWindows(entryPath: string): number | null {
+  const psQuote = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+  // Start-Process joins -ArgumentList with spaces and does not quote, so the
+  // script path is wrapped in double quotes itself (paths with spaces).
+  const script =
+    `$p = Start-Process -FilePath ${psQuote(process.execPath)} ` +
+    `-ArgumentList @(${psQuote(`"${entryPath}"`)}, 'run-loop') -WindowStyle Hidden -PassThru; $p.Id`;
+  try {
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 20000,
+    });
+    const pid = Number.parseInt((result.stdout ?? "").trim(), 10);
+    if (result.status !== 0 || !Number.isInteger(pid) || pid <= 0) return null;
+    return isProcessAlive(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The daemon owns its log file: on Windows it is started without any stdio
+ * redirection (see spawnDetachedWindows), and on other platforms this simply
+ * writes to the same file the parent opened for it.
+ */
+function redirectConsoleToLog(): void {
+  ensureConfigDir();
+  const out = fs.createWriteStream(LOG_PATH, { flags: "a" });
+  globalThis.console = new Console({ stdout: out, stderr: out });
 }
 
 /**
@@ -143,6 +194,7 @@ export async function stopDaemon(): Promise<void> {
  * user.
  */
 export function runForeground(config: TrackerConfig): void {
+  redirectConsoleToLog();
   // A request left behind by an interrupted `stop` must not end this daemon on
   // its very first check.
   clearStopRequest();

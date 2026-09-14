@@ -187,6 +187,9 @@ export async function postHeartbeat(
           Authorization: `Bearer ${deviceToken}`,
         },
         body: JSON.stringify(payload),
+        // A stalled connection must not freeze the loop (ticks never overlap);
+        // a timeout is a plain failure → queued and retried next tick.
+        signal: AbortSignal.timeout(15000),
       }
     );
     return { ok: res.ok, authRejected: res.status === 401 };
