@@ -228,6 +228,9 @@ function Progress({
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** The person copied a command — an attempt is under way (round 12: lets the card
+   *  behind the sheet say "Waiting…" only once there is something to wait for). */
+  onStarted?: () => void;
 }
 
 /**
@@ -241,7 +244,7 @@ interface Props {
  * Bottom sheet on phones, centered dialog on desktop. Focus moves in on open and back to
  * the opener on close, Tab is trapped, Escape and the backdrop close it.
  */
-export function ConnectSheet({ open, onClose }: Props) {
+export function ConnectSheet({ open, onClose, onStarted }: Props) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
@@ -354,6 +357,7 @@ export function ConnectSheet({ open, onClose }: Props) {
     // — the text is on screen and the message says to select it. Withholding progress
     // in that case leaves the one person who most needs it watching nothing.
     setStarted(true);
+    onStarted?.();
     setError(null);
     try {
       await navigator.clipboard.writeText(value);

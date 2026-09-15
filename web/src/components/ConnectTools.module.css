@@ -169,6 +169,12 @@
   animation: ct-pulse 1.4s var(--ease-out) infinite;
 }
 
+/* "Not connected": nothing is in flight, so nothing pulses. */
+.pulseStill {
+  animation: none;
+  opacity: 0.55;
+}
+
 .link {
   border: 0;
   background: none;

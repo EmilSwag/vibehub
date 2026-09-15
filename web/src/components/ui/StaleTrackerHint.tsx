@@ -11,8 +11,8 @@ const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(
  * they all get the same answer in the same words — a second wording for the same state
  * is how a product ends up telling one person to reinstall and another to restart.
  *
- * The rule (`!connected && staleTracker`) lives in lib/trackerPing.ts and is pinned by
- * its check file; this component only decides how it looks. It renders nothing at all
+ * The rule (a rejection newer than the last accepted heartbeat) lives in
+ * lib/trackerPing.ts and is pinned by its check file; this component only decides how it looks. It renders nothing at all
  * when the rule says nothing, so callers need no condition of their own.
  */
 export function StaleTrackerHint({ status, className }: { status: StaleStatus | null; className?: string }) {

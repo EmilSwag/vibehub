@@ -164,6 +164,8 @@ export const STALE_TRACKER_FIX = "Redo step 1 and step 2. Start replaces it.";
 /** Just the parts of TrackerStatus this rule reads, so it stays pure and testable. */
 export interface StaleStatus {
   connected: boolean;
+  /** Last *accepted* heartbeat. A rejected one never moves it. */
+  lastSeenAt?: string | null;
   staleTracker?: { lastRejectedAt: string; label: string | null; revokedAt: string } | null;
 }
 
@@ -177,18 +179,27 @@ export interface StaleTrackerHintCopy {
 /**
  * Should a surface say "a tracker here is running with a revoked token"?
  *
- * Both halves are required. `staleTracker` alone is not enough: a second machine's dead
- * token being rejected while *this* one heartbeats fine would otherwise put a warning on
- * a working setup. And `!connected` alone is the status quo — plain "Offline", which is
- * the word that was failing to explain anything.
+ * `staleTracker` alone is not enough: a second machine's dead token being rejected while
+ * *this* one heartbeats fine would otherwise put a warning on a working setup. So the
+ * rejection has to be *newer than the last accepted heartbeat* — nothing the server
+ * trusts has spoken since it turned a tracker away.
+ *
+ * That test replaces the old `!connected` gate (round 12). `connected` lingers for the
+ * whole presence window after the last good ping, so revoking your only device used to
+ * leave Settings saying "Connected" over "No devices yet." for two minutes, with the one
+ * sentence that explains it suppressed. While the account is offline the rule is the same
+ * as before: a rejection with no accepted ping after it is exactly the stale case.
  *
  * Optional-by-design: a server that predates the field omits it, and this returns null,
  * which is exactly the old behaviour.
  */
 export function staleTrackerHint(status: StaleStatus | null): StaleTrackerHintCopy | null {
-  if (!status || status.connected) return null;
+  if (!status) return null;
   const stale = status.staleTracker;
   if (!stale) return null;
+  const rejectedAt = Date.parse(stale.lastRejectedAt);
+  const seenAt = status.lastSeenAt ? Date.parse(status.lastSeenAt) : 0;
+  if (Number.isFinite(rejectedAt) && Number.isFinite(seenAt) && seenAt >= rejectedAt) return null;
   return { lead: STALE_TRACKER_LEAD, fix: STALE_TRACKER_FIX, lastRejectedAt: stale.lastRejectedAt };
 }
 
@@ -233,9 +244,10 @@ export function installedNote(status: NoteStatus | null, ago: (iso: string) => s
   return {
     lead: `Last tracked from ${device.label} · ${ago(device.lastUsedAt!)}.`,
     // "step 2", the Start step — an already-installed tracker that has gone quiet
-    // needs starting, not reinstalling. The reinstall caveat is the second sentence
-    // precisely because reinstalling is the thing you do *not* need here.
-    detail:
-      "Run step 2 again. After a reinstall, a running tracker keeps its old settings until you stop and start it yourself.",
+    // needs starting, not reinstalling. Since round 10 the tracker re-reads its config
+    // every tick and `start` replaces a daemon that is already running, so the old
+    // "keeps its old settings until you stop and start it yourself" caveat was false
+    // (round 12). Say what start does instead; it is the only command they need.
+    detail: "Run step 2 again. Start replaces a tracker that is already running.",
   };
 }

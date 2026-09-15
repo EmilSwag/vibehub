@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { usersApi } from "../../lib/api";
 import type { User, UserRole } from "../../types";
@@ -8,18 +8,28 @@ import styles from "./Onboarding.module.css";
 
 interface Props {
   user: User;
+  /** Unsaved picks kept by the page so Back → Continue does not lose them. */
+  draft?: UserRole[] | null;
+  onDraft?: (roles: UserRole[]) => void;
   onSaved: (user: User) => void;
   onBack: () => void;
   onNext: () => void;
 }
 
-export function StepRole({ user, onSaved, onBack, onNext }: Props) {
-  const [roles, setRoles] = useState<UserRole[]>(user.roles ?? []);
+export function StepRole({ user, draft, onDraft, onSaved, onBack, onNext }: Props) {
+  const [roles, setRoles] = useState<UserRole[]>(draft ?? user.roles ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Functional updater on purpose: two taps inside one render must both land
+  // (reading `roles` from the closure made the second overwrite the first).
   const toggle = (id: UserRole) =>
     setRoles((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+
+  // Mirror every committed change to the page-level draft so Back → Continue restores it.
+  useEffect(() => {
+    onDraft?.(roles);
+  }, [roles, onDraft]);
 
   const submit = async () => {
     if (roles.length === 0 || saving) return;

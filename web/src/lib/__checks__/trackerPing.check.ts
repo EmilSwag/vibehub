@@ -219,15 +219,17 @@ eq("it never says installed on, or this machine", /installed on|this machine/i.t
 // Installed-but-offline needs *starting*, not reinstalling - step 2 is the Start step.
 eq("the advice is to start again, not to reinstall", /Run step 2 again\./.test(dated?.detail ?? ""), true);
 eq("and it is never step 1", /step 1/.test(dated?.detail ?? ""), false);
+// Round 10 made `start` replace a running daemon and re-read config every tick, so the
+// old "keeps its old settings until you stop and start it yourself" caveat became false.
 eq(
-  "the reinstall caveat says a running tracker keeps its old settings",
-  /keeps its old settings until you stop and start it yourself/.test(dated?.detail ?? ""),
+  "the second sentence says what start does: it replaces a running tracker",
+  /Start replaces a tracker that is already running\./.test(dated?.detail ?? ""),
   true
 );
 eq(
-  "and that stopping or starting is only ever the user own command",
-  /until you stop and start it yourself\./.test(dated?.detail ?? ""),
-  true
+  "and never claims a running tracker keeps its old settings",
+  /keeps its old settings/.test(dated?.detail ?? ""),
+  false
 );
 
 // Neither branch may resurrect the two deleted claims.
@@ -301,12 +303,31 @@ eq("the typed field accepts the server's shape", staleField?.lastRejectedAt, "20
 
 const offlineAndStale: StaleStatus = { connected: false, staleTracker: staleShape };
 
-// The rule itself: both halves required.
+// The rule itself: the rejection must be newer than the last accepted heartbeat.
 eq("offline with a revoked token still heartbeating → say so", staleTrackerHint(offlineAndStale)?.lead, STALE_TRACKER_LEAD);
 eq("and it carries the fix sentence", staleTrackerHint(offlineAndStale)?.fix, STALE_TRACKER_FIX);
+// staleShape was rejected at 10:04. A good ping at 10:05 means a working tracker has
+// spoken since — a second machine's dead token must not put a warning on this one.
 eq(
-  "connected → silent, even while some token of this account is being rejected",
-  staleTrackerHint({ connected: true, staleTracker: staleShape }),
+  "connected, and a heartbeat was accepted after the rejection → silent",
+  staleTrackerHint({ connected: true, lastSeenAt: "2026-09-14T10:05:00.000Z", staleTracker: staleShape }),
+  null,
+);
+// Round 12: revoking your only device. `connected` lingers for the presence window, but
+// nothing has been accepted since the rejection — that is the stale case, say so now.
+eq(
+  "connected, but the rejection is newer than the last accepted ping → say so",
+  staleTrackerHint({ connected: true, lastSeenAt: "2026-09-14T10:03:00.000Z", staleTracker: staleShape })?.lead,
+  STALE_TRACKER_LEAD,
+);
+eq(
+  "a rejection at the same instant as the last good ping is not newer → silent",
+  staleTrackerHint({ connected: true, lastSeenAt: "2026-09-14T10:04:00.000Z", staleTracker: staleShape }),
+  null,
+);
+eq(
+  "offline, but a tracker pinged fine after the old rejection → silent (that one was replaced)",
+  staleTrackerHint({ connected: false, lastSeenAt: "2026-09-14T11:00:00.000Z", staleTracker: staleShape }),
   null,
 );
 eq("offline with nothing stale → silent (plain Offline, as before)", staleTrackerHint({ connected: false, staleTracker: null }), null);

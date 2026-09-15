@@ -48,8 +48,16 @@ export function StepIdentity({ user, onSaved, onNext }: Props) {
     setSaving(true);
     setError(null);
     try {
+      // GitHub sign-in falls back to `displayName = login` when the profile has no
+      // name. The greeting ("Back at it, {displayName}") would then keep showing the
+      // GitHub login after the user picked a nickname here (round 12). When the display
+      // name is still that fallback, move it along with the nickname; a real name is
+      // left alone.
+      const displayNameFollows = user.displayName.trim().toLowerCase() === user.username.toLowerCase();
       const { user: updated } =
-        normalized === user.username ? { user } : await usersApi.updateMe({ username: normalized });
+        normalized === user.username
+          ? { user }
+          : await usersApi.updateMe({ username: normalized, ...(displayNameFollows ? { displayName: normalized } : {}) });
       onSaved({ ...updated, avatarUrl });
       onNext();
     } catch (err) {
@@ -96,19 +104,33 @@ export function StepIdentity({ user, onSaved, onNext }: Props) {
           <input
             className={styles.input}
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              // "That nickname is taken" must not outlive the nickname it was about.
+              if (error) setError(null);
+            }}
             autoComplete="off"
+            autoCapitalize="none"
             spellCheck={false}
             maxLength={24}
             autoFocus
+            aria-invalid={(!valid && username.length > 0) || !!error ? true : undefined}
+            aria-describedby={error ? "nickname-hint nickname-error" : "nickname-hint"}
           />
         </span>
-        <span className={[styles.fieldHint, !valid && username.length > 0 && styles.fieldHintBad].filter(Boolean).join(" ")}>
+        <span
+          id="nickname-hint"
+          className={[styles.fieldHint, !valid && username.length > 0 && styles.fieldHintBad].filter(Boolean).join(" ")}
+        >
           3–24 characters · lowercase letters, digits, hyphens
         </span>
       </label>
 
-      {error && <p className={styles.error}>{error}</p>}
+      {error && (
+        <p id="nickname-error" role="alert" className={styles.error}>
+          {error}
+        </p>
+      )}
 
       <div className={[styles.actions, styles.actionsField].join(" ")}>
         <Button type="submit" disabled={!valid || saving || uploading}>

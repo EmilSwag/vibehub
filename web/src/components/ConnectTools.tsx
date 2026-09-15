@@ -168,6 +168,10 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
    *  card's whole job is to open it. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [copied, setCopied] = useState<Copyable | null>(null);
+  // Has the person copied a command in the sheet this session? Until then the card
+  // says "Not connected" — a pulsing "Waiting…" before any action was waiting for
+  // nothing (round 12, seen on the onboarding Connect step).
+  const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [celebrating, setCelebrating] = useState(false);
   const [seen, setSeen] = useState(() => (userId ? hasSeenTracking(userId) : false));
@@ -377,11 +381,17 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
             Connect
           </Button>
 
-          <div className={styles.foot}>
-            <span className={styles.waiting}>
-              <span className={styles.pulse} aria-hidden="true" /> Waiting…
-            </span>
-          </div>
+          {/* With the head above ("Nothing tracked yet.") a second "Not connected" line
+              would say the same thing twice; the compact card has no head, so there
+              the status line is the only state it shows. */}
+          {(attempted || variant === "compact") && (
+            <div className={styles.foot}>
+              <span className={styles.waiting} role="status">
+                <span className={cx(styles.pulse, !attempted && styles.pulseStill)} aria-hidden="true" />{" "}
+                {attempted ? "Waiting…" : "Not connected"}
+              </span>
+            </div>
+          )}
 
           {variant === "full" && status && (
             <>
@@ -429,7 +439,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
         />
       )}
 
-      <ConnectSheet open={sheetOpen} onClose={() => setSheetOpen(false)} />
+      <ConnectSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onStarted={() => setAttempted(true)} />
       {celebration}
     </>
   );

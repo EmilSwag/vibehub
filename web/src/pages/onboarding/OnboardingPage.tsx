@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { usersApi } from "../../lib/api";
+import type { UserRole } from "../../types";
 import { StepIdentity } from "./StepIdentity";
 import { StepRole } from "./StepRole";
 import { StepFriends } from "./StepFriends";
@@ -36,6 +37,9 @@ export function OnboardingPage() {
     return floor;
   });
   const [invited, setInvited] = useState(0);
+  // Unsaved role picks survive Back → Continue (round 12: they used to reset to the
+  // saved roles, i.e. none, because StepRole unmounts on Back).
+  const [roleDraft, setRoleDraft] = useState<UserRole[] | null>(null);
   const [tracking, setTracking] = useState(false);
   const [finishing, setFinishing] = useState(false);
 
@@ -87,7 +91,14 @@ export function OnboardingPage() {
           <StepIdentity user={user} onSaved={setUser} onNext={() => go("role")} />
         )}
         {step === "role" && (
-          <StepRole user={user} onSaved={setUser} onBack={() => go("identity")} onNext={() => go("friends")} />
+          <StepRole
+            user={user}
+            draft={roleDraft}
+            onDraft={setRoleDraft}
+            onSaved={setUser}
+            onBack={() => go("identity")}
+            onNext={() => go("friends")}
+          />
         )}
         {step === "friends" && (
           <StepFriends
