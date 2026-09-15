@@ -102,4 +102,11 @@ describe("isStaleDaemon", () => {
       assert.ok(!sentence.endsWith("."), `${reason}: carries its own full stop`);
     }
   });
+
+  it("does not claim a different build for older-build — a byte-identical reinstall trips it too", () => {
+    // The signal is "bundle written after the daemon started" (mtime), which re-running
+    // the one-liner with the same bundle also produces. The sentence must stay true then.
+    assert.ok(!/older build|newer build|different build/i.test(STALE_DAEMON_EXPLANATION["older-build"]));
+    assert.match(STALE_DAEMON_EXPLANATION["older-build"], /installed/);
+  });
 });

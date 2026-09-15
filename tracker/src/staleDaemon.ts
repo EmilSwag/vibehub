@@ -68,6 +68,9 @@ export function isStaleDaemon(inputs: StaleDaemonInputs): StaleDaemonReason | nu
 
 /** How `start` explains itself before replacing a daemon. Complete a sentence with it. */
 export const STALE_DAEMON_EXPLANATION: Record<StaleDaemonReason, string> = {
-  "older-build": "it is running an older build of the tracker than the one installed on this machine",
+  // mtime says "installed after the daemon started", not "different build": re-running
+  // the one-liner with a byte-identical bundle trips this too (round 12), so the sentence
+  // must be true in both cases.
+  "older-build": "it was started before the tracker was last installed on this machine",
   "revoked-token": "the server is rejecting its token and it has never read the newer one in config.json",
 };
