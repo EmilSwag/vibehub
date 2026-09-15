@@ -231,6 +231,9 @@ interface Props {
   /** The person copied a command — an attempt is under way (round 12: lets the card
    *  behind the sheet say "Waiting…" only once there is something to wait for). */
   onStarted?: () => void;
+  /** The celebration this sheet raised was dismissed. Onboarding advances on it, so
+   *  it must fire no matter which surface won the per-user claim. */
+  onCelebrated?: () => void;
 }
 
 /**
@@ -244,7 +247,7 @@ interface Props {
  * Bottom sheet on phones, centered dialog on desktop. Focus moves in on open and back to
  * the opener on close, Tab is trapped, Escape and the backdrop close it.
  */
-export function ConnectSheet({ open, onClose, onStarted }: Props) {
+export function ConnectSheet({ open, onClose, onStarted, onCelebrated }: Props) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
@@ -397,7 +400,12 @@ export function ConnectSheet({ open, onClose, onStarted }: Props) {
     dialog.current?.focus();
     return () => {
       document.body.style.overflow = overflow;
-      opener.current?.focus();
+      // Give focus back only if we still hold it. When the sheet closes because the
+      // tracker came alive, the celebration layer has already focused its "Enter";
+      // pulling focus back to the opener (which unmounts a moment later) dropped it
+      // on <body>, so Enter/Space did nothing (round 12 prod pass).
+      const active = document.activeElement;
+      if (!active || active === document.body || dialog.current?.contains(active)) opener.current?.focus();
     };
   }, [open]);
 
@@ -479,7 +487,10 @@ export function ConnectSheet({ open, onClose, onStarted }: Props) {
       open={celebrating}
       status={ping.status}
       onRefresh={async () => {}}
-      onClose={() => setCelebrating(false)}
+      onClose={() => {
+        setCelebrating(false);
+        onCelebrated?.();
+      }}
     />
   );
 

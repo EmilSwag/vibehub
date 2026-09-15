@@ -439,7 +439,12 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
         />
       )}
 
-      <ConnectSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onStarted={() => setAttempted(true)} />
+      <ConnectSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        onStarted={() => setAttempted(true)}
+        onCelebrated={onCelebrated}
+      />
       {celebration}
     </>
   );

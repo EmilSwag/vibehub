@@ -16,7 +16,10 @@ const STEPS = ["identity", "role", "friends", "connect", "welcome"] as const;
 // (skills/emil_design_eng §6). The celebration is the payoff, not a fifth step, so it
 // lands with every dot already done rather than adding one.
 const DOT_STEPS = STEPS.slice(0, -1);
-const STEP_KEY = "vh.onboarding.step";
+// Keyed by account: sessionStorage is per tab, and a second person signing in on the
+// same tab used to resume at the first one's step (round 12 prod pass: a fresh
+// account landed on "Welcome" without ever picking a nickname or a role).
+const stepKey = (userId: string | undefined) => `vh.onboarding.step:${userId ?? "anon"}`;
 type Step = (typeof STEPS)[number];
 
 /**
@@ -30,6 +33,7 @@ export function OnboardingPage() {
   // Resume where the user left off: role saved → skip identity, etc.
   // Survive a reload mid-wizard (a token was just minted, a terminal opened…):
   // resume where the user was, but never *ahead* of what the account allows.
+  const STEP_KEY = stepKey(user?.id);
   const [step, setStep] = useState<Step>(() => {
     const floor: Step = user?.roles?.length ? "friends" : "identity";
     const saved = sessionStorage.getItem(STEP_KEY) as Step | null;
@@ -44,10 +48,13 @@ export function OnboardingPage() {
   const [finishing, setFinishing] = useState(false);
 
   const index = STEPS.indexOf(step);
-  const go = useCallback((next: Step) => {
-    sessionStorage.setItem(STEP_KEY, next);
-    setStep(next);
-  }, []);
+  const go = useCallback(
+    (next: Step) => {
+      sessionStorage.setItem(STEP_KEY, next);
+      setStep(next);
+    },
+    [STEP_KEY]
+  );
 
   const finish = useCallback(async () => {
     if (finishing) return;
@@ -60,7 +67,7 @@ export function OnboardingPage() {
     } finally {
       setFinishing(false);
     }
-  }, [finishing, navigate, setUser]);
+  }, [finishing, navigate, setUser, STEP_KEY]);
 
   if (!user) return null;
 
