@@ -196,7 +196,7 @@ async function endLingeringSession(): Promise<void> {
         model: status.model,
         occurredAt: new Date().toISOString(),
       });
-      console.log(`Sent session_end for the interrupted session (${status.projectAlias} · ${status.tool}).`);
+      console.log(`Sent session_end for the interrupted session (${status.projectAlias}, ${status.tool}).`);
     }
   }
   writeOfflineStatus();

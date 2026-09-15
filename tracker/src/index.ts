@@ -59,7 +59,7 @@ program
     const verified = await verifyToken(options.apiUrl, deviceToken);
     if (verified.rejected) {
       console.error(`Login failed: token rejected by the server (${verified.detail}).`);
-      console.error("Create a new token in VibeHub → Settings → Tracker and try again.");
+      console.error("Create a new token in VibeHub > Settings > Tracker and try again.");
       process.exit(1);
     }
 
@@ -78,7 +78,7 @@ program
       console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`);
     } else {
       console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`);
-      console.log(`Could not verify with the server right now (${verified.detail}) — saved anyway.`);
+      console.log(`Could not verify with the server right now (${verified.detail}) - saved anyway.`);
       console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected.");
     }
 
@@ -154,15 +154,15 @@ program
     // (heartbeat.ts); a literal "Connected:" line also gives the connect-prompt
     // an AI agent pastes something unambiguous to check for.
     if (status.authRejected) {
-      console.log("Connected: no — token rejected by the server.");
-      console.log("  Create a new token in VibeHub → Settings → Tracker, then run:");
+      console.log("Connected: no - token rejected by the server.");
+      console.log("  Create a new token in VibeHub > Settings > Tracker, then run:");
       console.log("  vibehub-tracker login <newToken>");
     } else if (!running) {
-      console.log("Connected: no — daemon isn't running. Run `vibehub-tracker start`.");
+      console.log("Connected: no - daemon isn't running. Run `vibehub-tracker start`.");
     } else if (status.authRejected === false) {
       console.log("Connected: yes");
     } else {
-      console.log("Connected: not yet — waiting for the first heartbeat. Open an AI tool session and check again in ~30s.");
+      console.log("Connected: not yet - waiting for the first heartbeat. Open an AI tool session and check again in ~30s.");
     }
   });
 

@@ -2683,7 +2683,7 @@ var ProcessAdapter = class {
       return [];
     }
   }
-}, WATCHED_NAMES = [...new Set(RULES.flatMap((r) => r.names))], POWERSHELL_TIMEOUT_MS = 2e4;
+}, WATCHED_NAMES = [...new Set(RULES.flatMap((r) => r.names))], POWERSHELL_TIMEOUT_MS = 2e4, TASKLIST_TIMEOUT_MS = 2e4, PS_TIMEOUT_MS = 1e4, LSOF_TIMEOUT_MS = 5e3;
 async function listWindows() {
   try {
     return await listWindowsPowerShell();
@@ -2709,7 +2709,11 @@ async function listWindowsPowerShell() {
   return out;
 }
 async function listWindowsTasklist() {
-  let { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], { maxBuffer: 8388608, windowsHide: !0 }), out = [];
+  let { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], {
+    maxBuffer: 8388608,
+    windowsHide: !0,
+    timeout: TASKLIST_TIMEOUT_MS
+  }), out = [];
   for (let line of stdout.split(/\r?\n/)) {
     if (!line.startsWith('"')) continue;
     let cols = line.slice(1, -1).split('","');
@@ -2720,7 +2724,7 @@ async function listWindowsTasklist() {
   return out;
 }
 async function listUnix() {
-  let { stdout } = await exec("ps", ["-axo", "pid=,ppid=,comm="], { maxBuffer: 8388608 }), rows = stdout.split(`
+  let { stdout } = await exec("ps", ["-axo", "pid=,ppid=,comm="], { maxBuffer: 8388608, timeout: PS_TIMEOUT_MS }), rows = stdout.split(`
 `).map((l) => l.trim()).filter(Boolean).map((l) => {
     let m = l.match(/^(\d+)\s+(\d+)\s+(.*)$/);
     if (!m) return null;
@@ -2742,7 +2746,7 @@ async function listUnix() {
 }
 async function cwdOf(pid) {
   try {
-    let { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]), line = stdout.split(`
+    let { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { timeout: LSOF_TIMEOUT_MS }), line = stdout.split(`
 `).find((l) => l.startsWith("n"));
     return line ? line.slice(1) : null;
   } catch {
@@ -2782,9 +2786,18 @@ var CHARS_PER_TOKEN = 4, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_LINE_CHARS = 2 *
   projectPaths = /* @__PURE__ */ new Map();
   async poll() {
     let out = [], cutoff = Date.now() - this.recentWindowMs;
-    for (let root of this.roots)
-      for (let { file, projectDir } of chatLogs(root)) {
-        let mtime = this.tailer.mtime(file);
+    for (let root of this.roots) {
+      let logs = chatLogs(root).map((l) => ({ ...l, mtime: this.tailer.mtime(l.file) })), currentChat = /* @__PURE__ */ new Map();
+      for (let l of logs) {
+        let prev = currentChat.get(l.projectDir);
+        (!prev || l.mtime > prev.mtime) && currentChat.set(l.projectDir, { file: l.file, mtime: l.mtime });
+      }
+      let editsSeen = /* @__PURE__ */ new Map(), editsMtimeFor = (projectDir) => {
+        let at = editsSeen.get(projectDir);
+        return at === void 0 && (at = fileVersionsMtime(projectDir), editsSeen.set(projectDir, at)), at;
+      };
+      for (let { file, projectDir, mtime: chatMtime } of logs) {
+        let mtime = currentChat.get(projectDir)?.file === file ? Math.max(chatMtime, editsMtimeFor(projectDir)) : chatMtime;
         if (mtime < cutoff) {
           this.tailer.readNewLines(file);
           continue;
@@ -2814,6 +2827,7 @@ var CHARS_PER_TOKEN = 4, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_LINE_CHARS = 2 *
           confidence: "activity"
         });
       }
+    }
     return out;
   }
   /**
@@ -2867,6 +2881,13 @@ function chatLogs(root) {
     }
   }
   return out;
+}
+function fileVersionsMtime(projectDir) {
+  try {
+    return import_node_fs3.default.statSync(import_node_path4.default.join(projectDir, ".quadcodeai", ".data", "file_versions")).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 function dirs(parent) {
   try {
@@ -2942,9 +2963,27 @@ function peekModel(file) {
 }
 
 // src/detector.ts
-var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex", "quadcode"]), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, isLogBacked = (o) => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool), newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), usageKey = (tool, model) => `${tool}\0${model ?? ""}`, Detector = class {
-  constructor(activeWindowMs) {
+var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex", "quadcode"]), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, isLogBacked = (o) => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool), newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), usageKey = (tool, model) => `${tool}\0${model ?? ""}`, ADAPTER_POLL_TIMEOUT_MS = 45e3, TIMED_OUT = /* @__PURE__ */ Symbol("adapter poll timed out");
+async function pollAdapter(adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
+  let timer;
+  try {
+    let settled = await Promise.race([
+      adapter.poll(),
+      new Promise((resolve2) => {
+        timer = setTimeout(() => resolve2(TIMED_OUT), timeoutMs);
+      })
+    ]);
+    return settled === TIMED_OUT ? (console.warn(`tracker: adapter ${adapter.name} did not answer within ${timeoutMs} ms; skipped this tick`), []) : settled;
+  } catch (err) {
+    return console.warn(`tracker: adapter ${adapter.name} failed this tick:`, err instanceof Error ? err.message : err), [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+var Detector = class {
+  constructor(activeWindowMs, adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
     this.activeWindowMs = activeWindowMs;
+    this.adapterTimeoutMs = adapterTimeoutMs;
     this.adapters = [
       new ClaudeCodeAdapter(activeWindowMs * 6),
       // scan a wider window so idle sessions still resolve
@@ -2959,9 +2998,10 @@ var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex", "quadcod
     ];
   }
   activeWindowMs;
+  adapterTimeoutMs;
   adapters;
   async detect(now = Date.now(), current) {
-    let all = (await Promise.all(this.adapters.map((a) => a.poll().catch(() => [])))).flat();
+    let all = (await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs)))).flat();
     if (all.length === 0) return null;
     let usage = /* @__PURE__ */ new Map(), tokensIn = 0, tokensOut = 0;
     for (let o of all) {
@@ -3303,7 +3343,7 @@ function settleWithin(p, ms) {
     p.then(done, done);
   });
 }
-var LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"];
+var MIN_TICK_WATCHDOG_MS = 9e4, tickWatchdogMs = (intervalMs) => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS), LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"];
 function refreshConfig(active, loaded) {
   if (!loaded || typeof loaded.apiUrl != "string" || !loaded.apiUrl) return { config: active, changed: [] };
   if (typeof loaded.deviceToken != "string" || !loaded.deviceToken) return { config: active, changed: [] };
@@ -3313,28 +3353,39 @@ function refreshConfig(active, loaded) {
   return changed.length > 0 ? { config: next, changed: [...changed] } : { config: active, changed: [] };
 }
 function runLoop(initialConfig, options = {}) {
-  let loadConfig = options.loadConfig ?? readConfig, runTick = options.runTick ?? tick, config = initialConfig, state = createLoopState(config), intervalMs = heartbeatIntervalMs(config), inFlight = null, stopRequestSeen = !1, adoptCurrentConfig = () => {
+  let loadConfig = options.loadConfig ?? readConfig, runTick = options.runTick ?? tick, config = initialConfig, state = createLoopState(config), intervalMs = heartbeatIntervalMs(config), watchdogMs = options.watchdogMs ?? tickWatchdogMs(intervalMs), inFlight = null, ticks = 0, stopRequestSeen = !1, adoptCurrentConfig = () => {
     let refreshed = refreshConfig(config, loadConfig());
     return refreshed.changed.length > 0 && console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`), config = refreshed.config, config;
   }, checkStopRequest = () => stopRequestSeen ? !0 : isStopRequested() ? (stopRequestSeen = !0, console.log("tracker: stop requested (stop.request found)"), options.onStopRequest?.(), !0) : !1, safeTick = () => {
     if (state.stopping || checkStopRequest()) return;
     if (inFlight) {
-      console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
-      return;
+      let stuckFor = Date.now() - inFlight.startedAt;
+      if (stuckFor <= watchdogMs) {
+        console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
+        return;
+      }
+      console.warn(
+        `tracker: tick #${inFlight.seq} has been in flight for ${stuckFor} ms (watchdog ${watchdogMs} ms); abandoning it and starting a new tick`
+      ), inFlight = null;
     }
     let startedAt = Date.now();
-    inFlight = runTick(adoptCurrentConfig(), state).catch((err) => {
-      console.error("tracker: heartbeat tick failed:", err);
-    }).finally(() => {
-      inFlight = null;
-      let took = Date.now() - startedAt;
-      took > intervalMs && console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
-    });
+    ticks += 1;
+    let mine = {
+      seq: ticks,
+      startedAt,
+      done: runTick(adoptCurrentConfig(), state).catch((err) => {
+        console.error("tracker: heartbeat tick failed:", err);
+      }).finally(() => {
+        let took = Date.now() - startedAt;
+        inFlight === mine ? inFlight = null : console.warn(`tracker: abandoned tick #${mine.seq} finished late after ${took} ms`), took > intervalMs && console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
+      })
+    };
+    inFlight = mine;
   };
   safeTick();
   let interval = setInterval(safeTick, intervalMs), stopWatch = setInterval(checkStopRequest, STOP_REQUEST_POLL_MS);
   return { stop: async () => {
-    clearInterval(interval), clearInterval(stopWatch), state.stopping = !0, inFlight && await settleWithin(inFlight, IN_FLIGHT_GRACE_MS), state.activeSession && (await endActiveSession(config, state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), state.activeSession = null), writeOfflineStatus(), clearStopRequest();
+    clearInterval(interval), clearInterval(stopWatch), state.stopping = !0, inFlight && await settleWithin(inFlight.done, IN_FLIGHT_GRACE_MS), state.activeSession && (await endActiveSession(config, state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), state.activeSession = null), writeOfflineStatus(), clearStopRequest();
   } };
 }
 
@@ -3444,7 +3495,7 @@ async function endLingeringSession() {
         tool: status.tool,
         model: status.model,
         occurredAt: (/* @__PURE__ */ new Date()).toISOString()
-      }), console.log(`Sent session_end for the interrupted session (${status.projectAlias} \xB7 ${status.tool}).`));
+      }), console.log(`Sent session_end for the interrupted session (${status.projectAlias}, ${status.tool}).`));
     }
     writeOfflineStatus();
   }
@@ -3522,7 +3573,7 @@ async function verifyToken(apiUrl, deviceToken) {
 }
 program2.command("login <deviceToken>").description(`validate the token with the server, then write ${CONFIG_PATH_LABEL}`).option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL).action(async (deviceToken, options) => {
   let verified = await verifyToken(options.apiUrl, deviceToken);
-  verified.rejected && (console.error(`Login failed: token rejected by the server (${verified.detail}).`), console.error("Create a new token in VibeHub \u2192 Settings \u2192 Tracker and try again."), process.exit(1));
+  verified.rejected && (console.error(`Login failed: token rejected by the server (${verified.detail}).`), console.error("Create a new token in VibeHub > Settings > Tracker and try again."), process.exit(1));
   let existing = readConfig(), config = {
     apiUrl: options.apiUrl,
     deviceToken,
@@ -3531,7 +3582,7 @@ program2.command("login <deviceToken>").description(`validate the token with the
     idleThresholdMs: existing?.idleThresholdMs,
     toolProcessNames: existing?.toolProcessNames
   };
-  writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) \u2014 saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
+  writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) - saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
   let daemon = daemonStatus();
   daemon.running && (console.log(`Tracker is running (pid ${daemon.pid}): it picks up this token within 30 s.`), console.log("Run `start` anyway - it replaces a tracker started from an older build."));
 });
@@ -3552,7 +3603,7 @@ program2.command("status").description(`pretty-print the current ${STATUS_PATH_L
   let status = readStatus(), { running, pid } = daemonStatus();
   console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status !== "offline" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
   let seeingCutoff = Date.now() - 600 * 1e3, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
-  seeing.length > 0 ? console.log(`Seeing:  ${describeSources(seeing)}`) : running && console.log("Seeing:  nothing in the last 10 min (no AI tool open, no Claude Code / Codex log activity)"), status.authRejected ? (console.log("Connected: no \u2014 token rejected by the server."), console.log("  Create a new token in VibeHub \u2192 Settings \u2192 Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.authRejected === !1 ? console.log("Connected: yes") : console.log("Connected: not yet \u2014 waiting for the first heartbeat. Open an AI tool session and check again in ~30s.") : console.log("Connected: no \u2014 daemon isn't running. Run `vibehub-tracker start`.");
+  seeing.length > 0 ? console.log(`Seeing:  ${describeSources(seeing)}`) : running && console.log("Seeing:  nothing in the last 10 min (no AI tool open, no Claude Code / Codex log activity)"), status.authRejected ? (console.log("Connected: no - token rejected by the server."), console.log("  Create a new token in VibeHub > Settings > Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.authRejected === !1 ? console.log("Connected: yes") : console.log("Connected: not yet - waiting for the first heartbeat. Open an AI tool session and check again in ~30s.") : console.log("Connected: no - daemon isn't running. Run `vibehub-tracker start`.");
 });
 program2.command("stop").description("stop the running tracker daemon (waits for it to end the session cleanly)").action(async () => {
   await stopDaemon();

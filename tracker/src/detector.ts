@@ -102,10 +102,61 @@ const usageKey = (tool: string, model: string | null): string => `${tool}\u0000$
  *  4. No candidate at all: the newest observation of any kind, reported as
  *     `active: false` (editor open, nothing happening) so the loop can go idle.
  */
+/**
+ * Round 11: the ceiling on how long ONE adapter may hold up a tick.
+ *
+ * Deliberately above the process adapter's own internal budget (PowerShell 20 s, then
+ * the tasklist fallback 20 s), so this never preempts a fallback that is legitimately
+ * in progress. It is the backstop for the case those timeouts cannot cover: an adapter
+ * wedged somewhere with no timeout of its own (a stat on a disconnected network drive,
+ * a promise that simply never settles). Above this the tick gives up on that adapter
+ * and reports what the others found, which is strictly better than reporting nothing.
+ */
+export const ADAPTER_POLL_TIMEOUT_MS = 45_000;
+
+const TIMED_OUT = Symbol("adapter poll timed out");
+
+/**
+ * One adapter's poll, bounded. Never throws and never returns late: on timeout the
+ * adapter contributes nothing to this tick and says so once. The abandoned poll keeps
+ * running (fs/exec work is not cancellable) and its result is discarded; the adapters
+ * are all stateful tailers that re-read from their own offsets, so the next tick picks
+ * up whatever this one dropped.
+ */
+export async function pollAdapter(adapter: Adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS): Promise<Observation[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // Promise.race attaches a handler to the adapter's promise, so a rejection that
+    // arrives after the timeout is already handled and cannot crash the daemon.
+    const settled = await Promise.race([
+      adapter.poll(),
+      new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+      }),
+    ]);
+    if (settled === TIMED_OUT) {
+      console.warn(`tracker: adapter ${adapter.name} did not answer within ${timeoutMs} ms; skipped this tick`);
+      return [];
+    }
+    return settled;
+  } catch (err) {
+    // The Adapter contract says poll() never throws. If one does, that is a bug worth
+    // one line rather than the silence this used to keep.
+    console.warn(`tracker: adapter ${adapter.name} failed this tick:`, err instanceof Error ? err.message : err);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class Detector {
   private adapters: Adapter[];
 
-  constructor(private activeWindowMs: number) {
+  constructor(
+    private activeWindowMs: number,
+    /** Per-adapter ceiling for one poll. Injected by tests; see pollAdapter. */
+    private adapterTimeoutMs: number = ADAPTER_POLL_TIMEOUT_MS
+  ) {
     this.adapters = [
       new ClaudeCodeAdapter(activeWindowMs * 6), // scan a wider window so idle sessions still resolve
       new CodexAdapter(activeWindowMs * 6),
@@ -120,7 +171,7 @@ export class Detector {
   }
 
   async detect(now = Date.now(), current?: CurrentSession): Promise<Detection | null> {
-    const results = await Promise.all(this.adapters.map((a) => a.poll().catch(() => [] as Observation[])));
+    const results = await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs)));
     const all = results.flat();
     if (all.length === 0) return null;
 

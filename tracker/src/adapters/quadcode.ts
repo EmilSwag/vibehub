@@ -31,7 +31,11 @@ import { UsageAccumulator, normalizeModel } from "./usage";
  *    useless as a liveness signal; the *append* is the signal, and the file mtime
  *    is when that append happened. During a long turn nothing is appended at all —
  *    the process adapter (genui.exe / "Quadcode AI" window) carries presence then,
- *    which is exactly the split the detector is built for.
+ *    which is exactly the split the detector is built for. Presence alone is not
+ *    enough, though: a static window title degrades to presence-only after the
+ *    active window, so the user showed **Idle** through a 40-minute agent turn.
+ *    Round 11 adds the one mid-turn signal that does exist — the `file_versions`
+ *    directory mtime; see fileVersionsMtime and poll().
  *
  * 3. **`message` is ~99% embedded tool transcript.** `message_raw` is byte-identical
  *    to `message`, and in the measured record 214,147 of 215,709 chars sat inside
@@ -90,8 +94,39 @@ export class QuadcodeAdapter implements Adapter {
     const cutoff = Date.now() - this.recentWindowMs;
 
     for (const root of this.roots) {
-      for (const { file, projectDir } of chatLogs(root)) {
-        const mtime = this.tailer.mtime(file);
+      const logs = chatLogs(root).map((l) => ({ ...l, mtime: this.tailer.mtime(l.file) }));
+
+      // Round 11, work item 3. The chat JSONL is appended only at turn boundaries, so a
+      // 40-minute agent turn writes nothing and this adapter used to report the turn's
+      // START as the last activity - the user went Idle on the site while the agent was
+      // working (measured: chat records at 17:29 and 17:44, nothing between). The signal
+      // that DOES exist mid-turn is `.quadcodeai/.data/file_versions/`, which gains a
+      // `<file>_<uuid>.json` on every agent edit (20 writes in 4 minutes, measured), so
+      // the directory's own mtime moves. Directory stat only: no readdir, no recursion,
+      // no file contents - the entry names are project paths and never leave the machine.
+      //
+      // The bump applies to the project's most recently written chat, not to every chat
+      // in it: the liveness fact is "this project is being worked on", and the chat that
+      // is mid-turn is the newest one. Spreading it over every chat would make each of
+      // them equally fresh and let an arbitrary one's model win presence.
+      const currentChat = new Map<string, { file: string; mtime: number }>();
+      for (const l of logs) {
+        const prev = currentChat.get(l.projectDir);
+        if (!prev || l.mtime > prev.mtime) currentChat.set(l.projectDir, { file: l.file, mtime: l.mtime });
+      }
+      const editsSeen = new Map<string, number>();
+      const editsMtimeFor = (projectDir: string): number => {
+        let at = editsSeen.get(projectDir);
+        if (at === undefined) {
+          at = fileVersionsMtime(projectDir);
+          editsSeen.set(projectDir, at);
+        }
+        return at;
+      };
+
+      for (const { file, projectDir, mtime: chatMtime } of logs) {
+        const mtime =
+          currentChat.get(projectDir)?.file === file ? Math.max(chatMtime, editsMtimeFor(projectDir)) : chatMtime;
         if (mtime < cutoff) {
           // Still prime the tailer's offset so a later append is read as a delta
           // rather than replayed from wherever we happened to start.
@@ -219,6 +254,22 @@ function chatLogs(root: string): Array<{ file: string; projectDir: string }> {
     }
   }
   return out;
+}
+
+/**
+ * mtime of `<project>/.quadcodeai/.data/file_versions`, or 0 when there is none.
+ *
+ * A directory's mtime moves when an entry is added or removed, which is exactly what
+ * Quadcode does per agent edit (one new `<file>_<uuid>.json`). Note the limit: it does
+ * NOT move if a version file is overwritten in place rather than created, so this is a
+ * liveness signal that can only ever be late, never early.
+ */
+function fileVersionsMtime(projectDir: string): number {
+  try {
+    return fs.statSync(path.join(projectDir, ".quadcodeai", ".data", "file_versions")).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 function dirs(parent: string): string[] {

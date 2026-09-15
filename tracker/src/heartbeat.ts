@@ -461,6 +461,30 @@ export interface RunLoopOptions {
   loadConfig?: () => TrackerConfig | null;
   /** The per-tick work. Defaults to `tick`; injected by tests. */
   runTick?: (config: TrackerConfig, state: LoopState) => Promise<void>;
+  /** Overrides the tick watchdog. Injected by tests; see tickWatchdogMs. */
+  watchdogMs?: number;
+}
+
+/** Floor for the tick watchdog, so a short interval cannot make it trigger-happy. */
+export const MIN_TICK_WATCHDOG_MS = 90_000;
+
+/**
+ * How long one tick may stay in flight before the loop stops waiting for it.
+ *
+ * Ticks already skip rather than stack, which is right for a poll that is merely slow
+ * and wrong for one that is stuck: `inFlight` stays set forever, every later tick is
+ * skipped, and the daemon lives on sending nothing at all. The site then says
+ * "Offline" with the daemon running and no message anywhere explaining it (round 11
+ * finding). Three intervals is comfortably past "slow" for a poll meant to take under
+ * a second; the 90 s floor keeps a tightened interval from abandoning healthy ticks.
+ */
+export const tickWatchdogMs = (intervalMs: number): number => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS);
+
+/** The tick currently in flight. `seq` is what tells a late straggler from the live one. */
+interface InFlightTick {
+  seq: number;
+  startedAt: number;
+  done: Promise<void>;
 }
 
 /** What `refreshConfig` decided: the config to tick with, and what actually moved. */
@@ -533,7 +557,9 @@ export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = 
   let config = initialConfig;
   const state = createLoopState(config);
   const intervalMs = heartbeatIntervalMs(config);
-  let inFlight: Promise<void> | null = null;
+  const watchdogMs = options.watchdogMs ?? tickWatchdogMs(intervalMs);
+  let inFlight: InFlightTick | null = null;
+  let ticks = 0;
   let stopRequestSeen = false;
 
   /** Re-reads config.json and adopts it for this tick. Never throws: readConfig returns null. */
@@ -559,19 +585,42 @@ export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = 
   const safeTick = (): void => {
     if (state.stopping || checkStopRequest()) return;
     if (inFlight) {
-      console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
-      return;
+      const stuckFor = Date.now() - inFlight.startedAt;
+      if (stuckFor <= watchdogMs) {
+        console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
+        return;
+      }
+      // Past the watchdog the tick is presumed wedged, not slow. Let go of it and
+      // start a fresh one: a daemon that reports something stale is worth more than
+      // one that silently reports nothing until the machine is rebooted.
+      console.warn(
+        `tracker: tick #${inFlight.seq} has been in flight for ${stuckFor} ms (watchdog ${watchdogMs} ms); abandoning it and starting a new tick`
+      );
+      inFlight = null;
     }
     const startedAt = Date.now();
-    inFlight = runTick(adoptCurrentConfig(), state)
-      .catch((err) => {
-        console.error("tracker: heartbeat tick failed:", err);
-      })
-      .finally(() => {
-        inFlight = null;
-        const took = Date.now() - startedAt;
-        if (took > intervalMs) console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
-      });
+    ticks += 1;
+    const mine: InFlightTick = {
+      seq: ticks,
+      startedAt,
+      done: runTick(adoptCurrentConfig(), state)
+        .catch((err) => {
+          console.error("tracker: heartbeat tick failed:", err);
+        })
+        .finally(() => {
+          const took = Date.now() - startedAt;
+          // Only the tick that still OWNS the marker may clear it. An abandoned tick
+          // that finally returns must not clear the marker belonging to the tick that
+          // replaced it — doing so would let a third tick start alongside the second.
+          if (inFlight === mine) {
+            inFlight = null;
+          } else {
+            console.warn(`tracker: abandoned tick #${mine.seq} finished late after ${took} ms`);
+          }
+          if (took > intervalMs) console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
+        }),
+    };
+    inFlight = mine;
   };
 
   // First tick immediately: primes the log tailers so the *next* tick can
@@ -586,7 +635,7 @@ export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = 
     state.stopping = true;
     // Let a tick that is mid-send finish so session_end lands after its heartbeat;
     // a tick stuck in a slow poll is abandoned (it checks `stopping` on return).
-    if (inFlight) await settleWithin(inFlight, IN_FLIGHT_GRACE_MS);
+    if (inFlight) await settleWithin(inFlight.done, IN_FLIGHT_GRACE_MS);
     if (state.activeSession) {
       await endActiveSession(config, state.activeSession, new Date().toISOString());
       state.activeSession = null;

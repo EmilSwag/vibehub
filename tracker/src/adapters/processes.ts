@@ -139,6 +139,23 @@ const WATCHED_NAMES = [...new Set(RULES.flatMap((r) => r.names))];
 const POWERSHELL_TIMEOUT_MS = 20_000;
 
 /**
+ * Round 11: every process listing is bounded, because none of them were.
+ *
+ * `tasklist /v` resolves a window title for every process synchronously and blocks on
+ * a hung GUI app; it was measured at 54 s here, i.e. longer than a whole 30 s tick,
+ * and a tick that never returns is a daemon that is alive and silent — which the site
+ * renders as "Offline" with no explanation anywhere. Cutting the listing short costs
+ * one tick of process presence (the log adapters still report); not cutting it short
+ * cost the user their status.
+ *
+ * lsof is per-PID and only refines a cwd, so it gets much less rope: a stalled network
+ * mount can hang it indefinitely and the caller already treats null as "unknown".
+ */
+const TASKLIST_TIMEOUT_MS = 20_000;
+const PS_TIMEOUT_MS = 10_000;
+const LSOF_TIMEOUT_MS = 5_000;
+
+/**
  * Windows. `tasklist /v` resolves every window title synchronously and was measured
  * at ~54 s per call on a busy machine — longer than the 30 s tick. One `Get-Process`
  * call takes well under a second (measured ~0.4 s here) and returns, as compact JSON:
@@ -185,7 +202,11 @@ async function listWindowsPowerShell(): Promise<Proc[]> {
 
 /** Fallback: `tasklist /v /fo csv` — Image Name, PID, …, Window Title (last column). Slow (see above). */
 async function listWindowsTasklist(): Promise<Proc[]> {
-  const { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], { maxBuffer: 8 * 1024 * 1024, windowsHide: true });
+  const { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], {
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
+    timeout: TASKLIST_TIMEOUT_MS,
+  });
   const out: Proc[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.startsWith('"')) continue;
@@ -204,7 +225,7 @@ async function listWindowsTasklist(): Promise<Proc[]> {
  * descends from the editor and read its cwd via lsof.
  */
 async function listUnix(): Promise<Proc[]> {
-  const { stdout } = await exec("ps", ["-axo", "pid=,ppid=,comm="], { maxBuffer: 8 * 1024 * 1024 });
+  const { stdout } = await exec("ps", ["-axo", "pid=,ppid=,comm="], { maxBuffer: 8 * 1024 * 1024, timeout: PS_TIMEOUT_MS });
   const rows = stdout
     .split("\n")
     .map((l) => l.trim())
@@ -248,7 +269,7 @@ async function listUnix(): Promise<Proc[]> {
 
 async function cwdOf(pid: number): Promise<string | null> {
   try {
-    const { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
+    const { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { timeout: LSOF_TIMEOUT_MS });
     const line = stdout.split("\n").find((l) => l.startsWith("n"));
     return line ? line.slice(1) : null;
   } catch {
