@@ -44,6 +44,7 @@ export interface ModelFocus {
 /** "12.4 hours past 2 weeks" — the header's one number, Steam's own phrasing. */
 function pastTwoWeeks(seconds: number): string {
   if (seconds < 60) return "Nothing past 2 weeks";
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min past 2 weeks`;
   return `${(seconds / 3600).toFixed(1)} hours past 2 weeks`;
 }
 

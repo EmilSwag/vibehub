@@ -166,7 +166,9 @@ export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
 /** "18.4 hrs" — Steam's own unit for a lifetime total, one decimal, never "0.0". */
 export function formatHoursOnRecord(seconds: number): string {
   const hours = seconds / 3600;
-  if (hours >= 0.1) return `${hours.toFixed(1)} hrs`;
+  // Under an hour the decimal is noise ("0.1 hrs" for seven minutes, next to a Stats
+  // tile that says "7m"), so minutes carry until a full hour is on record.
+  if (hours >= 1) return `${hours.toFixed(1)} hrs`;
   return `${Math.max(0, Math.round(seconds / 60))} min`;
 }
 

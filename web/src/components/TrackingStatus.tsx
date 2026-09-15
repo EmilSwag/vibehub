@@ -179,23 +179,24 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
           <span className={styles.stripActivity}>
             <span className={styles.stripIn}>in</span>
             <span className={styles.stripProject}>{parts.project}</span>
-            <span className={styles.sep} aria-hidden="true">
-              ·
-            </span>
+            {/* Each "·" lives inside the pair it introduces. `.stripPair` is nowrap, so
+                when the line breaks on a phone the dot travels with its tool or model
+                instead of dangling at the end of the previous row (round 11, 390px). */}
             <span className={styles.stripPair}>
+              <span className={styles.sep} aria-hidden="true">
+                ·
+              </span>
               <ToolGlyph family={toolFamily(activity.tool)} size={13} className={styles.rowGlyph} />
               <span>{parts.tool}</span>
             </span>
             {parts.model && (
-              <>
+              <span className={styles.stripPair}>
                 <span className={styles.sep} aria-hidden="true">
                   ·
                 </span>
-                <span className={styles.stripPair}>
-                  <ModelGlyph family={modelFamily(activity.model)} size={13} className={styles.rowGlyph} />
-                  <span className={styles.stripModel}>{parts.model}</span>
-                </span>
-              </>
+                <ModelGlyph family={modelFamily(activity.model)} size={13} className={styles.rowGlyph} />
+                <span className={styles.stripModel}>{parts.model}</span>
+              </span>
             )}
             {live && (
               <span className={styles.stripElapsed}>

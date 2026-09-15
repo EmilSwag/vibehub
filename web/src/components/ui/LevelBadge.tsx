@@ -79,6 +79,16 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
   const pct = breakdown ? progressToNextLevel(level, breakdown.xp) : null;
   const interactive = size === "md" && !!breakdown;
 
+  // The number has to be legible at the size it is actually drawn. `md` is 76 px, so
+  // 22 units (three digits: 17) read fine. `sm` is 28 px: the same units come out at
+  // ~7 px for "100", which a list row cannot read (round 11, live Friends/onboarding),
+  // so the small badge gives the number more of the disc — a wider plate (23 of the
+  // ring's 28) and 28 / 21 units. Baseline follows the font so the glyphs stay centred.
+  const digits = String(level).length;
+  const plateR = size === "sm" ? 23 : PLATE_R;
+  const fontSize = size === "sm" ? (digits >= 3 ? 21 : 28) : digits >= 3 ? 17 : 22;
+  const baselineY = 32 + fontSize * 0.34;
+
   const close = () => {
     setOpen(false);
     triggerRef.current?.focus();
@@ -137,17 +147,15 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
           transform="rotate(-90 32 32)"
         />
       )}
-      {tier !== "plain" && <circle className={styles[`plate-${tier}`]} cx={32} cy={32} r={PLATE_R} />}
+      {tier !== "plain" && <circle className={styles[`plate-${tier}`]} cx={32} cy={32} r={plateR} />}
       <text
         className={cx(styles.number, (tier === "ink" || tier === "solid") && styles.numberOnPlate)}
         x={32}
-        y={39.5}
+        y={baselineY}
         textAnchor="middle"
         fontFamily="var(--vh-font-mono)"
         fontWeight={600}
-        // Three digits at 22 span ~36 of the plate's 40 units and kiss its edge;
-        // 17 keeps "100" inside the plate with the same margin two digits get.
-        fontSize={level >= 100 ? 17 : 22}
+        fontSize={fontSize}
       >
         {level}
       </text>

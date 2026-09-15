@@ -116,7 +116,7 @@ export function buildConnectPrompt(target: ConnectPromptTarget, token: string, a
   return [
     "Set up the VibeHub tracker on this machine. Install only — do not start it.",
     "",
-    "1. Detect the OS: macOS/Linux or Windows.",
+    "1. Detect the OS: macOS/Linux or Windows. In a bash shell on Windows (Git Bash), use the macOS/Linux lines.",
     "2. Run the matching command. It downloads the tracker and saves my token; it starts no background tracker and adds no OS autostart:",
     `   - macOS/Linux: ${bash}`,
     `   - Windows (PowerShell): ${ps1}`,

@@ -147,9 +147,11 @@ const partial = groupStatsByModel([
 eq("undated bucket sorts last", partial.map((r) => r.label), ["GPT-5 Codex", "Claude Opus 5"]);
 
 // ---- hours on record ----
-eq("formatHoursOnRecord", [formatHoursOnRecord(66_240), formatHoursOnRecord(3600), formatHoursOnRecord(120), formatHoursOnRecord(0)], [
+eq("formatHoursOnRecord", [formatHoursOnRecord(66_240), formatHoursOnRecord(3600), formatHoursOnRecord(3540), formatHoursOnRecord(420), formatHoursOnRecord(120), formatHoursOnRecord(0)], [
   "18.4 hrs",
   "1.0 hrs",
+  "59 min",
+  "7 min",
   "2 min",
   "0 min",
 ]);

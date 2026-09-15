@@ -400,8 +400,24 @@ export function ConnectSheet({ open, onClose }: Props) {
   // Copy is at the top of the sheet and the step list it creates is at the bottom, so
   // on a 900px window — and on every phone — the answer to "did that do anything?"
   // appeared off-screen. Bring it into the body's view when it first appears.
+  //
+  // Only a copy made in *this* opening earns the scroll. The copied flags persist, so
+  // a sheet that reopens with the block already there must open at the top — scrolled,
+  // "1 · Install" landed under the header on a 390px phone (round 11 prod pass).
+  const progressAtOpen = useRef(false);
   useEffect(() => {
-    if (!showProgress) return;
+    if (open) progressAtOpen.current = showProgress;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sampled at open only
+  }, [open]);
+  useEffect(() => {
+    if (!showProgress) {
+      progressAtOpen.current = false;
+      return;
+    }
+    if (progressAtOpen.current) {
+      progressAtOpen.current = false;
+      return;
+    }
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // Two frames, not one: the block mounts its three rows and the sweep line in the
     // same commit, and a scroll measured before that settles lands ~36px short.
