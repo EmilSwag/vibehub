@@ -14,6 +14,7 @@ import {
 import { stagger } from "../lib/motion";
 import { modelRowLabel } from "../lib/recentModels";
 import { sumToday } from "../lib/sources";
+import { homeDevices, revokePrompt, showHomeDevices } from "../lib/trackerPing";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { ModelGlyph } from "./ui/ModelGlyph";
@@ -59,11 +60,16 @@ interface DeviceListProps {
 export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
   const [busy, setBusy] = useState<string | null>(null);
 
-  const revoke = async (id: string) => {
+  const revoke = async (d: TrackerDevice) => {
     if (!onRevoke) return;
-    setBusy(id);
+    // A used token is a machine that is reporting; revoking it stops that tracker for
+    // good — the daemon gets rejected and only a reinstall brings it back. A ghost button
+    // in a list is one slip away, so ask first (Projects do the same before delete). A
+    // never-used token is harmless to drop and gets no dialog.
+    if (d.lastUsedAt && !window.confirm(revokePrompt(d.label))) return;
+    setBusy(d.id);
     try {
-      await onRevoke(id);
+      await onRevoke(d.id);
     } finally {
       setBusy(null);
     }
@@ -80,7 +86,7 @@ export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
           </span>
           <span className={styles.rowRight}>{d.lastUsedAt ? `seen ${agoShort(d.lastUsedAt, now)}` : "never used"}</span>
           {onRevoke && (
-            <Button size="sm" variant="ghost" onClick={() => revoke(d.id)} disabled={busy === d.id}>
+            <Button size="sm" variant="ghost" onClick={() => revoke(d)} disabled={busy === d.id}>
               Revoke
             </Button>
           )}
@@ -278,7 +284,7 @@ export interface TrackingStatusProps {
  *   Today          1.2k tokens · 34m active
  *   Now            Online · in vibehub · Claude Code · Claude Fable 5.1 · for 12m
  *   Models         ✦ Claude Fable 5.1 · ⌘ Claude Code       160 today · 12s ago
- *   Devices        Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1)
+ *   Devices        Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1 *used*)
  *   Sends tool, model, project name … Never code, prompts or diffs.   [Got it]
  *
  * Relative times re-render every 5s. The wrapper owns polling and realtime.
@@ -363,7 +369,10 @@ export function TrackingStatus({
   const live = status.presence.status === "active";
   const offline = status.presence.status === "offline";
   const running = !offline && status.presence.activity !== null;
-  const showDevices = variant === "settings" || status.devices.length > 1;
+  // Home lists only machines that have actually reported (a never-used token minted by
+  // opening the sheet is not one); Settings lists every non-revoked token — Revoke lives there.
+  const devices = variant === "settings" ? status.devices : homeDevices(status.devices);
+  const showDevices = variant === "settings" || showHomeDevices(status.devices);
   const capSources = variant === "home" && !allSources && status.sources.length > HOME_SOURCE_ROWS;
   const sources = capSources ? status.sources.slice(0, HOME_SOURCE_ROWS) : status.sources;
   const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
@@ -437,7 +446,7 @@ export function TrackingStatus({
           <span className={styles.label}>Devices</span>
           {/* Home lists devices so a second machine is visible, but revoking one is
               destructive and belongs with the rest of the tracker controls. */}
-          <DeviceList devices={status.devices} now={now} onRevoke={variant === "settings" ? onRevoke : undefined} />
+          <DeviceList devices={devices} now={now} onRevoke={variant === "settings" ? onRevoke : undefined} />
           {onAddDevice && !addDeviceBlock && (
             <div>
               <Button size="sm" variant="secondary" onClick={onAddDevice} disabled={addingDevice}>

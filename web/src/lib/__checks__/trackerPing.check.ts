@@ -16,12 +16,15 @@
 
 import {
   freshPing,
+  homeDevices,
   installedNote,
   newer,
   observePing,
   pingStage,
+  revokePrompt,
   sessionKeyOf,
   shouldCelebrate,
+  showHomeDevices,
   staleSinceWaiting,
   staleTrackerHint,
   STALE_TRACKER_FIX,
@@ -347,6 +350,33 @@ eq("an unparseable server timestamp is not evidence", staleSinceWaiting(hintAt("
 // Home and Settings deliberately do not apply this gate: they are ambient, with no
 // "moment this attempt began" to compare against.
 eq("the ambient rule ignores timing entirely", staleTrackerHint(offlineAndStale) !== null, true);
+
+// ---- Home's Devices section: a second *machine*, never a pending token (round 14) ----
+// Opening the connect sheet mints a token. If the person then closes the sheet, or follows
+// "Run step 2 again" so the old key reconnects, that token stays never-used. It is not a
+// device and must not conjure a Devices section on Home.
+const one = [dev("desktop", T0)];
+const oneAndPending = [dev("pending", null), dev("desktop", T0)];
+const two = [dev("desktop", T0), dev("laptop", T1)];
+eq("a single machine → no section", showHomeDevices(one), false);
+eq("one machine plus a never-used token → still no section", showHomeDevices(oneAndPending), false);
+eq("two machines → section", showHomeDevices(two), true);
+eq("two machines plus a pending token → section", showHomeDevices([dev("pending", null), ...two]), true);
+eq(
+  "and the pending token is not listed",
+  homeDevices([dev("pending", null), ...two]).map((d) => d.label),
+  ["desktop", "laptop"]
+);
+eq("nothing used yet → nothing listed", homeDevices([dev("pending", null)]), []);
+eq("order of the used ones is preserved", homeDevices(two).map((d) => d.label), ["desktop", "laptop"]);
+
+// ---- the question before revoking a live device (round 14) ----
+// One ghost click used to end a machine's tracking with no way back but a reinstall.
+const q = revokePrompt("Windows · Sep 16");
+eq("names the machine", q.startsWith("Revoke Windows · Sep 16?"), true);
+eq("says what stops and how to come back", /stops reporting until you install again\./.test(q), true);
+eq("never mentions keys or tokens", /token|key/i.test(q), false);
+eq("stays one short sentence pair", q.length < 90, true);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`trackerPing check failed: ${failures.join(", ")}`);

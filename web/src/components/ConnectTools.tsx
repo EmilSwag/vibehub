@@ -161,7 +161,9 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
   const isBanner = variant === "banner";
 
   const [status, setStatus] = useState<TrackerStatus | null>(null);
-  const [deviceToken, setDeviceToken] = useState<string | null>(null);
+  // The install block for a second machine, with the id of the token it shows so the
+  // block can fold away once that machine has reported.
+  const [deviceToken, setDeviceToken] = useState<{ token: string; tokenId: string } | null>(null);
   const [addingDevice, setAddingDevice] = useState(false);
   const [os, setOs] = useState<InstallOs>(detectOs);
   /** Round 8C: the picker, the copy and the wait all live in ConnectSheet now. This
@@ -289,6 +291,17 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     if (connected) setSheetOpen(false);
   }, [connected]);
 
+  // The "Add device" block has done its job the moment that machine reports — its row
+  // now says "seen …" right above, and a command with a token already in use is just
+  // clutter (round 14). Only "used" closes it here: a status fetched before the token
+  // existed simply does not list it yet, and must not read as "gone". Revoking the token
+  // from the list closes the block in `revoke` below.
+  useEffect(() => {
+    if (!deviceToken || !status) return;
+    const device = status.devices.find((d) => d.id === deviceToken.tokenId);
+    if (device?.lastUsedAt) setDeviceToken(null);
+  }, [deviceToken, status]);
+
   const copy = async (what: Copyable, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -304,6 +317,8 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     try {
       await usersApi.revokeTrackerToken(id);
       if (userId && readStoredConnectToken(userId)?.tokenId === id) clearStoredConnectToken(userId);
+      // The command in the Add-device block would now be one the tracker rejects.
+      if (deviceToken?.tokenId === id) setDeviceToken(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not revoke that device");
@@ -316,7 +331,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     setError(null);
     try {
       const res = await usersApi.createTrackerToken(deviceLabel(os));
-      setDeviceToken(res.token);
+      setDeviceToken({ token: res.token, tokenId: res.tokenId });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create a token");
@@ -423,7 +438,7 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
           addingDevice={addingDevice}
           addDeviceBlock={
             deviceToken ? (
-              <ManualInstall token={deviceToken} os={os} onOs={setOs} copied={copied} onCopy={copy} />
+              <ManualInstall token={deviceToken.token} os={os} onOs={setOs} copied={copied} onCopy={copy} />
             ) : undefined
           }
           error={error}

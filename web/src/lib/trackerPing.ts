@@ -251,3 +251,32 @@ export function installedNote(status: NoteStatus | null, ago: (iso: string) => s
     detail: "Run step 2 again. Start replaces a tracker that is already running.",
   };
 }
+
+/* ---- which devices the Home panel may list ---- */
+
+/**
+ * Home lists devices so a *second machine* is visible; it shows the section only when
+ * there is more than one. A token that was minted by opening the connect sheet but never
+ * used — the person closed the sheet, or followed "Run step 2 again" and the old key
+ * reconnected — is not a machine. Counting it grew a Devices section with a "never used"
+ * row after a routine reconnect (round 14). Settings keeps every non-revoked token
+ * because that is where Revoke lives; this rule is for Home only.
+ */
+export function homeDevices<T extends { lastUsedAt: string | null }>(devices: readonly T[]): T[] {
+  return devices.filter((d) => d.lastUsedAt !== null);
+}
+
+/** Home shows the Devices section only for a real second machine. */
+export function showHomeDevices(devices: readonly { lastUsedAt: string | null }[]): boolean {
+  return homeDevices(devices).length > 1;
+}
+
+/**
+ * The question asked before revoking a token that a machine has actually used. Short,
+ * names the machine, says what stops and what it takes to come back — nothing about
+ * "keys" or "tokens", which the person never saw. Never-used tokens are dropped without
+ * asking, so this is only ever about a real device.
+ */
+export function revokePrompt(label: string): string {
+  return `Revoke ${label}? Its tracker stops reporting until you install again.`;
+}
