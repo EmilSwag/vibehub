@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { ConnectTools } from "../../components/ConnectTools";
+import { DEVICE_CONNECT_SCOPE, TRACKER_SUPPORT_NOTICE } from "../../lib/connectPrompt";
 import styles from "./Onboarding.module.css";
 
 interface Props {
@@ -30,8 +31,8 @@ export function StepConnect({ onBack, onNext, onConnected }: Props) {
 
   return (
     <div className={styles.step}>
-      <h1 className={styles.title}>Connect your AI tools</h1>
-      <p className={styles.lead}>Paste one prompt. Only status, hours and tokens leave your machine.</p>
+      <h1 className={styles.title}>Connect VibeHub once</h1>
+      <p className={styles.lead}>{DEVICE_CONNECT_SCOPE} {TRACKER_SUPPORT_NOTICE}</p>
 
       <ConnectTools onConnected={markConnected} onCelebrated={advance} />
 

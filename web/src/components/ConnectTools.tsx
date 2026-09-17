@@ -1,6 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { API_BASE, usersApi } from "../lib/api";
-import { buildInstallCommand, buildStartCommand } from "../lib/connectPrompt";
+import {
+  BACKGROUND_START_MEANS,
+  CONNECT_COMMAND_ERROR,
+  COPY_ONLY_NOTICE,
+  DEVICE_CONNECT_SCOPE,
+  INSTALL_START_MEANS,
+  NODE_SETUP_NOTICE,
+  PRIVATE_COMMAND_NOTICE,
+  TRACKER_CONTROL_NOTICE,
+  TRACKER_HISTORY_NOTICE,
+  TRACKER_LOCAL_READS,
+  TRACKER_STATE_NOTICE,
+  TRACKER_SUPPORT_DETAILS,
+  TRACKER_SUPPORT_NOTICE,
+  TRACKER_UPLOADS,
+  TRACKER_VISIBILITY,
+  buildConnectPrompt,
+  buildOneCommandConnect,
+  buildStartCommand,
+  buildStatusCommand,
+  buildStopCommand,
+} from "../lib/connectPrompt";
 import type { InstallOs } from "../lib/connectPrompt";
 import {
   claimConnectCelebration,
@@ -12,6 +33,8 @@ import {
   markTrackingSeen,
   readStoredConnectToken,
 } from "../lib/connectToken";
+import { connectionAlive, newer, observePing } from "../lib/trackerPing";
+import type { PingObservation } from "../lib/trackerPing";
 import { useExitTransition } from "../lib/motion";
 import type { TrackerStatus } from "../types";
 import { useAuth } from "../context/AuthContext";
@@ -25,185 +48,205 @@ import { useNow } from "./ui/PresenceBlock";
 import styles from "./ConnectTools.module.css";
 
 const WEB_URL = window.location.origin;
-
-// The celebration shows once per user per tab, on whichever surface notices the
-// connection first (Home banner, Settings, or the sheet). Level-triggered ("is
-// connected and hasn't been celebrated yet") so a connection made on another page still
-// gets its moment here. The gate itself is `claimConnectCelebration` in lib/connectToken
-// — shared with ConnectSheet, and keyed by user id so switching accounts in one tab
-// still celebrates.
-
 const POLL_WAITING_MS = 5_000;
 const POLL_CONNECTED_MS = 10_000;
 const EXIT_MS = 260;
-
 const OSES: { id: InstallOs; label: string }[] = [
   { id: "mac", label: "macOS / Linux" },
   { id: "windows", label: "Windows" },
 ];
-
-type Copyable = "command" | "start" | "token";
-/** "offline" = this account has heartbeated before but its tracker is silent now.
- *  It must not fall back to the connect card: that reads as "not connected" and
- *  mints tokens nobody needs. It gets the status panel/strip saying so instead. */
+type Copyable = "command" | "assistant" | "start" | "status" | "stop";
+type CopyError = { what: Copyable; message: string } | null;
 type Phase = "loading" | "waiting" | "connected" | "offline";
+const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
-const cx =(...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
-
-/* ---- Segmented control (target / OS) ---- */
-
-function Segment<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { id: T; label: string }[];
-  value: T;
-  onChange: (id: T) => void;
-}) {
+function OsPicker({ value, onChange }: { value: InstallOs; onChange: (os: InstallOs) => void }) {
   return (
-    <div className={styles.seg} role="tablist" aria-label={label}>
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          role="tab"
-          aria-selected={value === o.id}
-          className={cx(styles.segBtn, value === o.id && styles.segBtnOn)}
-          onClick={() => onChange(o.id)}
-        >
-          {o.label}
+    <div className={styles.seg} role="group" aria-label="Operating system">
+      {OSES.map((os) => (
+        <button key={os.id} type="button" aria-pressed={value === os.id}
+          className={cx(styles.segBtn, value === os.id && styles.segBtnOn)} onClick={() => onChange(os.id)}>
+          {os.label}
         </button>
       ))}
     </div>
   );
 }
 
-/* ---- Manual install: token + OS-segmented one-liner ---- */
-
-function ManualInstall({
-  token,
-  os,
-  onOs,
-  copied,
-  onCopy,
-}: {
+/** Settings uses the same command and foreground disclosure as the main sheet. */
+function ManualInstall({ token, os, onOs, copied, onCopy, error }: {
   token: string;
   os: InstallOs;
   onOs: (os: InstallOs) => void;
   copied: Copyable | null;
   onCopy: (what: Copyable, text: string) => void;
+  error: CopyError;
 }) {
-  const command = buildInstallCommand(os, token, API_BASE, WEB_URL);
-  // Installing sets the tracker up and starts nothing (2026-09-14). Without the
-  // second command this panel is a dead end: you run the one-liner, it succeeds, and
-  // nothing ever tracks. Token-free — it reads the one the install just saved.
-  const startCmd = buildStartCommand(os);
+  const id = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const commands = useMemo(() => {
+    try {
+      return {
+        command: buildOneCommandConnect(os, token, API_BASE, WEB_URL),
+        prompt: buildConnectPrompt("assistant", token, API_BASE, WEB_URL, os),
+        error: null,
+      };
+    } catch {
+      return { command: null, prompt: null, error: CONNECT_COMMAND_ERROR };
+    }
+  }, [os, token]);
+  const copyError = (what: Copyable) => error?.what === what
+    ? <p className={styles.error} role="alert">{error.message}</p> : null;
   return (
     <div className={cx(styles.manual, "fade-in")}>
-      <div className={styles.osRow}>
-        <span className={styles.manualLabel}>Run in your terminal</span>
-        <Segment label="Operating system" options={OSES} value={os} onChange={onOs} />
+      <h3 className={styles.manualLabel}>Install and start on the device you're adding</h3>
+      <p className={styles.sub}>{DEVICE_CONNECT_SCOPE}</p>
+      <OsPicker value={os} onChange={onOs} />
+      <p className={styles.sub}>{os === "windows" ? "Paste in PowerShell." : "Paste in Terminal."} {NODE_SETUP_NOTICE}</p>
+      <div className={styles.consent} aria-label="Before you start">
+        <p>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
+        <p>{TRACKER_LOCAL_READS}</p>
+        <p>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
       </div>
-      {/* Command and button stack on phones — side by side the button used to sit
-          on top of the command text (round-7 design QA). */}
-      <div className={styles.cmdRow}>
-        <code className={styles.cmd}>{command}</code>
-        <Button size="sm" variant="secondary" className={styles.cmdCopy} onClick={() => onCopy("command", command)}>
-          {copied === "command" ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <span className={styles.hint}>Then start it — runs in the background until you stop it:</span>
-      <div className={styles.cmdRow}>
-        <code className={styles.cmd}>{startCmd}</code>
-        <Button size="sm" variant="secondary" className={styles.cmdCopy} onClick={() => onCopy("start", startCmd)}>
-          {copied === "start" ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <div className={styles.tokenRow}>
-        <code className={styles.token}>{token}</code>
-        <button type="button" className={styles.link} onClick={() => onCopy("token", token)}>
-          {copied === "token" ? "Copied" : "Copy token"}
-        </button>
-      </div>
-      <span className={styles.hint}>Needs Node.js 18+.</span>
+      <button type="button" className={styles.link} aria-expanded={detailsOpen} aria-controls={`${id}-data`} onClick={() => setDetailsOpen((value) => !value)}>
+        Data access and supported sources
+      </button>
+      {detailsOpen && (
+        <div id={`${id}-data`} className={styles.details}>
+          <p className={styles.sub}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
+          <p className={styles.sub}>{TRACKER_STATE_NOTICE} A needed Node.js runtime stays in VibeHub's folder. System PATH and OS startup settings stay unchanged.</p>
+          <p className={styles.sub}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
+        </div>
+      )}
+      <p className={styles.sub}>{PRIVATE_COMMAND_NOTICE}</p>
+      <p className={styles.sub}>{COPY_ONLY_NOTICE}</p>
+      {commands.command ? (
+        <div className={styles.cmdRow}>
+          <pre className={styles.cmd} tabIndex={0} aria-label="Install and start command">{commands.command}</pre>
+          <Button className={styles.cmdCopy} onClick={() => onCopy("command", commands.command!)}>
+            {copied === "command" ? "Command copied" : "Copy install & start"}
+          </Button>
+        </div>
+      ) : <p className={styles.error} role="alert">{commands.error}</p>}
+      {copyError("command")}
+      <button type="button" className={styles.link} aria-expanded={assistantOpen} aria-controls={`${id}-assistant`} onClick={() => setAssistantOpen((value) => !value)}>
+        Ask your AI assistant
+      </button>
+      {assistantOpen && (
+        <div id={`${id}-assistant`} className={styles.details}>
+          <p className={styles.sub}>This changes where you run setup, not what gets tracked. A local coding assistant must ask for your yes before starting. ChatGPT can guide you but cannot run commands on your device.</p>
+          <p className={styles.sub}>If an assistant declines, stop automation. You may choose to run the terminal command yourself; never change its permissions to force a start.</p>
+          {commands.prompt && (
+            <div className={styles.cmdRow}>
+              <pre className={styles.cmd} tabIndex={0} aria-label="Assistant setup prompt">{commands.prompt}</pre>
+              <Button variant="secondary" className={styles.cmdCopy} onClick={() => onCopy("assistant", commands.prompt!)}>
+                {copied === "assistant" ? "Prompt copied" : "Copy assistant prompt"}
+              </Button>
+            </div>
+          )}
+          {copyError("assistant")}
+        </div>
+      )}
+      <button type="button" className={styles.link} aria-expanded={controlsOpen} aria-controls={`${id}-controls`} onClick={() => setControlsOpen((value) => !value)}>
+        Status, Stop & reconnect
+      </button>
+      {controlsOpen && (
+        <div id={`${id}-controls`} className={styles.details}>
+          <p className={styles.sub}>{TRACKER_CONTROL_NOTICE}</p>
+          <p className={styles.sub}>Already installed? Start / reconnect uses the saved key and replaces a running tracker. It has the same background data access described above.</p>
+          {([
+            ["status", "Check status", buildStatusCommand(os)],
+            ["stop", "Stop", buildStopCommand(os)],
+            ["start", "Start / reconnect", buildStartCommand(os)],
+          ] as const).map(([what, label, command]) => (
+            <div key={what} className={styles.details}>
+              <h4 className={styles.manualLabel}>{label}</h4>
+              <div className={styles.cmdRow}>
+                <pre className={styles.cmd} tabIndex={0} aria-label={`${label} command`}>{command}</pre>
+                <Button variant="secondary" className={styles.cmdCopy} onClick={() => onCopy(what, command)}>
+                  {copied === what ? "Command copied" : `Copy ${label.toLowerCase()}`}
+                </Button>
+              </div>
+              {copyError(what)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---- ConnectTools ---- */
-
 interface Props {
-  /** compact = onboarding (always visible); banner = Home (hides itself once
-   * connected and explained, with exit transitions); full = Settings (lists
-   * devices in both states). */
   variant?: "compact" | "banner" | "full";
-  /** Fires the first time we observe a live heartbeat. */
+  /** First server-observed live connection, including one already live at mount. */
   onConnected?: () => void;
-  /** Fires when the celebration layer is dismissed — onboarding advances on it. */
   onCelebrated?: () => void;
 }
 
-/**
- * One component, two states. Not connected → the connect card, whose whole job is
- * one click: pick a tool, Copy, wait. Connected → TrackingStatus (what got
- * connected, is it tracking). This wrapper owns the status poll (5s while waiting,
- * 10s while the connected panel is on screen), reacts instantly to the viewer's own
- * presence pushes, mints the device token exactly once per browser
- * (lib/connectToken), and raises the first-heartbeat celebration.
- */
-export function ConnectTools({ variant = "compact", onConnected, onCelebrated }: Props) {
+/** A user change remounts all visible and in-flight connection state together. */
+export function ConnectTools(props: Props) {
+  const { user } = useAuth();
+  return <ConnectToolsForUser key={user?.id ?? "signed-out"} {...props} />;
+}
+
+function ConnectToolsForUser({ variant = "compact", onConnected, onCelebrated }: Props) {
   const { user } = useAuth();
   const { presences } = useRealtime();
   const userId = user?.id ?? null;
   const isBanner = variant === "banner";
-
-  const [status, setStatus] = useState<TrackerStatus | null>(null);
-  // The install block for a second machine, with the id of the token it shows so the
-  // block can fold away once that machine has reported.
-  const [deviceToken, setDeviceToken] = useState<{ token: string; tokenId: string } | null>(null);
+  const [observation, setObservation] = useState<PingObservation<TrackerStatus> | null>(null);
+  const status = observation?.tracker ?? null;
+  const [deviceToken, setDeviceToken] = useState<{ token: string; tokenId: string; baselineAt: string | null } | null>(null);
   const [addingDevice, setAddingDevice] = useState(false);
   const [os, setOs] = useState<InstallOs>(detectOs);
-  /** Round 8C: the picker, the copy and the wait all live in ConnectSheet now. This
-   *  card's whole job is to open it. */
   const [sheetOpen, setSheetOpen] = useState(false);
   const [copied, setCopied] = useState<Copyable | null>(null);
-  // Has the person copied a command in the sheet this session? Until then the card
-  // says "Not connected" — a pulsing "Waiting…" before any action was waiting for
-  // nothing (round 12, seen on the onboarding Connect step).
+  const [copyError, setCopyError] = useState<CopyError>(null);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [celebrating, setCelebrating] = useState(false);
   const [seen, setSeen] = useState(() => (userId ? hasSeenTracking(userId) : false));
+  const mounted = useRef(false);
+  const refreshGeneration = useRef(0);
+  const copyGeneration = useRef(0);
+  const actionGeneration = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      refreshGeneration.current += 1;
+      copyGeneration.current += 1;
+      actionGeneration.current += 1;
+    };
+  }, []);
 
-  const phase: Phase = !status
-    ? "loading"
-    : status.connected
-      ? "connected"
-      : status.lastSeenAt
-        ? "offline"
-        : "waiting";
+  const hasHeartbeat = status !== null && newer(status.lastSeenAt, null);
+  const phase: Phase = !status ? "loading" : hasHeartbeat && connectionAlive(status)
+    ? "connected" : hasHeartbeat ? "offline" : "waiting";
   const connected = phase === "connected";
-  // Panel and strip show for anyone who has ever heartbeated; only a blank account gets the card.
   const everConnected = connected || phase === "offline";
 
   const refresh = useCallback(async () => {
+    if (!mounted.current || !userId) return;
+    const mine = ++refreshGeneration.current;
     try {
-      setStatus(await usersApi.trackerStatus());
+      const next = await usersApi.trackerStatus();
+      if (!mounted.current || mine !== refreshGeneration.current) return;
+      setObservation((previous) => observePing(previous, next));
+      setStatusError(null);
     } catch {
-      /* transient — keep the last known state */
+      if (mounted.current && mine === refreshGeneration.current) setStatusError("Could not check tracker status. Try again.");
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (userId) dropForeignConnectTokens(userId);
     void refresh();
   }, [userId, refresh]);
 
-  // onConnected: the first time a connection is observed (a live flip, or an
-  // account that was already connected when this mounted).
   const firedRef = useRef(false);
   useEffect(() => {
     if (!connected || firedRef.current) return;
@@ -211,104 +254,79 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     onConnected?.();
   }, [connected, onConnected]);
 
-  // Track whether this mount saw the flip itself (for the celebration gate below).
-  const sawFlipRef = useRef(false);
-  const prevPhaseRef = useRef<Phase>("loading");
-  useEffect(() => {
-    if (prevPhaseRef.current === "waiting" && phase === "connected") sawFlipRef.current = true;
-    prevPhaseRef.current = phase;
-  }, [phase]);
-
-  // Poll every 5s while waiting: the user is watching this card.
   useEffect(() => {
     if (phase !== "waiting") return;
     const id = window.setInterval(() => void refresh(), POLL_WAITING_MS);
     return () => window.clearInterval(id);
   }, [phase, refresh]);
 
-  // Poll every 10s while the panel or the Home strip is on screen and the tab is
-  // visible. Both show "last heartbeat" and today's counter, which realtime
-  // pushes alone would let drift.
-  const panelVisible = everConnected;
   useEffect(() => {
-    if (!panelVisible) return;
+    if (!everConnected) return;
     let id: number | undefined;
-    const stop = () => {
-      if (id !== undefined) window.clearInterval(id);
-      id = undefined;
-    };
+    const stop = () => { if (id !== undefined) window.clearInterval(id); id = undefined; };
     const sync = () => {
       stop();
       if (document.visibilityState === "visible") id = window.setInterval(() => void refresh(), POLL_CONNECTED_MS);
     };
     sync();
     document.addEventListener("visibilitychange", sync);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", sync);
-    };
-  }, [panelVisible, refresh]);
+    return () => { stop(); document.removeEventListener("visibilitychange", sync); };
+  }, [everConnected, refresh]);
 
-  // Realtime: the server pushes the viewer's own presence too. Merge it at once
-  // (status word / activity), then pull the full status for sources and devices.
+  // Presence is a reason to fetch, not proof of a first heartbeat. Only the server
+  // status response may advance the baseline or announce a connection.
   const me = user ? presences.get(user.username) : undefined;
+  useEffect(() => { if (me) void refresh(); }, [me, refresh]);
+
+  const celebrationAttempted = useRef(false);
   useEffect(() => {
-    if (!me) return;
-    setStatus((prev) =>
-      prev
-        ? { ...prev, connected: me.status !== "offline", presence: { status: me.status, activity: me.activity } }
-        : prev
-    );
-    void refresh();
-  }, [me, refresh]);
+    if (celebrationAttempted.current || !connected || !userId || !observation || observation.liveAtOpen) return;
+    if (!status || !connectionAlive(status) || !newer(status.lastSeenAt, observation.baselineAt)) return;
+    celebrationAttempted.current = true;
+    if (claimConnectCelebration(userId)) setCelebrating(true);
+  }, [connected, userId, observation, status]);
 
-  // Celebration — once per user per tab, on the flip (or on first landing while the
-  // explainer hasn't been seen yet). No user id yet means auth is still loading; the
-  // effect re-runs when it arrives, so the moment is delayed rather than lost.
-  useEffect(() => {
-    if (!connected || !userId) return;
-    if (!sawFlipRef.current && hasSeenTracking(userId)) return;
-    if (!claimConnectCelebration(userId)) return;
-    setCelebrating(true);
-  }, [connected, userId]);
+  const closeCelebration = useCallback(() => { setCelebrating(false); onCelebrated?.(); }, [onCelebrated]);
 
-  const closeCelebration = useCallback(() => {
-    setCelebrating(false);
-    onCelebrated?.();
-  }, [onCelebrated]);
-
-  // Once the tracker has used the stored token, forget it — the next connect
-  // card (if ever) starts from a fresh one instead of a token already in use.
   useEffect(() => {
     if (!userId || !status) return;
     const stored = readStoredConnectToken(userId);
     if (!stored) return;
-    const device = status.devices.find((d) => d.id === stored.tokenId);
-    if (device?.lastUsedAt) clearStoredConnectToken(userId);
+    if (status.devices.find((device) => device.id === stored.tokenId)?.lastUsedAt) clearStoredConnectToken(userId);
   }, [userId, status]);
 
+  // Close on a witnessed transition, never on each poll of an already-live account.
+  const previouslyConnected = useRef(false);
   useEffect(() => {
-    if (connected) setSheetOpen(false);
-  }, [connected]);
+    const transitioned = connected && !previouslyConnected.current;
+    previouslyConnected.current = connected;
+    if (transitioned && observation && !observation.liveAtOpen && newer(status?.lastSeenAt ?? null, observation.baselineAt)) setSheetOpen(false);
+  }, [connected, observation, status]);
 
-  // The "Add device" block has done its job the moment that machine reports — its row
-  // now says "seen …" right above, and a command with a token already in use is just
-  // clutter (round 14). Only "used" closes it here: a status fetched before the token
-  // existed simply does not list it yet, and must not read as "gone". Revoking the token
-  // from the list closes the block in `revoke` below.
+  // A verified key alone must not hide the instructions. Keep the established fold,
+  // but require a fresh accepted account heartbeat as well. The existing API does
+  // not expose a per-device heartbeat; do not claim which machine sent that ping.
   useEffect(() => {
-    if (!deviceToken || !status) return;
-    const device = status.devices.find((d) => d.id === deviceToken.tokenId);
-    if (device?.lastUsedAt) setDeviceToken(null);
+    if (!deviceToken || !status || !newer(status.lastSeenAt, deviceToken.baselineAt)) return;
+    if (status.devices.find((device) => device.id === deviceToken.tokenId)?.lastUsedAt) setDeviceToken(null);
   }, [deviceToken, status]);
 
+  useEffect(() => {
+    copyGeneration.current += 1;
+    setCopied(null);
+    setCopyError(null);
+  }, [os, deviceToken?.tokenId]);
+
   const copy = async (what: Copyable, text: string) => {
+    const mine = ++copyGeneration.current;
+    setCopied(null);
+    setCopyError(null);
     try {
       await navigator.clipboard.writeText(text);
+      if (!mounted.current || mine !== copyGeneration.current) return;
       setCopied(what);
-      window.setTimeout(() => setCopied(null), 1600);
     } catch {
-      setError("Copy failed — select the text above.");
+      if (mounted.current && mine === copyGeneration.current) setCopyError({ what, message: "Copy failed — select and copy the text above." });
     }
   };
 
@@ -316,115 +334,84 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
     setError(null);
     try {
       await usersApi.revokeTrackerToken(id);
+      if (!mounted.current) return;
       if (userId && readStoredConnectToken(userId)?.tokenId === id) clearStoredConnectToken(userId);
-      // The command in the Add-device block would now be one the tracker rejects.
       if (deviceToken?.tokenId === id) setDeviceToken(null);
       await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not revoke that device");
+    } catch {
+      if (mounted.current) setError("Could not revoke that device. Try again.");
     }
   };
 
-  // "Add another device" — a genuinely new token; never replaces anything.
   const addDevice = async () => {
+    if (!userId || addingDevice) return;
+    const mine = ++actionGeneration.current;
     setAddingDevice(true);
     setError(null);
     try {
-      const res = await usersApi.createTrackerToken(deviceLabel(os));
-      setDeviceToken({ token: res.token, tokenId: res.tokenId });
+      const result = await usersApi.createTrackerToken(deviceLabel(os));
+      if (!mounted.current || mine !== actionGeneration.current) return;
+      setDeviceToken({ ...result, baselineAt: status?.lastSeenAt ?? null });
       await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create a token");
+    } catch {
+      if (mounted.current && mine === actionGeneration.current) setError("Could not prepare a device command. Try Add device again.");
     } finally {
-      setAddingDevice(false);
+      if (mounted.current && mine === actionGeneration.current) setAddingDevice(false);
     }
   };
 
-  const dismiss = () => {
-    if (userId) markTrackingSeen(userId);
-    setSeen(true);
-  };
-
-  // Exit transitions: the card leaves first, then the panel reveals in its place.
+  const dismiss = () => { if (userId) markTrackingSeen(userId); setSeen(true); };
   const showCard = phase === "waiting";
   const { render: renderCard, closing: cardClosing } = useExitTransition(showCard, EXIT_MS);
   const showPanel = everConnected && !(isBanner && seen) && !renderCard;
   const { render: renderPanel, closing: panelClosing } = useExitTransition(showPanel, EXIT_MS);
-  // Home never goes blank once a tracker has talked to us: after "Got it" the
-  // panel folds into a one-line strip that stays. That line is how the person
-  // knows, on every visit, whether anything is being tracked right now.
   const showStrip = isBanner && everConnected && seen && !renderCard && !renderPanel;
-
   const now = useNow(variant === "full" && phase === "waiting", 5000);
-
-  const celebration = (
-    <ConnectCelebration open={celebrating} status={status} onRefresh={refresh} onClose={closeCelebration} />
+  const celebration = <ConnectCelebration open={celebrating} status={status} onRefresh={refresh} onClose={closeCelebration} />;
+  const statusRetry = statusError && (
+    <div className={styles.details}>
+      <p className={styles.error} role="alert">{statusError}</p>
+      <Button variant="secondary" onClick={() => void refresh()}>Retry status check</Button>
+    </div>
   );
 
   if (phase === "loading") {
+    if (statusRetry) return <Card className={cx(styles.card, isBanner && styles.bannerSpacing)}>{statusRetry}</Card>;
     if (isBanner && seen) return celebration;
-    return (
-      <>
-        <TrackingStatus
-          variant={variant === "full" ? "settings" : "home"}
-          status={null}
-          className={cx(isBanner && styles.bannerSpacing)}
-        />
-        {celebration}
-      </>
-    );
+    return <><TrackingStatus variant={variant === "full" ? "settings" : "home"} status={null} className={cx(isBanner && styles.bannerSpacing)} />{celebration}</>;
   }
 
   return (
     <>
       {renderCard && (
         <Card className={cx(styles.card, isBanner && styles.bannerSpacing, cardClosing ? "leave" : "reveal")}>
-          {/* Onboarding's step already carries the title and the one-line
-              explainer above this card; repeating them here is the redundant
-              label the design rules forbid (round-7 live pass). */}
           {variant !== "compact" && (
             <div className={styles.head}>
-              <strong className={styles.title}>Connect your tools</strong>
-              <span className={styles.sub}>Nothing tracked yet.</span>
+              <strong className={styles.title}>Connect VibeHub</strong>
+              <span className={styles.sub}>{DEVICE_CONNECT_SCOPE}</span>
             </div>
           )}
-
-          {/* One action. Everything that used to be inlined here — picker, prompt,
-              manual install, the wait — is the sheet's job now, so there is exactly
-              one copy of that logic in the app. */}
-          <Button className={styles.copy} onClick={() => setSheetOpen(true)}>
-            Connect
-          </Button>
-
-          {/* With the head above ("Nothing tracked yet.") a second "Not connected" line
-              would say the same thing twice; the compact card has no head, so there
-              the status line is the only state it shows. */}
+          <Button className={styles.copy} onClick={() => setSheetOpen(true)}>Connect VibeHub</Button>
           {(attempted || variant === "compact") && (
             <div className={styles.foot}>
               <span className={styles.waiting} role="status">
-                <span className={cx(styles.pulse, !attempted && styles.pulseStill)} aria-hidden="true" />{" "}
-                {attempted ? "Waiting…" : "Not connected"}
+                <span className={cx(styles.pulse, !attempted && styles.pulseStill)} aria-hidden="true" />
+                {attempted ? "Waiting for a tracker connection…" : "Not connected"}
               </span>
             </div>
           )}
-
           {variant === "full" && status && (
             <>
-              <p className={styles.privacy}>
-                Works with Claude Code, Codex CLI, Cursor, VS Code and Quadcode. Sends tool, model, project name,
-                timestamps and token counts. Never code, prompts or diffs.
-              </p>
+              <p className={styles.privacy}>{TRACKER_LOCAL_READS} {TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
               <div className={styles.devices}>
                 <span className={styles.label}>Devices</span>
                 <DeviceList devices={status.devices} now={now} onRevoke={revoke} />
               </div>
             </>
           )}
-
-          {error && <p className={styles.error}>{error}</p>}
+          {error && <p className={styles.error} role="alert">{error}</p>}
         </Card>
       )}
-
       {renderPanel && status && (
         <TrackingStatus
           variant={variant === "full" ? "settings" : "home"}
@@ -436,30 +423,13 @@ export function ConnectTools({ variant = "compact", onConnected, onCelebrated }:
           onRevoke={revoke}
           onAddDevice={variant === "full" ? addDevice : undefined}
           addingDevice={addingDevice}
-          addDeviceBlock={
-            deviceToken ? (
-              <ManualInstall token={deviceToken.token} os={os} onOs={setOs} copied={copied} onCopy={copy} />
-            ) : undefined
-          }
+          addDeviceBlock={deviceToken ? <ManualInstall key={deviceToken.tokenId} token={deviceToken.token} os={os} onOs={setOs} copied={copied} onCopy={copy} error={copyError} /> : undefined}
           error={error}
         />
       )}
-
-      {showStrip && status && (
-        <TrackingStrip
-          status={status}
-          settingsHref="/settings#tracker"
-          onGoOnline={() => setSheetOpen(true)}
-          className={cx(styles.bannerSpacing, "reveal")}
-        />
-      )}
-
-      <ConnectSheet
-        open={sheetOpen}
-        onClose={() => setSheetOpen(false)}
-        onStarted={() => setAttempted(true)}
-        onCelebrated={onCelebrated}
-      />
+      {showStrip && status && <TrackingStrip status={status} settingsHref="/settings#tracker" onGoOnline={() => setSheetOpen(true)} className={cx(styles.bannerSpacing, "reveal")} />}
+      {statusRetry}
+      <ConnectSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onStarted={() => setAttempted(true)} onCelebrated={onCelebrated} />
       {celebration}
     </>
   );

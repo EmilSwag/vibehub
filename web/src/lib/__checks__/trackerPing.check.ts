@@ -20,6 +20,7 @@ import {
   installedNote,
   newer,
   observePing,
+  connectionAlive,
   pingStage,
   revokePrompt,
   sessionKeyOf,
@@ -186,12 +187,12 @@ eq("no status, no claim", installedNote(null, ago), null);
 eq(
   "tracking now is said about the account, never this machine",
   installedNote({ presence: { status: "active" }, devices: [] }, ago),
-  { lead: "Your account is already tracking." }
+  { lead: "Your account is already connected." }
 );
 eq(
   "idle counts as tracking too - anything but offline",
   installedNote({ presence: { status: "idle" }, devices: [dev("laptop", T0)] }, ago)?.lead,
-  "Your account is already tracking."
+  "Your account is already connected."
 );
 eq(
   "the tracking line carries no reinstall caveat",
@@ -216,12 +217,12 @@ const dated = installedNote(
   { presence: { status: "offline" }, devices: [dev("never-used", null), dev("desktop", T0), dev("laptop", T1)] },
   ago
 );
-eq("a dated device earns a line, newest first", dated?.lead, "Last tracked from laptop - 12m ago.".replace(" - ", " · "));
+eq("a dated device earns a line, newest first", dated?.lead, "Last connected from laptop - 12m ago.".replace(" - ", " · "));
 eq("it never says installed on, or this machine", /installed on|this machine/i.test(dated?.lead ?? ""), false);
 
-// Installed-but-offline needs *starting*, not reinstalling - step 2 is the Start step.
-eq("the advice is to start again, not to reinstall", /Run step 2 again\./.test(dated?.detail ?? ""), true);
-eq("and it is never step 1", /step 1/.test(dated?.detail ?? ""), false);
+// Installed-but-offline needs the secondary Start / reconnect control, not reinstalling.
+eq("the advice is to start again, not to reinstall", /Use Start \/ reconnect under Status, Stop & reconnect\./.test(dated?.detail ?? ""), true);
+eq("and it has no obsolete numbered instruction", /step [12]/i.test(dated?.detail ?? ""), false);
 // Round 10 made `start` replace a running daemon and re-read config every tick, so the
 // old "keeps its old settings until you stop and start it yourself" caveat became false.
 eq(
@@ -233,6 +234,39 @@ eq(
   "and never claims a running tracker keeps its old settings",
   /keeps its old settings/.test(dated?.detail ?? ""),
   false
+);
+
+// Round 15 (seen on prod): `devices[].lastUsedAt` is bumped by `login`'s verify at
+// install time, so a dated device is not proof that anything ever tracked. Only an
+// accepted heartbeat (`lastSeenAt`) is. Install-only = offline, a dated device, and
+// no heartbeat ever: the sheet must say nothing, not "Last connected from … · just now".
+eq(
+  "install-only (verified token, no heartbeat ever) claims nothing",
+  installedNote({ presence: { status: "offline" }, devices: [dev("laptop", T1)], lastSeenAt: null }, ago),
+  null
+);
+eq(
+  "with a heartbeat on record the dated device still earns its line",
+  installedNote({ presence: { status: "offline" }, devices: [dev("laptop", T0)], lastSeenAt: T0 }, ago)?.lead,
+  "Last connected from laptop · 12m ago."
+);
+// A `stop` sends session_end and a reinstall verifies — both move lastUsedAt past the
+// last ping. "tracked" is dated by the ping.
+const agoSpy = (iso: string) => `at ${iso}`;
+eq(
+  "the time is the last heartbeat, not the token's last use",
+  installedNote({ presence: { status: "offline" }, devices: [dev("laptop", T1)], lastSeenAt: T0 }, agoSpy)?.lead,
+  `Last connected from laptop · at ${T0}.`
+);
+eq(
+  "a status without the field keeps the old behaviour (dated by the device)",
+  installedNote({ presence: { status: "offline" }, devices: [dev("laptop", T1)] }, agoSpy)?.lead,
+  `Last connected from laptop · at ${T1}.`
+);
+eq(
+  "no heartbeat ever also silences the reinstall disclosure",
+  installedNote({ presence: { status: "offline" }, devices: [dev("laptop", T1)], lastSeenAt: null }, ago)?.detail,
+  undefined
 );
 
 // Neither branch may resurrect the two deleted claims.
@@ -374,9 +408,53 @@ eq("order of the used ones is preserved", homeDevices(two).map((d) => d.label), 
 // One ghost click used to end a machine's tracking with no way back but a reinstall.
 const q = revokePrompt("Windows · Sep 16");
 eq("names the machine", q.startsWith("Revoke Windows · Sep 16?"), true);
-eq("says what stops and how to come back", /stops reporting until you install again\./.test(q), true);
+eq("states remote reporting authorization, not local process control", /removes reporting authorization/.test(q), true);
+eq("makes no guarantee of local shutdown", /does not guarantee local shutdown/.test(q), true);
+eq("makes no history-erasure promise", /or erase history/.test(q), true);
+eq("says how to report again", /Reconnect with a new device command to report again\./.test(q), true);
 eq("never mentions keys or tokens", /token|key/i.test(q), false);
-eq("stays one short sentence pair", q.length < 90, true);
+eq("keeps the critical disclosure concise, not truncated", q.length < 220, true);
+eq("revoked-key recovery uses the one-command path", /new install & start command/.test(STALE_TRACKER_FIX), true);
+eq("revoked-key recovery contains no numbered split steps", /step [12]/i.test(STALE_TRACKER_FIX), false);
+
+// The web receives normalized status, not the raw connection-v1 POST receipt.
+// An accepted connection with no AI sessions is idle, with empty activity/sources.
+// Token verification alone still cannot complete the connection.
+const idleSnapshot: TrackerStatus = {
+  ...olderServerStatus,
+  lastSeenAt: T1,
+  connected: true,
+  presence: { status: "idle", activity: null },
+};
+const idleBefore = JSON.stringify(idleSnapshot);
+eq("idle with an accepted heartbeat is connected", connectionAlive(idleSnapshot), true);
+eq("idle verification without a heartbeat is not connected", connectionAlive({ ...idleSnapshot, lastSeenAt: null }), false);
+eq("idle with an invalid heartbeat is not connected", connectionAlive({ ...idleSnapshot, lastSeenAt: "bad-date" }), false);
+eq("explicit server disconnect wins over idle label", connectionAlive({ ...idleSnapshot, connected: false }), false);
+eq("offline with an old heartbeat remains offline", connectionAlive({ ...idleSnapshot, presence: { status: "offline" } }), false);
+eq("unknown presence cannot prove connection", connectionAlive({ ...idleSnapshot, presence: { status: "unknown" } }), false);
+eq("no response is not connected", connectionAlive(null), false);
+const firstIdle = observePing(null, idleSnapshot);
+eq("an existing idle connection is already-live on open", firstIdle.liveAtOpen, true);
+eq("existing idle connection does not celebrate again", shouldCelebrate(pingStage({ ...waiting, liveAtOpen: firstIdle.liveAtOpen, baselineAt: T1, lastSeenAt: T1, presenceActive: connectionAlive(idleSnapshot) }), firstIdle.liveAtOpen), false);
+eq("receipt-only observation keeps AI activity empty", firstIdle.tracker.presence.activity, null);
+eq("receipt-only observation keeps sources empty", firstIdle.tracker.sources, []);
+eq("receipt-only observation keeps tools empty", firstIdle.tracker.tools, []);
+eq("receipt-only note says connected without claiming AI activity", installedNote(firstIdle.tracker, ago)?.lead, "Your account is already connected.");
+const followingIdle = observePing(observePing(null, olderServerStatus), idleSnapshot);
+const freshIdleInputs = {
+  ...waiting,
+  liveAtOpen: followingIdle.liveAtOpen,
+  baselineAt: followingIdle.baselineAt,
+  lastSeenAt: followingIdle.tracker.lastSeenAt,
+  presenceActive: connectionAlive(followingIdle.tracker),
+};
+eq("a fresh idle heartbeat completes connection", pingStage(freshIdleInputs), "live");
+eq("a new idle connection may celebrate", shouldCelebrate(pingStage(freshIdleInputs), false), true);
+eq("idle label cannot turn a cached heartbeat into a new connection", pingStage({ ...freshIdleInputs, baselineAt: T1 }), "waiting");
+eq("the first response is not a witnessed new connection", freshPing({ ...freshIdleInputs, baselineReady: false }), false);
+eq("connection check never changes AI presence to active", idleSnapshot.presence.status, "idle");
+eq("connection observation never mutates the receipt-only status", JSON.stringify(idleSnapshot), idleBefore);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`trackerPing check failed: ${failures.join(", ")}`);

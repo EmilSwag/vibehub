@@ -12,6 +12,7 @@
 // with it) or revoked.
 
 import { usersApi } from "./api";
+import { assertAuthGeneration, authGeneration, AuthSessionChangedError, isCurrentAuth, onAuthBoundary } from "./authSession";
 import { formatShortDate } from "./format";
 import type { InstallOs } from "./connectPrompt";
 
@@ -125,6 +126,7 @@ export function dropForeignConnectTokens(currentUserId: string): void {
 // One in-flight ensure per user, so two panels mounting in the same tick (Home
 // banner + a quick hop to Settings) share a single mint instead of racing.
 const pending = new Map<string, Promise<StoredConnectToken>>();
+onAuthBoundary(() => pending.clear());
 
 /**
  * The token the connect card should show: the stored one if the server still
@@ -133,6 +135,8 @@ const pending = new Map<string, Promise<StoredConnectToken>>();
  * for the same user while a call is in flight.
  */
 export function ensureConnectToken(userId: string, label: string): Promise<StoredConnectToken> {
+  const generation = authGeneration();
+  if (!isCurrentAuth(generation)) return Promise.reject(new AuthSessionChangedError());
   const inFlight = pending.get(userId);
   if (inFlight) return inFlight;
 
@@ -144,7 +148,8 @@ export function ensureConnectToken(userId: string, label: string): Promise<Store
         const { tokens } = await usersApi.listTrackerTokens();
         const match = tokens.find((t) => t.id === stored.tokenId);
         if (match && !match.revokedAt && !match.lastUsedAt) return stored;
-      } catch {
+      } catch (err) {
+        if (!isCurrentAuth(generation)) throw err;
         // Can't verify right now — trust the copy we have rather than minting
         // another token on top of it; the next mount re-checks.
         return stored;
@@ -152,7 +157,9 @@ export function ensureConnectToken(userId: string, label: string): Promise<Store
       // Used (the tracker is on it) or gone (revoked elsewhere): forget it.
       clearStoredConnectToken(userId);
     }
+    assertAuthGeneration(generation);
     const res = await usersApi.createTrackerToken(label, { replaceUnused: true });
+    assertAuthGeneration(generation);
     const entry: StoredConnectToken = { tokenId: res.tokenId, token: res.token, createdAt: new Date().toISOString() };
     writeStoredConnectToken(userId, entry);
     return entry;
@@ -194,18 +201,21 @@ function sessionStore(): Storage | null {
  * the celebration is a per-tab event; a new tab celebrating again is the intent.
  *
  * Both callers (ConnectTools' status watcher and ConnectSheet's completion) go through
- * here, so the two gates cannot drift apart. When storage throws — private mode — it
- * returns true, which keeps today's behaviour of celebrating once rather than never.
+ * here, so the two gates cannot drift apart. If storage is blocked, a shared
+ * in-memory gate still prevents Home and the sheet from celebrating the same ping.
  */
+const celebratedInMemory = new Set<string>();
+
 export function claimConnectCelebration(userId: string): boolean {
+  if (celebratedInMemory.has(userId)) return false;
+  celebratedInMemory.add(userId);
   const store = sessionStore();
-  if (!store) return true;
   const key = CELEBRATED_PREFIX + userId;
   try {
-    if (store.getItem(key) === "1") return false;
-    store.setItem(key, "1");
-    return true;
+    if (store?.getItem(key) === "1") return false;
+    store?.setItem(key, "1");
   } catch {
-    return true;
+    // The shared memory claim already owns this celebration, even if storage fails.
   }
+  return true;
 }

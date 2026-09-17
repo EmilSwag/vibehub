@@ -15,6 +15,14 @@ import { stagger } from "../lib/motion";
 import { modelRowLabel } from "../lib/recentModels";
 import { sumToday } from "../lib/sources";
 import { homeDevices, revokePrompt, showHomeDevices } from "../lib/trackerPing";
+import {
+  TRACKER_HISTORY_NOTICE,
+  TRACKER_LOCAL_READS,
+  TRACKER_STATE_NOTICE,
+  TRACKER_SUPPORT_NOTICE,
+  TRACKER_UPLOADS,
+  TRACKER_VISIBILITY,
+} from "../lib/connectPrompt";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { ModelGlyph } from "./ui/ModelGlyph";
@@ -285,7 +293,7 @@ export interface TrackingStatusProps {
  *   Now            Online · in vibehub · Claude Code · Claude Fable 5.1 · for 12m
  *   Models         ✦ Claude Fable 5.1 · ⌘ Claude Code       160 today · 12s ago
  *   Devices        Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1 *used*)
- *   Sends tool, model, project name … Never code, prompts or diffs.   [Got it]
+ *   Supported AI-log metadata; local reads and public stats disclosed.   [Got it]
  *
  * Relative times re-render every 5s. The wrapper owns polling and realtime.
  */
@@ -417,14 +425,14 @@ export function TrackingStatus({
         {running ? (
           <PresenceBlock presence={status.presence} variant="row" />
         ) : (
-          <span className={styles.dim}>Nothing running</span>
+          <span className={styles.dim}>No recent supported AI activity</span>
         )}
       </section>
 
       <section className={styles.section} aria-label="Models">
         <span className={styles.label}>Models</span>
         {status.sources.length === 0 ? (
-          <span className={styles.dim}>No activity yet.</span>
+          <span className={styles.dim}>No supported AI activity yet.</span>
         ) : (
           <>
             <div className={cx(styles.rows, "stagger")}>
@@ -462,10 +470,15 @@ export function TrackingStatus({
 
       <footer className={styles.footer}>
         <p className={styles.privacy}>
-          Sends tool, model, project name, timestamps and token counts. Never code, prompts or diffs.
+          {TRACKER_LOCAL_READS} {TRACKER_UPLOADS} {TRACKER_VISIBILITY} {TRACKER_SUPPORT_NOTICE} {TRACKER_STATE_NOTICE} {TRACKER_HISTORY_NOTICE} Stop locally from Status, Stop &amp; reconnect. Revoke removes reporting authorization, not guaranteed local shutdown or history erasure.
         </p>
-        {(onDismiss || settingsHref || offline) && (
+        {(onDismiss || settingsHref || onGoOnline) && (
           <div className={styles.actions}>
+            {!offline && onGoOnline && (
+              <Button variant="secondary" onClick={onGoOnline}>
+                Status, Stop &amp; reconnect
+              </Button>
+            )}
             {settingsHref && (
               <Link to={settingsHref} className={styles.link}>
                 Tracker settings

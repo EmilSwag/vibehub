@@ -43,6 +43,22 @@ export function visibleSnapshot<T>(snap: { session: number; status: T } | null, 
   return snap !== null && snap.session === session ? snap.status : null;
 }
 
+/** Transport connectivity is not AI activity: an idle tracker still reports.
+ * A verified key or a status word without an accepted heartbeat proves neither.
+ * The optional connected flag preserves older observation/test shapes; an explicit
+ * server-side false always wins over the presence label. */
+export interface ConnectionSnapshot {
+  lastSeenAt: string | null;
+  presence: { status: string };
+  connected?: boolean;
+}
+
+export function connectionAlive(status: ConnectionSnapshot | null | undefined): boolean {
+  if (!status || (status.connected !== undefined && status.connected !== true)) return false;
+  return newer(status.lastSeenAt, null) &&
+    (status.presence?.status === "active" || status.presence?.status === "idle");
+}
+
 /** The baseline and the initial-live flag belong to the same server observation.
  * Keeping them together prevents a previous open's flags surviving a new session. */
 export interface PingObservation<T> {
@@ -60,7 +76,7 @@ export function observePing<T extends { lastSeenAt: string | null; presence: { s
     baselineAt: previous ? previous.baselineAt : tracker.lastSeenAt,
     liveAtOpen: previous
       ? previous.liveAtOpen
-      : tracker.presence.status === "active" && newer(tracker.lastSeenAt, null),
+      : connectionAlive(tracker),
   };
 }
 
@@ -68,7 +84,7 @@ export interface PingInputs {
   /** The reader has done something here — copied a command. A reason to watch, never
    *  evidence that anything was installed or started. */
   started: boolean;
-  /** Presence said "active" on this session's *first* successful fetch. */
+  /** An active OR idle connection was alive on this session's first fetch. */
   liveAtOpen: boolean;
   /** This session has established what "already pinged" looked like. */
   baselineReady: boolean;
@@ -78,7 +94,8 @@ export interface PingInputs {
   hasSnapshot: boolean;
   /** Its `lastSeenAt`. */
   lastSeenAt: string | null;
-  /** Its presence word. */
+  /** Alive transport from connectionAlive(), including idle AI state. The legacy
+   * field name does not imply that an AI request is currently running. */
   presenceActive: boolean;
 }
 
@@ -101,7 +118,7 @@ export function freshPing(i: PingInputs): boolean {
  * `liveAtOpen` rests at "live" without ever having waited — the `/?connect=1` deep
  * link lands there — and the sheet must not treat that as an event (see
  * `shouldCelebrate`). Otherwise "live" needs *both* halves: a fresh ping and presence
- * saying active. Presence alone used to be enough, and presence alone is exactly what
+ * saying connected (active or idle). Presence alone used to be enough, and it is what
  * a stale snapshot carries.
  */
 export function pingStage(i: PingInputs): PingStage {
@@ -128,6 +145,14 @@ export function shouldCelebrate(stage: PingStage, liveAtOpen: boolean): boolean 
 export interface NoteStatus {
   presence: { status: string };
   devices: readonly { label: string; lastUsedAt: string | null }[];
+  /**
+   * The account's last *accepted heartbeat* — the only field here that proves a
+   * tracker ever ran. `devices[].lastUsedAt` does not: the server bumps it on
+   * `/tracker/verify` too, i.e. the instant `login` ran during install, before any
+   * daemon exists (round 15, seen on prod in the install-only state). Optional so a
+   * status shape that predates the field keeps the old behaviour.
+   */
+  lastSeenAt?: string | null;
 }
 
 export interface InstalledNote {
@@ -159,7 +184,7 @@ export interface InstalledNote {
 
 /** The two sentences, defined once. Three surfaces render them; none owns the wording. */
 export const STALE_TRACKER_LEAD = "Tracker is running with an old token.";
-export const STALE_TRACKER_FIX = "Redo step 1 and step 2. Start replaces it.";
+export const STALE_TRACKER_FIX = "Open Connect VibeHub, then run the new install & start command. It replaces the running tracker.";
 
 /** Just the parts of TrackerStatus this rule reads, so it stays pure and testable. */
 export interface StaleStatus {
@@ -231,8 +256,14 @@ export function installedNote(status: NoteStatus | null, ago: (iso: string) => s
   if (!status) return null;
 
   if (status.presence.status !== "offline") {
-    return { lead: "Your account is already tracking." };
+    return { lead: "Your account is already connected." };
   }
+
+  // No accepted heartbeat, ever: nothing has tracked, whatever the token rows say. A
+  // device row dated by `login`'s verify alone would otherwise read "Last tracked
+  // from Windows · just now" to the person who has installed and not yet run step 2 —
+  // and the disclosure would tell them to run step 2 "again" (round 15).
+  if (status.lastSeenAt === null) return null;
 
   const seen = status.devices
     .filter((d) => d.lastUsedAt)
@@ -241,14 +272,19 @@ export function installedNote(status: NoteStatus | null, ago: (iso: string) => s
   const device = seen[0];
   if (!device) return null;
 
+  // "tracked" is dated by the heartbeat, not by the token's last use: a `stop` sends a
+  // final session_end and a reinstall verifies, both of which move `lastUsedAt` past
+  // the last ping. A status without the field keeps dating by the device.
+  const trackedAt = status.lastSeenAt ?? device.lastUsedAt!;
+
   return {
-    lead: `Last tracked from ${device.label} · ${ago(device.lastUsedAt!)}.`,
+    lead: `Last connected from ${device.label} · ${ago(trackedAt)}.`,
     // "step 2", the Start step — an already-installed tracker that has gone quiet
     // needs starting, not reinstalling. Since round 10 the tracker re-reads its config
     // every tick and `start` replaces a daemon that is already running, so the old
     // "keeps its old settings until you stop and start it yourself" caveat was false
     // (round 12). Say what start does instead; it is the only command they need.
-    detail: "Run step 2 again. Start replaces a tracker that is already running.",
+    detail: "Already installed? Use Start / reconnect under Status, Stop & reconnect. Start replaces a tracker that is already running.",
   };
 }
 
@@ -278,5 +314,5 @@ export function showHomeDevices(devices: readonly { lastUsedAt: string | null }[
  * asking, so this is only ever about a real device.
  */
 export function revokePrompt(label: string): string {
-  return `Revoke ${label}? Its tracker stops reporting until you install again.`;
+  return `Revoke ${label}? This removes reporting authorization, but does not guarantee local shutdown or erase history. Reconnect with a new device command to report again.`;
 }

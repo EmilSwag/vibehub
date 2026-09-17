@@ -320,3 +320,59 @@
     animation: none;
   }
 }
+
+/* One command in Settings uses the existing monochrome card and command well. */
+.sub,
+.manualLabel,
+.consent p {
+  margin: 0;
+}
+.manualLabel {
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--vh-text);
+}
+.consent,
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.consent,
+.privacy {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-dim);
+}
+.segBtn,
+.copy,
+.cmdCopy,
+.link {
+  min-height: 44px;
+}
+.link {
+  align-self: flex-start;
+  text-align: left;
+}
+.link:focus-visible,
+.cmd:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+.cmdRow {
+  flex-direction: column;
+  min-width: 0;
+}
+.cmd {
+  flex: none;
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--vh-text-dim);
+}
+.cmdCopy {
+  width: 100%;
+}

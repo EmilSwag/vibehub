@@ -10,7 +10,7 @@ import { Confetti } from "./Confetti";
 import { ModelGlyph } from "./ModelGlyph";
 import styles from "./ConnectCelebration.module.css";
 
-const WORDS = ["All", "connected."];
+const WORDS = ["VibeHub", "connected."];
 
 /** Fireworks and the word reveal both finish inside this; the layer itself stays
  *  until the person leaves it (motion budget, skills/emil_design_eng §6). */

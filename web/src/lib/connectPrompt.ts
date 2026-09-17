@@ -1,133 +1,177 @@
-// The text a user pastes into their AI tool to set the VibeHub tracker up.
-// `cursor`, `claude-code`, `codex` and `quadcode` can run shell commands; `chatgpt`
-// cannot, so it gets a walk-through instead.
-//
-// Installing and starting are two separate consents. A Claude Code auto-mode
-// classifier refused the old prompt, and it was right to: one paste downloaded the
-// tracker *and* spawned a background daemon. So the prompt installs only, explains
-// what a background start does, asks, and waits — and states what to do when the
-// agent's own safety layer blocks a step, because a prompt that leaves the denial
-// case undefined invites a model to improvise a bypass.
-//
+// Commands and disclosures shared by the connect sheet and Settings Add device.
+// One device connection covers supported sources, not separate provider accounts.
+// Copy never executes anything. Assisted execution requires an explicit yes first.
 // Pinned by lib/__checks__/connectPrompt.check.ts.
 
-export type ConnectPromptTarget = "cursor" | "claude-code" | "codex" | "quadcode" | "chatgpt";
-
+/** Legacy target names remain accepted; they no longer select tracking integrations. */
+export type ConnectPromptTarget = "assistant" | "cursor" | "claude-code" | "codex" | "quadcode" | "chatgpt";
 export type InstallOs = "mac" | "windows";
-
-/** The tracker's own verbs. `login` is deliberately absent: it is the only one that
- *  takes a token, and no command this file emits after install may carry one. */
+/** Login is deliberately absent: these controls never carry a device key. */
 export type TrackerVerb = "start" | "status" | "stop";
 
-// Where install.sh and install.ps1 put the single-file tracker — and, character for
-// character, what those installers print on completion. The two sides cannot share a
-// source (one is shell, one is TypeScript), so they are kept identical by hand and
-// pinned in the check; `install.sh` builds its from APP_DIR="$HOME/.vibehub/app" and
-// `install.ps1` from Join-Path $HOME ".vibehub\app".
-//
-// Both quote the path and both go through `$HOME` rather than `~`. Quoting matters:
-// an unquoted `~/.vibehub/...` word-splits on a home directory containing a space,
-// and quoting the tilde ("~/...") would stop it expanding at all — so `"$HOME/..."`
-// is the only form that is both expanded and safe.
-const BIN_POSIX = '"$HOME/.vibehub/app/vibehub-tracker.cjs"';
-const BIN_POWERSHELL = '"$HOME\\.vibehub\\app\\vibehub-tracker.cjs"';
+export const DEVICE_CONNECT_SCOPE =
+  "One connection for all supported tools on this device. No per-tool setup.";
+export const NODE_SETUP_NOTICE = "Node.js is installed automatically if needed.";
+export const INSTALL_START_MEANS = "Running this command installs VibeHub and starts background tracking.";
+export const BACKGROUND_START_MEANS = "Runs in the background until you stop it. No OS autostart.";
+export const TRACKER_LOCAL_READS =
+  "Reads only Claude Code and Codex session logs. Parsing may temporarily read records containing prompts, code and tool output. These contents are not saved or sent.";
+export const TRACKER_UPLOADS =
+  "Sends only tool/model, timing, usage counts (including tokens) and a bounded project alias to VibeHub.";
+export const TRACKER_VISIBILITY =
+  "Profiles and statistics, including recent activity, are public. Live presence cards are shared with accepted friends.";
+export const TRACKER_SUPPORT_NOTICE =
+  "Claude Code and Codex only. Quadcode, Cursor and ChatGPT/browser tracking are unavailable.";
+export const TRACKER_SUPPORT_DETAILS =
+  "No monitoring of other apps, processes, windows, browsing, keyboard activity, computer idle or Git. Unknown models stay unknown. Unsupported activity is not estimated. Setup does not install AI apps or connect provider accounts.";
+export const TRACKER_STATE_NOTICE =
+  "Connected means a recent server-accepted tracker connection. Idle means no recent supported AI activity—not an idle computer.";
+export const TRACKER_HISTORY_NOTICE =
+  "AI-only tracking applies going forward. Earlier public tracker history has not been erased or revalidated.";
+export const TRACKER_CONTROL_NOTICE =
+  "Run Stop on the device to stop local tracking. Revoke blocks future reporting with that key, but does not guarantee local shutdown. Neither action erases history.";
+export const PRIVATE_COMMAND_NOTICE =
+  "Private command: contains your device key. Do not share it publicly. Your terminal or AI assistant may retain it.";
+export const COPY_ONLY_NOTICE = "Copying does not run anything. Paste into your own terminal when you choose to start.";
+export const CONNECT_COMMAND_ERROR = "Could not prepare a connection command. Reopen setup or contact support.";
 
-/**
- * One tracker command for one OS — `start`, `status` or `stop`.
- *
- * Never carries the device token: the token is written to ~/.vibehub/config.json at
- * install time, and these three read it from there.
- */
+// Canonical paths agreed with the connector owner. Prefer the private runtime if
+// present, so an older global Node cannot shadow the runtime the connector prepared.
+// Otherwise use the compatible global Node that the connector reused. Quoted $HOME
+// paths also work for legacy installations and home directories containing spaces.
+const BIN = '"$HOME/.vibehub/app/vibehub-tracker.cjs"';
+const NODE_POSIX = '"$HOME/.vibehub/runtime/bin/node"';
+const NODE_WINDOWS = '"$HOME/.vibehub/runtime/node.exe"';
+const NODE_PROBE = 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)';
+
+function checkOs(os: InstallOs): void {
+  if (os !== "mac" && os !== "windows") throw new Error(CONNECT_COMMAND_ERROR);
+}
+
 export function buildTrackerCommand(os: InstallOs, verb: TrackerVerb): string {
-  return `node ${os === "windows" ? BIN_POWERSHELL : BIN_POSIX} ${verb}`;
+  checkOs(os);
+  if (verb !== "start" && verb !== "status" && verb !== "stop") throw new Error(CONNECT_COMMAND_ERROR);
+  // The connector can reuse global Node when an old/broken private binary remains.
+  // Existence alone must not select that unusable binary for later controls.
+  return os === "windows"
+    ? `& { $vhNode = ${NODE_WINDOWS}; $ok = $false; if (Test-Path -LiteralPath $vhNode -PathType Leaf) { try { & $vhNode -e '${NODE_PROBE}' 2>$null; $ok = $LASTEXITCODE -eq 0 } catch {} }; if (-not $ok) { $vhNode = 'node' }; & $vhNode ${BIN} ${verb} }`
+    : `if [ -x ${NODE_POSIX} ] && ${NODE_POSIX} -e '${NODE_PROBE}' >/dev/null 2>&1; then ${NODE_POSIX} ${BIN} ${verb}; else node ${BIN} ${verb}; fi`;
 }
 
 export const buildStartCommand = (os: InstallOs): string => buildTrackerCommand(os, "start");
 export const buildStatusCommand = (os: InstallOs): string => buildTrackerCommand(os, "status");
 export const buildStopCommand = (os: InstallOs): string => buildTrackerCommand(os, "stop");
 
-/**
- * What the person is agreeing to when they allow the start. Said once, in the prompt
- * and in the sheet, in the same words — a consent described two ways is not one
- * consent. It never claims to read no file contents: the Claude Code, Codex and
- * Quadcode adapters tail session JSONL, and take only ids, the model and token counts
- * from it, so the true statement is about what is *sent*.
- */
-export const BACKGROUND_START_MEANS =
-  "Runs in the background until you stop it. Reads activity metadata and window titles from your AI tools; sends tool, model, project name, timestamps and token counts to VibeHub — never your code or prompts. No OS autostart.";
-
-/**
- * The install one-liner for one OS. Sets VIBEHUB_API_URL explicitly so the command
- * works against any deployment, not just install.sh/.ps1's baked-in default. Shared by
- * the prompt and the "Do it manually" block so the two never drift.
- */
-export function buildInstallCommand(os: InstallOs, token: string, apiUrl: string, webUrl: string): string {
-  return os === "windows"
-    ? `$env:VIBEHUB_TOKEN="${token}"; $env:VIBEHUB_API_URL="${apiUrl}"; irm ${webUrl}/tracker/install.ps1 | iex`
-    : `curl -fsSL ${webUrl}/tracker/install.sh | VIBEHUB_API_URL="${apiUrl}" bash -s -- ${token}`;
-}
-
-/**
- * The one pass/fail check, per OS. Per OS because a single POSIX line was handed to
- * Windows users too, where `node` receives a literal `~` and fails on a path that does
- * not exist.
- */
-export function buildVerifyLine(os: InstallOs): string {
-  return `Run ${buildStatusCommand(os)} — it must print "Connected: yes".`;
-}
-
-/**
- * What an agent must do when its own safety tooling refuses a step.
- *
- * "A blocked step is a normal outcome" is load-bearing: without it the refusal reads
- * as an obstacle, and an obstacle is the kind of thing a capable model routes around.
- * It reprints no command: it points back at the step that was blocked, so the
- * token still appears exactly twice in the whole prompt.
- */
-const BLOCKED_CLAUSE =
-  "If your safety rules or approval prompts block step 2 or step 5, stop automating: say so and show me that step's command to run in my own terminal. Do not retry with other flags, shells or wrapper scripts, and do not edit any permission, allow-list or settings file. A blocked step is a normal outcome, not a problem to solve.";
-
-/** Builds the prompt for `target`. */
-export function buildConnectPrompt(target: ConnectPromptTarget, token: string, apiUrl: string, webUrl: string): string {
-  const bash = buildInstallCommand("mac", token, apiUrl, webUrl);
-  const ps1 = buildInstallCommand("windows", token, apiUrl, webUrl);
-  const startMac = buildStartCommand("mac");
-  const startWindows = buildStartCommand("windows");
-
-  if (target === "chatgpt") {
-    return [
-      "I'm setting up the VibeHub tracker. You can't run commands, so walk me through it one step at a time. Install first — starting is a separate step.",
-      "",
-      "1. Ask whether I'm on macOS/Linux or Windows.",
-      "2. Give me only the matching command to run in my own terminal, then ask what it printed. It downloads the tracker and saves my token; it starts no background tracker and adds no OS autostart:",
-      `   - macOS/Linux: ${bash}`,
-      `   - Windows (PowerShell): ${ps1}`,
-      "3. Read what I pasted. On a rejected token or any error, help me fix it from the actual output — never assume it worked.",
-      `4. Stop and ask me whether to start the tracker. Say plainly: ${BACKGROUND_START_MEANS} Wait for my answer — a successful install is not permission to start.`,
-      "5. Only if I say yes, give me the matching line to run myself; if I say no, stop — I can start it later:",
-      `   - macOS/Linux: ${startMac}`,
-      `   - Windows (PowerShell): ${startWindows}`,
-      '6. Ask me to run the check and paste its output, then tell me plainly whether it says "Connected: yes":',
-      `   - macOS/Linux: ${buildVerifyLine("mac")}`,
-      `   - Windows (PowerShell): ${buildVerifyLine("windows")}`,
-    ].join("\n");
+// Reject ambiguous/untrusted inputs rather than interpolating them into a shell or
+// leaking their value through an error message. Keys are opaque printable identifiers;
+// control characters, whitespace and shell syntax are never valid key input here.
+function checkToken(token: string): void {
+  // A JavaScript `$` anchor also matches before a final newline. Reject every
+  // non-key character explicitly so a pasted line ending cannot pass validation.
+  if (typeof token !== "string" || token.length < 1 || token.length > 512 || /[^A-Za-z0-9._~-]/.test(token)) {
+    throw new Error(CONNECT_COMMAND_ERROR);
   }
+}
 
+/** Deployment origins only. HTTP is restricted to explicit loopback previews. */
+function origin(value: string): string {
+  try {
+    if (!/^https?:\/\//i.test(value) || value.length > 2048 || /[\x00-\x20\x7f-\x9f\s\\'"`$;&|<>?#]/.test(value)) throw new Error();
+    const url = new URL(value);
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) throw new Error();
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error();
+    return url.origin;
+  } catch {
+    throw new Error(CONNECT_COMMAND_ERROR);
+  }
+}
+
+const quoteSh = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+const quotePs = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+
+function scriptCommand(
+  os: InstallOs,
+  token: string,
+  apiUrl: string,
+  webUrl: string,
+  script: "install" | "connect",
+  start: boolean,
+): string {
+  checkOs(os);
+  checkToken(token);
+  const api = origin(apiUrl);
+  const web = origin(webUrl);
+  if (os === "windows") {
+    // Scope preferences to this invocation, restore deployment settings, and erase
+    // the copied key even if the initial script download fails before it can clean up.
+    return `& { $ErrorActionPreference = 'Stop'; $oldApi = $env:VIBEHUB_API_URL; $oldWeb = $env:VIBEHUB_WEB_URL; try { $env:VIBEHUB_TOKEN=${quotePs(token)}; $env:VIBEHUB_API_URL=${quotePs(api)}; $env:VIBEHUB_WEB_URL=${quotePs(web)}; & ([scriptblock]::Create((irm ${quotePs(`${web}/tracker/${script}.ps1`)} -TimeoutSec 60 -MaximumRedirection 0)))${start ? " -Start" : ""} } finally { Remove-Item Env:VIBEHUB_TOKEN -ErrorAction SilentlyContinue; $env:VIBEHUB_API_URL = $oldApi; $env:VIBEHUB_WEB_URL = $oldWeb } }`;
+  }
+  // Do not let an empty/failed download look successful merely because Bash read
+  // an empty stream. Ignore local curl config and refuse redirects/protocol changes.
+  // HTTP is only possible for the literal loopback origins accepted above.
+  const protocols = web.startsWith("http:") ? "=http,https" : "=https";
+  return `(set -o pipefail; curl -q --fail --silent --show-error --location --max-redirs 0 --proto ${quoteSh(protocols)} --connect-timeout 20 --max-time 60 ${quoteSh(`${web}/tracker/${script}.sh`)} | VIBEHUB_TOKEN=${quoteSh(token)} VIBEHUB_API_URL=${quoteSh(api)} VIBEHUB_WEB_URL=${quoteSh(web)} bash -s --${start ? " --start" : ""})`;
+}
+
+/** Primary manual path. Running it explicitly consents to both install and start. */
+export function buildOneCommandConnect(os: InstallOs, token: string, apiUrl: string, webUrl: string): string {
+  return scriptCommand(os, token, apiUrl, webUrl, "connect", true);
+}
+
+/** Legacy setup-only path: no start flag, no runtime bootstrap promise. */
+export function buildInstallCommand(os: InstallOs, token: string, apiUrl: string, webUrl: string): string {
+  return scriptCommand(os, token, apiUrl, webUrl, "install", false);
+}
+
+/** Status output is diagnostic; token verification alone is not a received heartbeat. */
+export function buildVerifyLine(os: InstallOs): string {
+  return `Run ${buildStatusCommand(os)}; report exact output. Require a fresh server-accepted tracker connection, not "Connected: yes" alone.`;
+}
+
+const BLOCKED_CLAUSE =
+  "If your safety rules or approval prompts block installation or background start, stop automating: say so and show me the matching command for my own terminal. Do not retry with other flags, shells or wrapper scripts, and do not edit any permission, allow-list or settings file. A blocked step is a normal outcome, not a problem to solve.";
+
+/** Generic assisted setup; the optional OS keeps the visible prompt to one command.
+ * Old callers without an OS still receive both branches, never a provider selector. */
+export function buildConnectPrompt(
+  target: ConnectPromptTarget,
+  token: string,
+  apiUrl: string,
+  webUrl: string,
+  os?: InstallOs,
+): string {
+  if (os !== undefined) checkOs(os);
+  const oses: InstallOs[] = os ? [os] : ["mac", "windows"];
+  const label = (value: InstallOs) => value === "windows" ? "Windows (PowerShell)" : "macOS/Linux (bash)";
+  const guided = target === "chatgpt";
   return [
-    "Set up the VibeHub tracker on this machine. Install only — do not start it.",
+    "Connect VibeHub. Do not run commands yet.",
+    DEVICE_CONNECT_SCOPE,
+    guided
+      ? "You can't run commands. Guide me without claiming to have installed or started anything."
+      : "If you cannot run commands, guide me. ChatGPT cannot run them.",
+    "Explain:",
+    INSTALL_START_MEANS,
+    `${NODE_SETUP_NOTICE} A needed runtime is private to VibeHub; do not change the system PATH or install AI products.`,
+    BACKGROUND_START_MEANS,
+    TRACKER_LOCAL_READS,
+    TRACKER_UPLOADS,
+    TRACKER_VISIBILITY,
+    TRACKER_SUPPORT_NOTICE,
+    TRACKER_SUPPORT_DETAILS,
+    TRACKER_STATE_NOTICE,
+    TRACKER_CONTROL_NOTICE,
+    PRIVATE_COMMAND_NOTICE,
     "",
-    "1. Detect the OS: macOS/Linux or Windows. In a bash shell on Windows (Git Bash), use the macOS/Linux lines.",
-    "2. Run the matching command. It downloads the tracker and saves my token; it starts no background tracker and adds no OS autostart:",
-    `   - macOS/Linux: ${bash}`,
-    `   - Windows (PowerShell): ${ps1}`,
-    "3. Report what it printed. On a rejected token or any error, stop and show me the output — never assume it worked.",
-    `4. Stop and ask me whether to start the tracker. Say plainly: ${BACKGROUND_START_MEANS} Wait for my answer — a successful install is not permission to start.`,
-    "5. Only if I say yes, run the start command; if I say no, stop — I can start it later:",
-    `   - macOS/Linux: ${startMac}`,
-    `   - Windows (PowerShell): ${startWindows}`,
-    "6. Verify and report the exact output:",
-    `   - macOS/Linux: ${buildVerifyLine("mac")}`,
-    `   - Windows (PowerShell): ${buildVerifyLine("windows")}`,
+    os ? `1. Confirm this device uses ${label(os)}.` : "1. Ask the OS: Windows/PowerShell or macOS/Linux/bash.",
+    '2. Ask: "May I install VibeHub and start background tracking?" Wait for an explicit yes. Copying this prompt or a successful install is not permission to start. If I say no, stop.',
+    guided
+      ? "3. Only after my yes, give me the matching command to run myself:"
+      : "3. Only after my yes, run the matching command or show it for manual use:",
+    ...oses.map((value) => `   - ${label(value)}: ${buildOneCommandConnect(value, token, apiUrl, webUrl)}`),
+    "4. On any download, integrity, token or start error, stop and report it without the device key. Never assume success or mistake a spawned process for a connection.",
+    ...oses.map((value) => `   - ${label(value)}: ${buildVerifyLine(value)}`),
     "",
     BLOCKED_CLAUSE,
   ].join("\n");

@@ -3,7 +3,7 @@ import { usersApi } from "./api";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import type { TrackerStatus } from "../types";
-import { freshPing, observePing, pingStage, sessionKeyOf, visibleSnapshot } from "./trackerPing";
+import { connectionAlive, freshPing, observePing, pingStage, sessionKeyOf, visibleSnapshot } from "./trackerPing";
 import type { PingObservation, PingStage } from "./trackerPing";
 
 export type { PingStage } from "./trackerPing";
@@ -154,7 +154,7 @@ export function useTrackerPing(open: boolean, started: boolean): TrackerPing {
     baselineAt: observation?.baselineAt ?? null,
     hasSnapshot: status !== null,
     lastSeenAt: status?.lastSeenAt ?? null,
-    presenceActive: status?.presence.status === "active",
+    presenceActive: connectionAlive(status),
   };
   const pinged = freshPing(inputs);
   const stage = pingStage(inputs);

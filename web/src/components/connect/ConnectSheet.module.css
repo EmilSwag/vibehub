@@ -476,3 +476,71 @@
   flex-direction: column;
   gap: 8px;
 }
+
+/* One-command flow: existing visual language, legible consent and touch controls. */
+.scope {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--vh-text);
+}
+
+.consent,
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.consent {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-dim);
+}
+.consent p,
+.note {
+  margin: 0;
+}
+
+.close {
+  width: 44px;
+  height: 44px;
+}
+.copy,
+.segBtn,
+.helpToggle {
+  min-height: 44px;
+}
+.helpToggle,
+.note,
+.installedDetail,
+.helpList,
+.staleFix {
+  color: var(--vh-text-dim);
+  line-height: 1.5;
+}
+.helpToggle {
+  max-width: 100%;
+}
+.close:focus-visible,
+.helpToggle:focus-visible,
+.text:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+.body {
+  min-height: 0;
+  overscroll-behavior: contain;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+.text {
+  min-width: 0;
+  user-select: all;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step,
+  .pline::after {
+    animation: none;
+  }
+}
