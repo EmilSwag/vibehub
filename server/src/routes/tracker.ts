@@ -9,7 +9,9 @@ import { computeLevel } from "../lib/level";
 import { heartbeatSchema } from "../lib/schemas";
 import { closeSession, foldUsageIntoDailyStat, normalizeModel, presenceFor, utcDay, type UsageEntry } from "../lib/sessions";
 import { buildTrackerMePayload, foldToday } from "../lib/tracker-me";
+import { latestTrackerLastSeenAt, trackerConnections } from "../lib/trackerConnection";
 import { requireTrackerToken } from "../middleware/auth";
+import { assertEmptyTrackerConnectionRequest, receiveTrackerConnection, retireTrackerConnection } from "../services/trackerConnection";
 import { emitPresenceUpdate } from "../ws/hub";
 
 // Heartbeat ingestion — ARCHITECTURE.md §4.3 / §5.8. Auth is a Bearer device token
@@ -17,6 +19,30 @@ import { emitPresenceUpdate } from "../ws/hub";
 // projectAlias/tool/model/counts/timestamps (§3) — nothing else is stored.
 
 const router = Router();
+
+// Connection-v1 is daemon transport, NOT an AI heartbeat. Authentication may update
+// token bookkeeping; these handlers never write Sessions, usage or activity events.
+router.post(
+  "/tracker/connection",
+  requireTrackerToken,
+  asyncHandler(async (req, res) => {
+    assertEmptyTrackerConnectionRequest(req);
+    const receipt = await receiveTrackerConnection(req.trackerUserId!, req.trackerTokenId!);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(receipt);
+  })
+);
+
+router.delete(
+  "/tracker/connection",
+  requireTrackerToken,
+  asyncHandler(async (req, res) => {
+    assertEmptyTrackerConnectionRequest(req);
+    const receipt = await retireTrackerConnection(req.trackerUserId!, req.trackerTokenId!);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(receipt);
+  })
+);
 
 // Round 5: `vibehub-tracker login <token>` calls this to validate the token before
 // ever writing it to ~/.vibehub/config.json, so a bad paste fails loudly at login
@@ -81,7 +107,7 @@ router.get(
       }),
       prisma.trackerToken.findMany({
         where: { userId, revokedAt: null },
-        select: { label: true, lastUsedAt: true },
+        select: { id: true, label: true },
         orderBy: { createdAt: "desc" },
       }),
       friendIdsOf(userId),
@@ -101,8 +127,13 @@ router.get(
         level: level.level,
         presence,
         today: foldToday(dailyStats, openSessions, today),
-        lastSeenAt: latestHeartbeat?.lastHeartbeatAt ?? null,
-        devices,
+        lastSeenAt: latestTrackerLastSeenAt(userId, latestHeartbeat?.lastHeartbeatAt),
+        // Sessions have no device attribution in this contract. A device timestamp
+        // is its accepted connection receipt, never the auth middleware's write.
+        devices: devices.map((device) => ({
+          label: device.label,
+          lastSeenAt: trackerConnections.snapshot(userId, device.id).lastSeenAt,
+        })),
         friends,
       })
     );

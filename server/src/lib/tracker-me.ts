@@ -68,7 +68,8 @@ export interface TrackerMePayload {
 /** How many friends the popover can actually draw (spec: up to 4 avatars). */
 export const FRIENDS_SAMPLE_LIMIT = 4;
 
-const iso = (value: Date | null | undefined): string | null => (value ? value.toISOString() : null);
+const iso = (value: Date | null | undefined): string | null =>
+  value instanceof Date && Number.isFinite(value.getTime()) ? value.toISOString() : null;
 
 /**
  * `PresenceActivity` (projectAlias/startedAt) → the menu bar's naming (project/since).
@@ -91,21 +92,19 @@ export interface TrackerMeInput {
   presence: PresenceSnapshot;
   today: { activeSeconds: number; tokens: number; sessionStartedAt: Date | null };
   /**
-   * Heartbeat-derived, NOT `TrackerToken.lastUsedAt`. `lastUsedAt` is bumped by
-   * `/tracker/verify` and by this route's own middleware, so deriving `connected`
-   * from it reports a connected tracker the instant `login` runs — the Round 5
-   * regression that hid the Home banner while presence stayed empty
-   * (see the note above `GET /users/me/tracker` in routes/users.ts).
+   * Latest actual AI heartbeat or accepted connection receipt, never token use.
+   * `/tracker/verify` and this route's middleware update `TrackerToken.lastUsedAt`;
+   * that authentication bookkeeping proves neither installation nor daemon life.
    */
   lastSeenAt: Date | null;
-  devices: { label: string; lastUsedAt: Date | null }[];
+  /** Device-scoped connection receipts only; token verification is not last seen. */
+  devices: { label: string; lastSeenAt: Date | null }[];
   friends: { user: { username: string; displayName: string | null; avatarUrl: string | null }; presence: PresenceSnapshot }[];
 }
 
 export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
-  // "Online" is anything not offline: an idle friend is still at the keyboard and is
-  // worth showing, greyed. Same active/idle/offline split `presenceFor()` already
-  // decayed from lastHeartbeatAt.
+  // Idle includes a reachable daemon with no AI activity. It does not prove that
+  // someone is at the keyboard. Use the central presence snapshot unchanged.
   const online = input.friends.filter((friend) => friend.presence.status !== "offline");
 
   return {
@@ -128,7 +127,7 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
     tracker: {
       connected: input.presence.status !== "offline",
       lastSeenAt: iso(input.lastSeenAt),
-      devices: input.devices.map((device) => ({ name: device.label, lastSeenAt: iso(device.lastUsedAt) })),
+      devices: input.devices.map((device) => ({ name: device.label, lastSeenAt: iso(device.lastSeenAt) })),
     },
     friendsOnline: {
       // `count` is every online friend; `sample` is only what fits in the popover, so

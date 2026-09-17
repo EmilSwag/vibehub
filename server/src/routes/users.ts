@@ -20,7 +20,9 @@ import {
   suggestedUsersQuerySchema,
 } from "../lib/schemas";
 import { toMeUser, toPublicLink, toPublicUser } from "../lib/serializers";
+import { latestTrackerLastSeenAt, trackerConnections } from "../lib/trackerConnection";
 import { requireAuth } from "../middleware/auth";
+import { retireTrackerConnection } from "../services/trackerConnection";
 
 const router = Router();
 
@@ -136,7 +138,7 @@ router.get(
       prisma.friendship.count({
         where: { OR: [{ userAId: user.id }, { userBId: user.id }] },
       }),
-      computeLevel(user.id),
+      computeLevel(user.id, { withModels: true }),
     ]);
 
     res.json({
@@ -312,8 +314,8 @@ router.get(
 /**
  * "Is my tracker actually talking to us?" — drives the Connect-your-tools panel
  * (onboarding step, Home banner, Settings). `connected`/`lastSeenAt` are
- * heartbeat-based (reuse `presenceFor()`, §lib/sessions.ts) — NOT
- * `TrackerToken.lastUsedAt`. That field also gets bumped by `/tracker/verify`
+ * based on actual AI heartbeats or accepted connection receipts (`presenceFor`)
+ * — NOT `TrackerToken.lastUsedAt`. That field also gets bumped by `/tracker/verify`
  * (the `login` command's own token check, before any daemon or heartbeat
  * exists), so a `connected` derived from it flipped true — and hid the Home
  * banner — the instant `login` ran, well before the tracker was actually
@@ -473,7 +475,7 @@ router.get(
 
     res.json({
       connected: presence.status !== "offline",
-      lastSeenAt: latestHeartbeat?.lastHeartbeatAt ?? null,
+      lastSeenAt: latestTrackerLastSeenAt(userId, latestHeartbeat?.lastHeartbeatAt),
       activeTokens: tokens.length,
       // Sessions arrive newest first, so the first occurrence of each tool wins.
       tools: [...new Set(sessions.map((s) => s.tool))],
@@ -481,7 +483,10 @@ router.get(
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       presence: { status: presence.status, activity: presence.activity, tools: presence.tools },
       sources: [...sources.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()),
-      devices: tokens.map((t) => ({ id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt })),
+      devices: tokens.map((t) => ({
+        id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt,
+        ...trackerConnections.snapshot(userId, t.id),
+      })),
       // Round 10: a daemon still heartbeating with a revoked token in the last 10 min.
       // The web shows it only while `connected` is false — a second machine may
       // legitimately hold an old token while this one is fine.
@@ -500,6 +505,9 @@ router.delete(
     const token = await prisma.trackerToken.findUnique({ where: { id: req.params.id } });
     if (!token || token.userId !== req.user!.id) throw new HttpError(404, "Token not found");
     await prisma.trackerToken.update({ where: { id: token.id }, data: { revokedAt: new Date() } });
+    // Fence in-flight authentication and notify only this owner's connection
+    // change. Other devices and genuine AI Sessions/accounting stay untouched.
+    await retireTrackerConnection(token.userId, token.id, true);
     res.status(204).end();
   })
 );

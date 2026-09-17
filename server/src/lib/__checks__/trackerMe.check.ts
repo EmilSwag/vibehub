@@ -52,7 +52,7 @@ const base: TrackerMeInput = {
   presence: activeAt("emil", "vibehub", "claude-code", "claude-opus-5"),
   today: { activeSeconds: 8_040, tokens: 125_000, sessionStartedAt: at(10 * H) },
   lastSeenAt: at(11 * H),
-  devices: [{ label: "MacBook Pro", lastUsedAt: at(11 * H) }],
+  devices: [{ label: "MacBook Pro", lastSeenAt: at(11 * H) }],
   friends: [],
 };
 
@@ -100,17 +100,18 @@ eq(
 );
 
 // ---- the Round 5 trap: connected must not come from token lastUsedAt ----
-// A device token used minutes ago (this route's own middleware bumps it) while presence
-// is offline must still report disconnected.
+// Even if a caller supplies legacy authentication metadata, it cannot become a
+// connection timestamp on either the account or its device.
+const verifiedOnlyDevice = { label: "MacBook Pro", lastSeenAt: null, lastUsedAt: at(11 * H) };
 eq(
-  "connected ignores a freshly-used device token",
+  "connected and lastSeenAt ignore a freshly-verified device token",
   buildTrackerMePayload({
     ...base,
     presence: offline,
     lastSeenAt: null,
-    devices: [{ label: "MacBook Pro", lastUsedAt: at(11 * H) }],
+    devices: [verifiedOnlyDevice],
   }).tracker,
-  { connected: false, lastSeenAt: null, devices: [{ name: "MacBook Pro", lastSeenAt: at(11 * H).toISOString() }] }
+  { connected: false, lastSeenAt: null, devices: [{ name: "MacBook Pro", lastSeenAt: null }] }
 );
 
 // ---- nulls the app must tolerate ----
@@ -135,7 +136,7 @@ eq(
 );
 eq(
   "device that has never been used",
-  buildTrackerMePayload({ ...base, devices: [{ label: "iMac", lastUsedAt: null }] }).tracker.devices,
+  buildTrackerMePayload({ ...base, devices: [{ label: "iMac", lastSeenAt: null }] }).tracker.devices,
   [{ name: "iMac", lastSeenAt: null }]
 );
 

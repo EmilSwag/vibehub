@@ -2,6 +2,7 @@ import { prisma } from "../db";
 import { env } from "../env";
 import { closeSession, ONLINE_AFTER_MS, presenceFor } from "../lib/sessions";
 import { emitPresenceUpdate } from "../ws/hub";
+import { sweepTrackerConnections } from "../services/trackerConnection";
 
 // Session sweeper — ARCHITECTURE.md §2.8 / §4.4. The tracker heartbeats every ~60s while
 // the developer is typing; when heartbeats stop we degrade the session in two steps:
@@ -19,6 +20,9 @@ import { emitPresenceUpdate } from "../ws/hub";
 export const SWEEP_INTERVAL_MS = 30_000;
 
 export async function sweepSessions(now: Date = new Date()): Promise<{ idled: number; ended: number }> {
+  // Independent transport expiry must run even with zero Sessions, and before a
+  // Session query/rollup failure can skip it. It never contributes activeSeconds.
+  await sweepTrackerConnections(now);
   const open = await prisma.session.findMany({
     where: { status: { not: "ENDED" } },
     include: { user: { select: { username: true } } },

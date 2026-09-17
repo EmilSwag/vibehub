@@ -2,6 +2,7 @@ import type { Session } from "@prisma/client";
 import { prisma } from "../db";
 import { env } from "../env";
 import { fromJsonArrayValue } from "./json-field";
+import { trackerConnections, trackerTimestamp } from "./trackerConnection";
 
 // Round 5: presence must decay from `lastHeartbeatAt` at *read* time, not trust
 // the stored `Session.status` column. That column is only advanced by the ~30s
@@ -268,22 +269,32 @@ export function sessionToActivity(session: Session): PresenceActivity {
 }
 
 /**
- * Current presence for a user, derived from the freshest non-ended Session row —
- * decayed from `lastHeartbeatAt` on every call, never trusting the stored
- * `status` column alone (see ONLINE_AFTER_MS above for why).
+ * Real Sessions retain their existing active/idle decay and accounting. When none
+ * is valid, an accepted transport receipt can mean idle — NEVER AI activity.
+ * This read does not extend, close, create or credit any Session.
  */
 export async function presenceFor(userId: string, username: string): Promise<PresenceSnapshot> {
   const session = await prisma.session.findFirst({
     where: { userId, status: { not: "ENDED" } },
     orderBy: { lastHeartbeatAt: "desc" },
   });
-  if (!session) return { username, status: "offline", activity: null, tools: [] };
+  const now = Date.now();
+  const withoutActivity = (): PresenceSnapshot => ({
+    username,
+    status: trackerConnections.forUser(userId, now).connected ? "idle" : "offline",
+    activity: null,
+    tools: [],
+  });
+  if (!session || session.status === "ENDED") return withoutActivity();
 
-  const silentForMs = Date.now() - session.lastHeartbeatAt.getTime();
+  const heartbeatAt = trackerTimestamp(session.lastHeartbeatAt, now);
+  const startedAt = trackerTimestamp(session.startedAt, now);
+  if (heartbeatAt === null || startedAt === null || startedAt > heartbeatAt) return withoutActivity();
+  const silentForMs = now - heartbeatAt;
   const status: PresenceStatus =
     silentForMs > env.sessionIdleTimeoutMs ? "offline" : silentForMs > ONLINE_AFTER_MS ? "idle" : "active";
 
-  if (status === "offline") return { username, status: "offline", activity: null, tools: [] };
+  if (status === "offline") return withoutActivity();
   const activity = sessionToActivity(session);
   return {
     username,

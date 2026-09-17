@@ -4,6 +4,8 @@ import { prisma } from "../db";
 import { SESSION_COOKIE, verifySessionToken } from "../auth/jwt";
 import { hashToken } from "../lib/crypto";
 import { asyncHandler, HttpError } from "../lib/http-error";
+import { TRACKER_AUTH_MAX_AGE_MS } from "../lib/trackerConnection";
+import { retireTrackerConnection } from "../services/trackerConnection";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -72,6 +74,7 @@ export const requireUserOrToken = asyncHandler(async (req: Request, _res: Respon
 const REJECTED_WRITE_THROTTLE_MS = 60_000;
 
 export const requireTrackerToken = asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
   const header = req.header("authorization");
   if (!header?.startsWith("Bearer ")) throw new HttpError(401, "Missing bearer token");
 
@@ -79,11 +82,9 @@ export const requireTrackerToken = asyncHandler(async (req: Request, _res: Respo
   const tokenHash = hashToken(raw);
   const token = await prisma.trackerToken.findUnique({ where: { tokenHash } });
   if (token?.revokedAt) {
-    // A daemon still heartbeating with a token the user revoked. Without this the
-    // UI has nothing to show but "Offline" — every request is a 401 and no session
-    // is written. Recording the attempt lets /users/me/tracker say "a tracker on
-    // your machine still uses an old token" (round 10, live PO state). Throttled so
-    // a 30 s heartbeat doesn't become one write per beat; best-effort by design.
+    // Rejection can retire only this opaque device, never another connection or
+    // actual AI Session. Preserve 401 even if a best-effort notification fails.
+    await retireTrackerConnection(token.userId, token.id, true).catch(() => undefined);
     const stale = !token.lastRejectedAt || Date.now() - token.lastRejectedAt.getTime() > REJECTED_WRITE_THROTTLE_MS;
     if (stale) {
       await prisma.trackerToken
@@ -93,7 +94,22 @@ export const requireTrackerToken = asyncHandler(async (req: Request, _res: Respo
   }
   if (!token || token.revokedAt) throw new HttpError(401, "Invalid or revoked tracker token");
 
-  await prisma.trackerToken.update({ where: { id: token.id }, data: { lastUsedAt: new Date() } });
+  // This remains authentication bookkeeping, not a connection receipt. The
+  // conditional write also rejects a token revoked while its lookup was pending.
+  const updated = await prisma.trackerToken.updateMany({
+    where: { id: token.id, revokedAt: null },
+    data: { lastUsedAt: new Date() },
+  });
+  if (updated.count !== 1) {
+    await retireTrackerConnection(token.userId, token.id, true).catch(() => undefined);
+    throw new HttpError(401, "Invalid or revoked tracker token");
+  }
+  // Bound the life of a cached auth decision. Revocation tombstones outlive it;
+  // connection handlers record synchronously before their first subsequent await.
+  const elapsed = Date.now() - startedAt;
+  if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= TRACKER_AUTH_MAX_AGE_MS) {
+    throw new HttpError(401, "Tracker authentication expired; retry");
+  }
   req.trackerUserId = token.userId;
   req.trackerTokenId = token.id;
   next();
