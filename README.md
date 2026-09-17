@@ -21,11 +21,60 @@ a project name, a tool/model name, token counts, and timestamps. See
 | API / WebSocket | `https://server-production-cc06.up.railway.app` (`/api/v1`, `/ws`) |
 | Health | `GET /api/v1/health` |
 
-Sign in, add your friends by username, paste a tracker token into `vibehub-tracker` and
-your live status shows up on their home screen.
+Sign in, add your friends by username, connect your device with one command and your
+live status shows up on their home screen.
 
 > **Auth.** Sign in with GitHub (OAuth App `Vibemunity`). Username login
 > (`DEV_LOGIN_ENABLED`) is off on the hosted instance.
+
+## Connect your device (one command)
+
+Get a device token in VibeHub → **Settings → Tracker → New token**, then run the
+command for your OS. The app also generates a ready-to-paste, hardened version of the
+same command (Home → **Connect**).
+
+**macOS / Linux** (Terminal)
+
+```bash
+curl -fsSL https://web-production-da778.up.railway.app/tracker/connect.sh | VIBEHUB_TOKEN='<device token>' bash -s -- --start
+```
+
+**Windows** (PowerShell)
+
+```powershell
+$env:VIBEHUB_TOKEN='<device token>'; & ([scriptblock]::Create((irm https://web-production-da778.up.railway.app/tracker/connect.ps1))) -Start; Remove-Item Env:VIBEHUB_TOKEN
+```
+
+What the installer does, in order:
+
+```
+VibeHub
+Connecting this device
+✓ [1/5] Node.js ready (v24.21.0, private runtime)   ← downloaded from nodejs.org only if you have no Node ≥ 18; SHA-256 verified
+✓ [2/5] Tracker downloaded                          ← ~/.vibehub/app/vibehub-tracker.cjs, syntax-checked before use
+✓ [3/5] Device token verified as @you
+✓ [4/5] Configuration saved                         ← ~/.vibehub/config.json (0600)
+✓ [5/5] Start running (pid 4242)                    ← only with --start / -Start; omit for setup only
+─── Installed in ~/.vibehub ─────────────────────────
+  start:  … vibehub-tracker.cjs start
+  status: … vibehub-tracker.cjs status
+  stop:   … vibehub-tracker.cjs stop
+Open VibeHub — it turns green after the first ping.
+```
+
+**What it reads.** Only Claude Code (`~/.claude/projects`) and Codex (`~/.codex/sessions`)
+session logs. No other apps, processes, window titles, browsing, keyboard, idle or Git.
+Parsing may temporarily read records containing prompts, code and tool output; those
+contents are never saved or sent. **What it sends:** tool, model, timing, token counts
+and a bounded project alias. Profiles and stats are public.
+
+**Manage / uninstall.** `~/.vibehub/runtime/bin/node ~/.vibehub/app/vibehub-tracker.cjs start|status|stop`
+(Windows: `%USERPROFILE%\.vibehub\runtime\node.exe %USERPROFILE%\.vibehub\app\vibehub-tracker.cjs …`).
+Nothing is added to OS autostart. To uninstall: `stop`, then delete `~/.vibehub`.
+
+Requirements: macOS 13.5+ or Linux (glibc 2.28+, x64/arm64) with `curl` and `tar`;
+Windows 10+ x64/arm64 with PowerShell 5.1+. Full details and troubleshooting:
+[`docs/INSTALL.md`](docs/INSTALL.md).
 
 ## Status
 

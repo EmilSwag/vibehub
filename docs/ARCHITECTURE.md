@@ -313,19 +313,26 @@ agent — packaging that is out of scope for this scaffold).
 
 `~/.vibehub/` is `0700`; `status.json` and `config.json` are `0600`.
 
-### 4.2 Detecting activity
+### 4.2 Detecting activity (AI-only)
 
-MVP detection is host-process based: the tracker polls the local process list every
-`HEARTBEAT_INTERVAL_MS` (default 30000) for known coding-tool process names (configurable
-list, e.g. `claude`, `cursor`, `code`) and reads the current working directory of the
-most recently active one to derive `projectAlias` (basename of cwd, or the configured
-alias override). Model name is read from the tool's own local session/log file when
-available (tool-specific adapters — the exact adapter table is a builder-agent decision
-documented in `tracker/README.md`); when unknown, `model` is sent as `"unknown"`.
+Shipped detection is log-adapter based, not host-process based: the tracker polls every
+`HEARTBEAT_INTERVAL_MS` (default 30000) and reads only newly appended, recognized
+session-log records from supported AI tools — currently Claude Code and Codex only (see
+`tracker/README.md` and `meta/facts/vibehub-ai-only-privacy.md`). The active detector
+(`tracker/src/detector.ts`) wires in only these two log adapters; there is no generic
+process/window enumeration, foreground-app polling, editor presence or Git probing in
+the collection path. `projectAlias` comes from a bounded hint on the log's own `cwd`
+field (basename, or the configured alias override), never from scanning the filesystem
+or asking the OS what is open. Model name is read from the tool's own log records when
+available; unrecognized or absent models are normalized to `model: null` (§4.3), not the
+string `"unknown"`.
 
-No filesystem/tool activity for `IDLE_THRESHOLD_MS` (default 300000 = 5 min) → tracker
+No supported-source activity for `IDLE_THRESHOLD_MS` (default 300000 = 5 min) → tracker
 marks itself idle locally and stops sending heartbeats (server-side session then times
-out per §2.8 after its own longer `SESSION_IDLE_TIMEOUT_MS`).
+out per §2.8 after its own longer `SESSION_IDLE_TIMEOUT_MS`). A host-process adapter and
+a Quadcode chat-log adapter exist in source (`tracker/src/adapters/processes.ts`,
+`quadcode.ts`) but are not constructed by the active detector, so neither contributes to
+detection today; see §4.5.
 
 ### 4.3 Wire format — `POST /api/v1/tracker/heartbeat`
 
@@ -475,7 +482,13 @@ the **only** interface `vibehub/macos` depends on; it never calls the server dir
 `null` except `updatedAt`. The macOS app computes the human string itself, e.g.
 `"in project neon-app · Claude Code · 1h 42m"`, from `sessionStartedAt`.
 
-### 4.5 Quadcode AI adapter (estimated tokens)
+### 4.5 Quadcode AI adapter (estimated tokens) — currently unavailable
+
+**Not wired into the active detector.** `tracker/src/detector.ts` constructs only
+`ClaudeCodeAdapter` and `CodexAdapter` (§4.2); Quadcode activity is unavailable until
+this adapter is explicitly re-enabled, and no Quadcode chat content is read by the
+current collector. The format and estimation notes below describe the existing adapter
+source for if/when that happens; they are not a claim about what ships today.
 
 Quadcode writes one JSONL per chat section, per project:
 
@@ -721,6 +734,35 @@ impossible case of a bucket with no contributing row.
 |---|---|---|---|
 | POST | `/api/v1/tracker/heartbeat` | Bearer device token | see §4.3 |
 | GET | `/api/v1/tracker/me` | Bearer device token | — → see below |
+| POST | `/api/v1/tracker/connection` | Bearer device token | empty body → `{ connected: true, lastSeenAt, protocol: "connection-v1" }` |
+| DELETE | `/api/v1/tracker/connection` | Bearer device token | empty body → `{ connected: false, lastSeenAt, protocol: "connection-v1" }` |
+| GET | `/api/v1/tracker/verify` | Bearer device token | — → `{ username }` |
+
+**Connection-v1 is daemon transport liveness, not an AI heartbeat**
+(`server/src/lib/trackerConnection.ts`, `services/trackerConnection.ts`,
+`routes/tracker.ts`). Both `/tracker/connection` routes reject any non-empty body
+(`assertEmptyTrackerConnectionRequest` — framing/content-type must agree with an empty
+JSON object) and never write a `Session`, `ActivityEvent` or `DailyStat` row; only an
+in-memory per-device receipt is recorded. `POST` marks the device live and returns
+`connected: true`; `DELETE` retires it (a clean stop) and returns `connected: false`.
+A receipt stays live for `TRACKER_CONNECTION_TTL_MS` (**90s**) after the last accepted
+`POST`, independent of AI-log activity — the tracker sends a bodyless `POST` before
+polling AI logs and whenever no AI source is active, and a bounded bodyless `DELETE` on
+clean shutdown.
+
+**Process-local by design:** the connection store lives in the API process's memory and
+a restart clears every receipt; a shared store is *required* before running multiple API
+processes/replicas, and sticky routing alone is not sufficient (see the file-level
+comment in `lib/trackerConnection.ts`).
+
+**`GET /api/v1/tracker/verify` is not liveness** — it only validates a bearer token and
+bumps `TrackerToken.lastUsedAt` (the same bookkeeping every authenticated tracker call
+performs) before `login` saves it, and never creates or refreshes a connection-v1
+receipt or otherwise proves a daemon is running, so treating it as "connected" is the
+exact Round 5 regression the `GET /api/v1/tracker/me` notes below guard against.
+
+Against a server that predates this protocol, the tracker deliberately treats the
+connection as unavailable rather than reading AI logs or fabricating a connected state.
 
 `GET /api/v1/tracker/me` is the read side of the device-token surface: everything the
 macOS menu-bar companion (`menubar-mac/`) renders, in one request. Same auth as the
