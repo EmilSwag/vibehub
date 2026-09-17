@@ -1,648 +1,348 @@
-import { heartbeatIntervalMs, idleThresholdMs, readConfig } from "./config";
+import { configFingerprint, heartbeatIntervalMs, idleThresholdMs, projectConfig, readConfig } from "./config";
 import { Detector } from "./detector";
-import type { Detection, DetectionUsage, SeenSource } from "./detector";
+import type { SeenSource } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
-import { enqueue, flushQueue } from "./queue";
+import { eventTime, isSupportedTool, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
 import type { SendResult } from "./queue";
-import { markAuthRejected, readStatus, writeOfflineStatus, writeStatus } from "./statusFile";
+import { markAuthRejected, writeOfflineStatus, writeStatus } from "./statusFile";
 import { clearStopRequest, isStopRequested } from "./stopRequest";
-import type { HeartbeatPayload, HeartbeatTool, HeartbeatUsage, QueuedEvent, StatusSource, TrackerConfig } from "./types";
+import type { HeartbeatPayload, HeartbeatTool, HeartbeatUsage, TrackerConfig } from "./types";
 
 interface ActiveSession {
   projectAlias: string;
   tool: string;
-  /** null when the tool exposes no model (presence-only tools). */
   model: string | null;
   startedAt: string;
-  /**
-   * Where the session was detected — kept in memory ONLY for the detector's
-   * hysteresis (same tool + same project). Never written to status.json or a
-   * payload: `cwd` is a full path (privacy invariant, index.ts header).
-   */
   cwd: string | null;
   projectHint: string | null;
 }
-
-/** How long a tool/model stays in `status.json`'s `sources` after it was last seen. */
-const SOURCES_WINDOW_MS = 10 * 60 * 1000;
-
-/** Consecutive polls a challenger model must burn tokens alone before presence follows it. */
+/** Legacy exported constant; model identities are no longer inferred or carried across sources. */
 export const MODEL_SWITCH_POLLS = 2;
-
-/** How often the loop looks for `stop.request` between ticks. */
 const STOP_REQUEST_POLL_MS = 1000;
-
-/** How long `stop()` waits for a mid-flight tick before sending session_end regardless. */
 const IN_FLIGHT_GRACE_MS = 3000;
-
-/** A model other than the session's that has been burning tokens while the session's model was silent. */
-interface ModelChallenger {
-  model: string;
-  /** Consecutive polls (so far) in which it burned and the current model did not. */
-  polls: number;
-}
 
 export interface LoopState {
   activeSession: ActiveSession | null;
   lastActivityAt: number | null;
   detector: Detector;
-  /**
-   * Token deltas not yet delivered, keyed by tool+model. Accumulates while no
-   * session is open (or while a project is hidden) and rides on the next
-   * heartbeat, so spend is never lost — and never re-attributed.
-   */
+  /** Compatibility field: never buffers hidden, offline or cross-tick usage. */
   pendingUsage: Map<string, HeartbeatUsage>;
-  /** (tool, model) pairs seen within SOURCES_WINDOW_MS, keyed like pendingUsage. */
   sourcesSeen: Map<string, SeenSource>;
-  /** Presence-model hysteresis bookkeeping — see resolvePresenceModel. */
-  modelChallenger: ModelChallenger | null;
-  /** Same window the detector uses: a source not seen inside it is stale. */
+  modelChallenger: { model: string; polls: number } | null;
   activeWindowMs: number;
-  /** Set by runLoop's stop(): a tick still in flight must not send anything more. */
   stopping: boolean;
+  epoch: number;
+  binding: string | null;
+  requestAbort: AbortController | null;
+  loadConfig: () => TrackerConfig | null;
 }
 
 export function createLoopState(config?: TrackerConfig): LoopState {
-  const activeWindowMs = config ? idleThresholdMs(config) : 5 * 60 * 1000;
-  return {
-    activeSession: null,
-    lastActivityAt: null,
-    detector: new Detector(activeWindowMs),
-    pendingUsage: new Map(),
-    sourcesSeen: new Map(),
-    modelChallenger: null,
-    activeWindowMs,
-    stopping: false,
-  };
+  const valid = projectConfig(config);
+  const activeWindowMs = valid ? idleThresholdMs(valid) : 300000;
+  return { activeSession: null, lastActivityAt: null, detector: new Detector(activeWindowMs),
+    pendingUsage: new Map(), sourcesSeen: new Map(), modelChallenger: null,
+    activeWindowMs, stopping: false, epoch: 0, binding: valid ? configFingerprint(valid) : null,
+    requestAbort: null, loadConfig: readConfig };
 }
 
-const usageKey = (tool: string, model: string | null): string => `${tool}\u0000${model ?? ""}`;
-
-function addPendingUsage(state: LoopState, u: DetectionUsage): void {
-  if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) return;
-  const key = usageKey(u.tool, u.model);
-  const bucket = state.pendingUsage.get(key) ?? { tool: u.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-  bucket.tokensInputDelta += u.tokensInputDelta;
-  bucket.tokensOutputDelta += u.tokensOutputDelta;
-  if (u.estimated) bucket.estimated = true;
-  state.pendingUsage.set(key, bucket);
-}
-
-/** Round 6 `tools[]` cap — the server's schema rejects more than this. */
-const MAX_TOOLS = 10;
-
-/**
- * Every tool seen open right now, primary first, one entry per tool.
- *
- * Built from the same `sources` map `status` prints, narrowed to the active window
- * so a tool closed ten minutes ago doesn't linger in presence. Within a tool the
- * freshest entry wins, so a tool that switched models reports the current one.
- * Each entry's project is resolved through `resolveProjectAlias`, exactly like the
- * primary's, so user aliases apply; a project the user marked `hidden` yields a
- * null alias — the tool still shows, its project name does not.
- */
-function buildTools(
-  state: LoopState,
-  config: TrackerConfig,
-  primary: { tool: string; model: string | null; projectAlias: string },
-  now: number
-): HeartbeatTool[] {
-  const byTool = new Map<string, HeartbeatTool>();
-  byTool.set(primary.tool, { tool: primary.tool, model: primary.model, projectAlias: primary.projectAlias });
-
-  const fresh = [...state.sourcesSeen.values()]
-    .filter((s) => now - s.lastSeenAt <= state.activeWindowMs)
-    .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-
-  // One entry per tool. Within a tool, a sighting that knows the model wins over a
-  // bare one even if the bare one is a shade fresher: an open editor reported by the
-  // process scanner should not erase the model its own log established. The detector
-  // keeps that known identity fresh while the tool is open (see its seen-building).
-  const perTool = new Map<string, SeenSource>();
-  for (const s of fresh) {
-    const chosen = perTool.get(s.tool);
-    if (!chosen || (chosen.model === null && s.model !== null)) perTool.set(s.tool, s);
-  }
-
-  for (const s of perTool.values()) {
-    if (byTool.has(s.tool)) continue;
-    byTool.set(s.tool, {
-      tool: s.tool,
-      model: s.model,
-      projectAlias: resolveProjectAlias(s.cwd ?? null, config, s.projectHint ?? null),
-    });
-    if (byTool.size >= MAX_TOOLS) break;
-  }
-  return [...byTool.values()];
-}
-
-/** Drains the pending map into a payload-ready list plus the legacy sums. */
-function takePendingUsage(state: LoopState): { usage: HeartbeatUsage[]; tokensInputDelta: number; tokensOutputDelta: number } {
-  const usage: HeartbeatUsage[] = [];
-  let tokensInputDelta = 0;
-  let tokensOutputDelta = 0;
-  for (const u of state.pendingUsage.values()) {
-    if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) continue;
-    usage.push({ ...u });
-    tokensInputDelta += u.tokensInputDelta;
-    tokensOutputDelta += u.tokensOutputDelta;
-  }
+/** Discard evidence on consent/config/account changes, cancellation or failed verification. */
+export function clearCollectedState(state: LoopState, config?: TrackerConfig): void {
+  state.epoch += 1;
+  state.requestAbort?.abort();
+  state.requestAbort = null;
+  state.detector.clear();
+  state.activeSession = null;
+  state.lastActivityAt = null;
   state.pendingUsage.clear();
-  return { usage, tokensInputDelta, tokensOutputDelta };
-}
-
-function noteSources(state: LoopState, seen: SeenSource[], now: number): StatusSource[] {
-  for (const s of seen) {
-    const key = usageKey(s.tool, s.model);
-    const prev = state.sourcesSeen.get(key);
-    if (!prev || s.lastSeenAt > prev.lastSeenAt) state.sourcesSeen.set(key, { ...s });
-  }
-  for (const [key, s] of state.sourcesSeen) {
-    if (now - s.lastSeenAt > SOURCES_WINDOW_MS) state.sourcesSeen.delete(key);
-  }
-  return [...state.sourcesSeen.values()]
-    .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-    .map((s) => ({ tool: s.tool, model: s.model, lastSeenAt: new Date(s.lastSeenAt).toISOString() }));
-}
-
-/**
- * POSTs one heartbeat event per docs/ARCHITECTURE.md §4.3. Never throws —
- * network/parse failures resolve to `{ ok: false, authRejected: false }` so
- * the caller can queue instead. A 401 is reported distinctly (`authRejected:
- * true`): that's the server saying the token itself is bad, not a transient
- * failure — see queue.ts's flushQueue for why that must not be retried.
- */
-export async function postHeartbeat(
-  apiUrl: string,
-  deviceToken: string,
-  payload: HeartbeatPayload
-): Promise<SendResult> {
-  try {
-    const res = await fetch(
-      `${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/heartbeat`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${deviceToken}`,
-        },
-        body: JSON.stringify(payload),
-        // A stalled connection must not freeze the loop (ticks never overlap);
-        // a timeout is a plain failure → queued and retried next tick.
-        signal: AbortSignal.timeout(15000),
-      }
-    );
-    return { ok: res.ok, authRejected: res.status === 401 };
-  } catch {
-    return { ok: false, authRejected: false };
-  }
-}
-
-/** Direct POST, else queued for the next tick (a 401 is neither: see postHeartbeat). */
-export async function sendOrQueue(
-  config: TrackerConfig,
-  payload: HeartbeatPayload
-): Promise<void> {
-  const result = await postHeartbeat(config.apiUrl, config.deviceToken, payload);
-  if (result.authRejected) {
-    markAuthRejected(true);
-    return; // don't enqueue a payload that's guaranteed to fail again
-  }
-  if (!result.ok) {
-    enqueue({ payload, apiUrl: config.apiUrl, deviceToken: config.deviceToken });
-    return;
-  }
-  markAuthRejected(false);
-}
-
-/** Retries queued events in order; stops at the first still-failing send. */
-export async function flushOfflineQueue(): Promise<{
-  delivered: number;
-  remaining: number;
-  authRejected: boolean;
-}> {
-  const result = await flushQueue((event: QueuedEvent) =>
-    postHeartbeat(event.apiUrl, event.deviceToken, event.payload)
-  );
-  if (result.authRejected) markAuthRejected(true);
-  return result;
-}
-
-/** session_start / session_end carry presence only — never token deltas or usage. */
-function endActiveSession(
-  config: TrackerConfig,
-  session: ActiveSession,
-  occurredAt: string
-): Promise<void> {
-  return sendOrQueue(config, {
-    eventType: "session_end",
-    projectAlias: session.projectAlias,
-    tool: session.tool,
-    model: session.model,
-    occurredAt,
-  });
-}
-
-/**
- * Presence-model hysteresis. Token attribution is exact and untouched by this; it
- * only decides which single model the *session* reports. Within one tool+project
- * several session files burn tokens in turn — the main model, a cheaper side-call
- * model (title generation), sub-agents on other models — and the detector's pick
- * follows whichever file burned most recently. Reporting that verbatim produced a
- * session_end/session_start pair every poll (opus-5 → sonnet-5 → fable in 90 s).
- *
- * So the current model is kept unless one of:
- *  - the same challenger burned tokens in MODEL_SWITCH_POLLS consecutive polls while
- *    the current model burned none in those polls;
- *  - the current model's source has gone stale — nothing seen for (tool, model)
- *    inside activeWindowMs, per the same `sources` map `status` prints.
- * A previously-unknown model (null) is adopted at once: that is a refinement, not a
- * switch. Any other tool/project change resets the challenger; those switches are
- * governed by the detector's tool hysteresis, not by this.
- */
-function resolvePresenceModel(state: LoopState, detection: Detection, tool: string, alias: string, now: number): string | null {
-  const session = state.activeSession;
-  // A previously-known model is kept if this poll saw none (log line without a
-  // model field), so a session doesn't flip known → null mid-run.
-  const candidate = detection.model ?? session?.model ?? null;
-  if (
-    !session ||
-    session.projectAlias !== alias ||
-    session.tool !== tool ||
-    session.model === null ||
-    candidate === null ||
-    candidate === session.model
-  ) {
-    state.modelChallenger = null;
-    return candidate;
-  }
-
-  const current = session.model;
-  const burned = (model: string): boolean =>
-    detection.usage.some((u) => u.tool === tool && u.model === model && (u.tokensInputDelta > 0 || u.tokensOutputDelta > 0));
-  const currentLastSeen = state.sourcesSeen.get(usageKey(tool, current))?.lastSeenAt ?? 0;
-  if (now - currentLastSeen > state.activeWindowMs) {
-    state.modelChallenger = null;
-    return candidate; // the model we were reporting has gone quiet for the whole window
-  }
-
-  if (burned(candidate) && !burned(current)) {
-    const polls = state.modelChallenger?.model === candidate ? state.modelChallenger.polls + 1 : 1;
-    if (polls >= MODEL_SWITCH_POLLS) {
-      state.modelChallenger = null;
-      return candidate;
-    }
-    state.modelChallenger = { model: candidate, polls };
-  } else {
-    // A one-off side call, both models busy, or a different challenger: start over.
-    state.modelChallenger = null;
-  }
-  return current;
-}
-
-/** One poll/heartbeat cycle. Exported standalone so it is unit-testable. */
-export async function tick(config: TrackerConfig, state: LoopState): Promise<void> {
-  await flushOfflineQueue();
-
-  const current = state.activeSession
-    ? { tool: state.activeSession.tool, cwd: state.activeSession.cwd, projectHint: state.activeSession.projectHint }
-    : undefined;
-  const detection = await state.detector.detect(Date.now(), current);
-
-  // `occurredAt` is stamped AFTER detection so a slow poll (a process listing that
-  // takes tens of seconds) doesn't date every payload at the start of the tick and
-  // leave Session.endedAt before lastHeartbeatAt.
-  const now = Date.now();
-  const nowIso = new Date(now).toISOString();
-
-  // Token deltas are real spend regardless of whether we consider the user "active",
-  // and each stays booked under the (tool, model) that produced it.
-  if (detection) {
-    for (const u of detection.usage) addPendingUsage(state, u);
-  }
-  // A stop landed while we were polling: the shutdown path owns session_end now,
-  // and a heartbeat sent after it would reopen the session server-side.
-  if (state.stopping) return;
-  const sources = noteSources(state, detection?.seen ?? [], now);
-
-  const alias = detection ? resolveProjectAlias(detection.cwd, config, detection.projectHint) : null;
-
-  if (detection && detection.active && alias !== null) {
-    const tool = detection.tool;
-    const model = resolvePresenceModel(state, detection, tool, alias, now);
-    const changed =
-      !state.activeSession ||
-      state.activeSession.projectAlias !== alias ||
-      state.activeSession.tool !== tool ||
-      // model null → known is a refinement, not a new session
-      (state.activeSession.model !== model && state.activeSession.model !== null);
-
-    if (changed) {
-      if (state.activeSession) {
-        await endActiveSession(config, state.activeSession, nowIso);
-      }
-      state.activeSession = {
-        projectAlias: alias,
-        tool,
-        model,
-        startedAt: nowIso,
-        cwd: detection.cwd,
-        projectHint: detection.projectHint,
-      };
-      await sendOrQueue(config, {
-        eventType: "session_start",
-        projectAlias: alias,
-        tool,
-        model,
-        occurredAt: nowIso,
-      });
-    } else if (state.activeSession) {
-      state.activeSession.model = model;
-      state.activeSession.cwd = detection.cwd;
-      state.activeSession.projectHint = detection.projectHint;
-    }
-    const session = state.activeSession!;
-
-    // Heartbeat v2: `usage` is the precise per-(tool, model) attribution; the
-    // top-level deltas are its sums so servers without v2 still count spend.
-    const pending = takePendingUsage(state);
-    await sendOrQueue(config, {
-      eventType: "heartbeat",
-      projectAlias: alias,
-      tool,
-      model,
-      tokensInputDelta: pending.tokensInputDelta,
-      tokensOutputDelta: pending.tokensOutputDelta,
-      usage: pending.usage,
-      tools: buildTools(state, config, { tool, model, projectAlias: alias }, now),
-      occurredAt: nowIso,
-    });
-
-    state.lastActivityAt = now;
-    // Preserve authRejected — sendOrQueue above may have just set/cleared it, and
-    // this write must not clobber that back to undefined every active tick.
-    writeStatus({
-      status: "active",
-      projectAlias: alias,
-      tool,
-      model,
-      sessionStartedAt: session.startedAt,
-      updatedAt: nowIso,
-      authRejected: readStatus().authRejected,
-      sources,
-    });
-    return;
-  }
-
-  // Nothing active (tool closed, logs quiet, or project hidden) — evaluate idle.
+  state.sourcesSeen.clear();
   state.modelChallenger = null;
-  if (!state.activeSession) {
-    // Nothing has ever been detected; stay offline, but keep "Seeing:" honest so
-    // `status` can explain why (e.g. Cursor open, no Claude log activity yet).
-    writeSourcesIfChanged(sources, nowIso);
-    return;
+  state.binding = config ? configFingerprint(config) : null;
+  if (config && idleThresholdMs(config) !== state.activeWindowMs) {
+    state.activeWindowMs = idleThresholdMs(config);
+    state.detector = new Detector(state.activeWindowMs);
   }
-  const idleAfter = idleThresholdMs(config);
-  if (state.lastActivityAt !== null && now - state.lastActivityAt >= idleAfter) {
-    // Close the session server-side so active-time stats stop accruing; the
-    // status file keeps the last project so the menu-bar app can show "idle in X".
-    const ended = state.activeSession;
-    await endActiveSession(config, ended, nowIso);
-    state.activeSession = null;
-    writeStatus({
-      status: "idle",
-      projectAlias: ended.projectAlias,
-      tool: ended.tool,
-      model: ended.model,
-      sessionStartedAt: ended.startedAt,
-      updatedAt: nowIso,
-      authRejected: readStatus().authRejected,
-      sources,
+}
+
+function sameConfig(config: TrackerConfig, load: () => TrackerConfig | null): boolean {
+  try {
+    const current = projectConfig(load());
+    return current !== null && configFingerprint(current) === configFingerprint(config);
+  } catch { return false; }
+}
+
+/** Only the already-configured origin and existing tracker routes; no redirects. */
+async function requestTracker(
+  apiUrl: string, deviceToken: string, payload?: HeartbeatPayload, signal?: AbortSignal, retiring = false
+): Promise<SendResult> {
+  const origin = safeApiOrigin(apiUrl);
+  if (!origin || !safeDeviceToken(deviceToken) || signal?.aborted) return { ok: false, authRejected: false };
+  const controller = new AbortController();
+  const cancel = (): void => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  const timer = setTimeout(cancel, 15000);
+  try {
+    const res = await fetch(`${origin}/api/v1/tracker/${payload ? "heartbeat" : "connection"}`, {
+      method: retiring ? "DELETE" : "POST", redirect: "error",
+      headers: { Authorization: `Bearer ${deviceToken}`, ...(payload ? { "Content-Type": "application/json" } : {}) },
+      ...(payload ? { body: JSON.stringify(payload) } : {}), signal: controller.signal,
     });
+    const authRejected = res.status === 401 || res.status === 403;
+    if (!payload && res.ok) {
+      // Only the explicit transport receipt can mean connected; login verification,
+      // arbitrary 2xx responses and unsupported servers cannot fabricate liveness.
+      const receipt = objectRecord(await res.json());
+      const at = typeof receipt?.lastSeenAt === "string" ? eventTime(receipt.lastSeenAt, Date.now(), 90000) : null;
+      const valid = receipt?.protocol === "connection-v1" && receipt.connected === !retiring &&
+        (retiring ? receipt.lastSeenAt === null || at !== null : at !== null);
+      return { ok: !controller.signal.aborted && valid, authRejected: false,
+        ...(valid && !retiring && at !== null ? { connectionLastSeenAt: new Date(at).toISOString() } : {}) };
+    }
+    try { await res.body?.cancel(); } catch {}
+    return { ok: !controller.signal.aborted && res.ok, authRejected };
+  } catch { return { ok: false, authRejected: false }; }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
+}
+
+/** Runtime allowlist is the LAST boundary before every activity send. */
+export async function postHeartbeat(
+  apiUrl: string, deviceToken: string, payload: HeartbeatPayload, signal?: AbortSignal
+): Promise<SendResult> {
+  const safe = projectHeartbeat(payload);
+  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: false, authRejected: false };
+}
+
+/** Connection-v1 transport receipt, NOT login verification or a fake ACTIVE event. */
+export function verifyConnection(config: TrackerConfig, signal?: AbortSignal): Promise<SendResult> {
+  return requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+}
+
+/** Best-effort bodyless clean stop; a failed receipt expires under the server lease. */
+export function retireConnection(config: TrackerConfig, signal?: AbortSignal): Promise<SendResult> {
+  return requestTracker(config.apiUrl, config.deviceToken, undefined, signal, true);
+}
+
+/** Compatibility name only: failed sends are dropped, never cached or replayed. */
+export async function sendOrQueue(config: TrackerConfig, payload: HeartbeatPayload): Promise<void> {
+  const safe = projectConfig(config);
+  if (!safe || !sameConfig(safe, readConfig)) return;
+  const result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload);
+  if (sameConfig(safe, readConfig) && (result.ok || result.authRejected)) markAuthRejected(result.authRejected);
+}
+export async function flushOfflineQueue(): Promise<{ delivered: number; remaining: number; authRejected: boolean }> {
+  return { delivered: 0, remaining: 0, authRejected: false };
+}
+
+function sessionEvent(eventType: "session_start" | "session_end", session: ActiveSession, occurredAt: string): HeartbeatPayload {
+  return { eventType, projectAlias: session.projectAlias, tool: session.tool, model: session.model, occurredAt };
+}
+
+function buildTools(state: LoopState, config: TrackerConfig): HeartbeatTool[] {
+  const session = state.activeSession;
+  if (!session) return [];
+  const tools = new Map<string, HeartbeatTool>([[session.tool, {
+    tool: session.tool, model: session.model, projectAlias: session.projectAlias }]]);
+  for (const source of state.sourcesSeen.values()) {
+    if (!isSupportedTool(source.tool) || tools.has(source.tool)) continue;
+    const alias = resolveProjectAlias(null, config, source.projectHint ?? null);
+    if (alias === null) continue;
+    tools.set(source.tool, { tool: source.tool, model: safeModel(source.model, source.tool), projectAlias: alias });
+  }
+  return [...tools.values()];
+}
+
+function writeSnapshot(state: LoopState, config: TrackerConfig | undefined, connected: boolean, rejected = false, receipt?: string): void {
+  const now = new Date().toISOString();
+  const session = connected ? state.activeSession : null;
+  writeStatus({ configFingerprint: config ? configFingerprint(config) : undefined, connected,
+    lastConnectionCheckAt: now, lastConnectionSeenAt: connected ? receipt : undefined,
+    status: connected ? session ? "active" : "idle" : "offline",
+    projectAlias: session?.projectAlias ?? null, tool: session?.tool ?? null, model: session?.model ?? null,
+    sessionStartedAt: session?.startedAt ?? null, updatedAt: now, authRejected: rejected,
+    sources: session ? [...state.sourcesSeen.values()].map((s) => ({
+      tool: s.tool, model: s.model, lastSeenAt: new Date(s.lastSeenAt).toISOString() })) : [] });
+}
+
+/** One isolated cycle. State means supported AI activity, never PC/keyboard activity. */
+export async function tick(config: TrackerConfig, state: LoopState): Promise<void> {
+  if (state.stopping) return;
+  const safe = projectConfig(config);
+  if (!safe || !sameConfig(safe, state.loadConfig)) {
+    clearCollectedState(state);
+    writeSnapshot(state, undefined, false);
     return;
   }
-  writeSourcesIfChanged(sources, nowIso);
+  if (state.binding !== configFingerprint(safe)) clearCollectedState(state, safe);
+  state.requestAbort?.abort();
+  const controller = new AbortController();
+  state.requestAbort = controller;
+  const epoch = ++state.epoch;
+  const allowed = (): boolean => {
+    if (state.stopping || controller.signal.aborted || state.epoch !== epoch) return false;
+    if (sameConfig(safe, state.loadConfig)) return true;
+    clearCollectedState(state);
+    writeSnapshot(state, undefined, false);
+    return false;
+  };
+  const failed = (result: SendResult): void => {
+    clearCollectedState(state, safe);
+    writeSnapshot(state, safe, false, result.authRejected);
+  };
+  const send = async (payload: HeartbeatPayload): Promise<boolean> => {
+    if (!allowed()) return false;
+    const result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    if (!allowed()) return false;
+    if (!result.ok) { failed(result); return false; }
+    return true;
+  };
+  try {
+    // No source reads with invalid/revoked credentials or unavailable verification.
+    const connection = await verifyConnection(safe, controller.signal);
+    if (!allowed()) return;
+    if (!connection.ok) { failed(connection); return; }
+    const current = state.activeSession ? { tool: state.activeSession.tool, cwd: null, projectHint: state.activeSession.projectHint } : undefined;
+    const detection = await state.detector.detect(Date.now(), current,
+      (o) => resolveProjectAlias(null, safe, o.projectHint) !== null, controller.signal);
+    if (!allowed()) return;
+    state.pendingUsage.clear();
+    state.sourcesSeen.clear();
+    state.modelChallenger = null;
+    const now = new Date().toISOString();
+    const alias = detection ? resolveProjectAlias(null, safe, detection.projectHint) : null;
+    if (!detection || !detection.active || alias === null || !isSupportedTool(detection.tool)) {
+      if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
+      state.activeSession = null;
+      state.lastActivityAt = null;
+      if (allowed()) writeSnapshot(state, safe, true, false, connection.connectionLastSeenAt);
+      return;
+    }
+    for (const s of detection.seen) state.sourcesSeen.set(`${s.tool}\u0000${s.model ?? ""}`, {
+      tool: s.tool, model: s.model, lastSeenAt: s.lastSeenAt, cwd: null, projectHint: s.projectHint ?? null });
+    const model = safeModel(detection.model, detection.tool);
+    const changed = !state.activeSession || state.activeSession.tool !== detection.tool ||
+      state.activeSession.projectAlias !== alias || state.activeSession.model !== model;
+    if (changed) {
+      if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
+      const session: ActiveSession = { tool: detection.tool, model, projectAlias: alias,
+        startedAt: now, cwd: null, projectHint: detection.projectHint };
+      if (!await send(sessionEvent("session_start", session, now))) return;
+      state.activeSession = session;
+    }
+    if (!await send({ eventType: "heartbeat", projectAlias: alias, tool: detection.tool, model,
+      tokensInputDelta: detection.tokensInputDelta, tokensOutputDelta: detection.tokensOutputDelta,
+      usage: detection.usage, tools: buildTools(state, safe), occurredAt: now })) return;
+    state.lastActivityAt = detection.lastActivityAt;
+    if (allowed()) writeSnapshot(state, safe, true, false, connection.connectionLastSeenAt);
+  } finally { if (state.requestAbort === controller) state.requestAbort = null; }
 }
 
-/** Refreshes only `sources` in status.json, and only when the list actually changed. */
-function writeSourcesIfChanged(sources: StatusSource[], nowIso: string): void {
-  const current = readStatus();
-  const same =
-    (current.sources ?? []).length === sources.length &&
-    (current.sources ?? []).every((s, i) => s.tool === sources[i].tool && s.model === sources[i].model);
-  if (same) return;
-  writeStatus({ ...current, updatedAt: nowIso, sources });
-}
-
-/** Resolves when `p` settles or after `ms`, whichever is first; never rejects. */
-function settleWithin(p: Promise<unknown>, ms: number): Promise<void> {
-  return new Promise<void>((resolve) => {
+function settleWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
-    const done = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    p.then(done, done);
+    const done = (): void => { clearTimeout(timer); resolve(); };
+    promise.then(done, done);
   });
 }
 
 export interface RunLoopOptions {
-  /**
-   * Called once when `~/.vibehub/stop.request` appears (written by `vibehub-tracker
-   * stop`). The loop stops scheduling ticks; the callback is expected to call
-   * `stop()` and exit — see daemon.ts's runForeground.
-   */
   onStopRequest?: () => void;
-  /**
-   * Reads `~/.vibehub/config.json` before every tick (round 10, T1). Defaults to the
-   * real reader; injected by tests so a config swap can be driven without touching a
-   * real home directory.
-   */
   loadConfig?: () => TrackerConfig | null;
-  /** The per-tick work. Defaults to `tick`; injected by tests. */
   runTick?: (config: TrackerConfig, state: LoopState) => Promise<void>;
-  /** Overrides the tick watchdog. Injected by tests; see tickWatchdogMs. */
   watchdogMs?: number;
 }
-
-/** Floor for the tick watchdog, so a short interval cannot make it trigger-happy. */
 export const MIN_TICK_WATCHDOG_MS = 90_000;
-
-/**
- * How long one tick may stay in flight before the loop stops waiting for it.
- *
- * Ticks already skip rather than stack, which is right for a poll that is merely slow
- * and wrong for one that is stuck: `inFlight` stays set forever, every later tick is
- * skipped, and the daemon lives on sending nothing at all. The site then says
- * "Offline" with the daemon running and no message anywhere explaining it (round 11
- * finding). Three intervals is comfortably past "slow" for a poll meant to take under
- * a second; the 90 s floor keeps a tightened interval from abandoning healthy ticks.
- */
 export const tickWatchdogMs = (intervalMs: number): number => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS);
-
-/** The tick currently in flight. `seq` is what tells a late straggler from the live one. */
-interface InFlightTick {
-  seq: number;
-  startedAt: number;
-  done: Promise<void>;
-}
-
-/** What `refreshConfig` decided: the config to tick with, and what actually moved. */
-export interface ConfigRefresh {
-  config: TrackerConfig;
-  /** Names of the fields that changed, for the log line. Empty when nothing did. */
-  changed: string[];
-}
-
-/**
- * Fields a live daemon adopts between ticks. These are exactly the ones `tick`
- * re-reads from its `config` argument every time it runs; anything else
- * (`heartbeatIntervalMs`, which set the interval timer, and the detector's active
- * window, fixed when its adapters were constructed) still needs a restart, so
- * claiming them here would be a lie.
- */
+interface InFlightTick { seq: number; startedAt: number; done: Promise<void> }
+export interface ConfigRefresh { config: TrackerConfig; changed: string[]; paused: boolean }
 const LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"] as const;
 
-/**
- * Round 10, T1. `runLoop(config)` used to close over the config it was handed at
- * spawn, which made a running daemon unreachable: `login` wrote a fresh token to
- * config.json and the daemon kept heartbeating the old one — 401 on every tick,
- * "Offline" on the site, no way to fix it short of knowing to stop the daemon
- * first. So the loop re-reads config.json before every tick and this decides what
- * to do with what came back.
- *
- * A missing, unreadable, half-written or credential-less file is NOT a reason to
- * start heartbeating with nothing: the last known-good config is kept and the next
- * tick tries again. Otherwise the file wins wholesale — it is written whole by
- * `writeConfig`, so a field dropped from it is meant to fall back to its default.
- *
- * Pure: takes the loaded value rather than reading the file, so the swap is unit
- * tested (test/runLoopConfig.test.ts) rather than only reachable at runtime.
- */
+/** Missing/invalid config pauses collection; retaining a comparison value is NOT permission to send. */
 export function refreshConfig(active: TrackerConfig, loaded: TrackerConfig | null): ConfigRefresh {
-  if (!loaded || typeof loaded.apiUrl !== "string" || !loaded.apiUrl) return { config: active, changed: [] };
-  if (typeof loaded.deviceToken !== "string" || !loaded.deviceToken) return { config: active, changed: [] };
-
-  const next: TrackerConfig = { ...loaded, projectAliases: loaded.projectAliases ?? {} };
-  const changed = LIVE_FIELDS.filter((field) =>
-    field === "projectAliases"
-      ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {})
-      : field === "idleThresholdMs"
-        ? idleThresholdMs(next) !== idleThresholdMs(active)
-        : next[field] !== active[field]
-  );
-  // Nothing moved: keep the object identity the loop already has, so a caller can
-  // tell "same config" from "same values, new object".
-  return changed.length > 0 ? { config: next, changed: [...changed] } : { config: active, changed: [] };
+  const next = projectConfig(loaded);
+  if (!next) return { config: active, changed: [], paused: true };
+  const changed = LIVE_FIELDS.filter((field) => field === "projectAliases"
+    ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {})
+    : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : next[field] !== active[field]);
+  return { config: changed.length ? next : active, changed: [...changed], paused: false };
 }
 
-/**
- * Runs the poll/heartbeat loop until `stop()` is called. Used by the detached
- * daemon process (see daemon.ts's hidden `run-loop` command).
- *
- * Ticks never overlap: if the previous one is still in flight when the interval
- * fires (a slow process listing), the new tick is skipped rather than stacked —
- * otherwise a 54 s poll on a 30 s interval piles up concurrent ticks that all send
- * stale-dated payloads.
- *
- * `initialConfig` is a starting point, not a snapshot: config.json is re-read before
- * every tick, so a `login` run while this daemon is alive reaches it (see
- * refreshConfig for which fields that covers, and which still need a restart).
- */
+/** CLI/daemon contract unchanged. Tests MUST inject config/ticks or use an isolated HOME. */
 export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = {}): { stop: () => Promise<void> } {
   const loadConfig = options.loadConfig ?? readConfig;
   const runTick = options.runTick ?? tick;
-  // Not const: T1's whole point is that this is replaced, in place, by whatever
-  // config.json says before each tick.
   let config = initialConfig;
   const state = createLoopState(config);
+  state.loadConfig = loadConfig;
   const intervalMs = heartbeatIntervalMs(config);
   const watchdogMs = options.watchdogMs ?? tickWatchdogMs(intervalMs);
   let inFlight: InFlightTick | null = null;
   let ticks = 0;
   let stopRequestSeen = false;
-
-  /** Re-reads config.json and adopts it for this tick. Never throws: readConfig returns null. */
-  const adoptCurrentConfig = (): TrackerConfig => {
-    const refreshed = refreshConfig(config, loadConfig());
-    if (refreshed.changed.length > 0) {
-      // Deliberately does not name the value: a device token must not reach the log.
-      console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`);
-    }
-    config = refreshed.config;
-    return config;
-  };
-
   const checkStopRequest = (): boolean => {
-    if (stopRequestSeen) return true;
+    if (stopRequestSeen || state.stopping) return true;
     if (!isStopRequested()) return false;
     stopRequestSeen = true;
+    state.epoch += 1;
+    state.requestAbort?.abort();
+    state.detector.clear();
     console.log("tracker: stop requested (stop.request found)");
     options.onStopRequest?.();
     return true;
   };
-
   const safeTick = (): void => {
     if (state.stopping || checkStopRequest()) return;
+    let loaded: TrackerConfig | null = null;
+    try { loaded = loadConfig(); } catch {}
+    const refreshed = refreshConfig(config, loaded);
+    if (refreshed.paused) {
+      clearCollectedState(state);
+      inFlight = null;
+      writeSnapshot(state, undefined, false);
+      return;
+    }
+    if (refreshed.changed.length) {
+      console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`);
+      clearCollectedState(state, refreshed.config);
+      inFlight = null;
+    }
+    config = refreshed.config;
     if (inFlight) {
       const stuckFor = Date.now() - inFlight.startedAt;
-      if (stuckFor <= watchdogMs) {
-        console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
-        return;
-      }
-      // Past the watchdog the tick is presumed wedged, not slow. Let go of it and
-      // start a fresh one: a daemon that reports something stale is worth more than
-      // one that silently reports nothing until the machine is rebooted.
-      console.warn(
-        `tracker: tick #${inFlight.seq} has been in flight for ${stuckFor} ms (watchdog ${watchdogMs} ms); abandoning it and starting a new tick`
-      );
+      if (stuckFor <= watchdogMs) return;
+      console.warn(`tracker: tick #${inFlight.seq} exceeded watchdog ${watchdogMs} ms; cancelling it`);
+      clearCollectedState(state, config);
       inFlight = null;
     }
     const startedAt = Date.now();
-    ticks += 1;
-    const mine: InFlightTick = {
-      seq: ticks,
-      startedAt,
-      done: runTick(adoptCurrentConfig(), state)
-        .catch((err) => {
-          console.error("tracker: heartbeat tick failed:", err);
-        })
-        .finally(() => {
-          const took = Date.now() - startedAt;
-          // Only the tick that still OWNS the marker may clear it. An abandoned tick
-          // that finally returns must not clear the marker belonging to the tick that
-          // replaced it — doing so would let a third tick start alongside the second.
-          if (inFlight === mine) {
-            inFlight = null;
-          } else {
-            console.warn(`tracker: abandoned tick #${mine.seq} finished late after ${took} ms`);
-          }
-          if (took > intervalMs) console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
-        }),
-    };
+    const mine: InFlightTick = { seq: ++ticks, startedAt, done: Promise.resolve().then(() => runTick(config, state))
+      .catch(() => {
+        if (inFlight !== mine) return;
+        console.error("tracker: heartbeat tick failed; collection paused");
+        clearCollectedState(state);
+        writeSnapshot(state, undefined, false);
+      }).finally(() => {
+        if (inFlight === mine) inFlight = null;
+        else console.warn(`tracker: cancelled tick #${mine.seq} finished late`);
+      }) };
     inFlight = mine;
   };
-
-  // First tick immediately: primes the log tailers so the *next* tick can
-  // report deltas, and gets presence up within seconds of `vibehub start`.
   safeTick();
   const interval = setInterval(safeTick, intervalMs);
   const stopWatch = setInterval(checkStopRequest, STOP_REQUEST_POLL_MS);
-
   const stop = async (): Promise<void> => {
-    clearInterval(interval);
-    clearInterval(stopWatch);
+    clearInterval(interval); clearInterval(stopWatch);
     state.stopping = true;
-    // Let a tick that is mid-send finish so session_end lands after its heartbeat;
-    // a tick stuck in a slow poll is abandoned (it checks `stopping` on return).
+    state.epoch += 1;
+    state.requestAbort?.abort();
+    state.detector.clear();
     if (inFlight) await settleWithin(inFlight.done, IN_FLIGHT_GRACE_MS);
-    if (state.activeSession) {
-      await endActiveSession(config, state.activeSession, new Date().toISOString());
-      state.activeSession = null;
+    if (state.activeSession && sameConfig(config, loadConfig)) {
+      await postHeartbeat(config.apiUrl, config.deviceToken, sessionEvent("session_end", state.activeSession, new Date().toISOString()), AbortSignal.timeout(2000));
     }
+    if (sameConfig(config, loadConfig)) await retireConnection(config, AbortSignal.timeout(2000));
+    clearCollectedState(state);
     writeOfflineStatus();
     clearStopRequest();
   };
-
   return { stop };
 }

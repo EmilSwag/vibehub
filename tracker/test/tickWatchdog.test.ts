@@ -12,13 +12,14 @@
 // read or written here.
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { after, describe, it, mock } from "node:test";
 import type { TrackerConfig } from "../src/types";
 
-const sandbox = mkdtempSync(join(tmpdir(), "vibehub-tracker-watchdog-"));
+const tempRoot = resolve(__dirname, "../../../.temp/vibehub-ai-only");
+mkdirSync(tempRoot, { recursive: true });
+const sandbox = mkdtempSync(join(tempRoot, "watchdog-"));
 process.env.HOME = sandbox;
 process.env.USERPROFILE = sandbox;
 process.env.HOMEDRIVE = sandbox.slice(0, 2);
@@ -34,7 +35,12 @@ if (!CONFIG_DIR.startsWith(sandbox)) {
 }
 const { MIN_TICK_WATCHDOG_MS, runLoop, tickWatchdogMs } = require("../src/heartbeat") as typeof import("../src/heartbeat");
 
-after(() => rmSync(sandbox, { recursive: true, force: true }));
+const forbidden = (): never => { throw new Error("Live network/process calls are forbidden in isolated watchdog tests"); };
+mock.method(globalThis, "fetch", async () => forbidden());
+mock.method(process, "kill", forbidden);
+for (const method of ["exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync"])
+  mock.method(require("node:child_process"), method, forbidden);
+after(() => { mock.restoreAll(); rmSync(sandbox, { recursive: true, force: true }); });
 
 const config = (overrides: Partial<TrackerConfig> = {}): TrackerConfig => ({
   apiUrl: "http://127.0.0.1:1",

@@ -718,7 +718,7 @@ var require_suggestSimilar = __commonJS({
 // ../node_modules/commander/lib/command.js
 var require_command = __commonJS({
   "../node_modules/commander/lib/command.js"(exports2) {
-    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path8 = require("node:path"), fs7 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
+    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path4 = require("node:path"), fs5 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
       /**
        * Initialize a new `Command`.
        *
@@ -1430,11 +1430,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         args = args.slice();
         let launchWithNode = !1, sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          let localBin = path8.resolve(baseDir, baseName);
-          if (fs7.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path8.extname(baseName))) return;
+          let localBin = path4.resolve(baseDir, baseName);
+          if (fs5.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path4.extname(baseName))) return;
           let foundExt = sourceExt.find(
-            (ext) => fs7.existsSync(`${localBin}${ext}`)
+            (ext) => fs5.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
         }
@@ -1443,21 +1443,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs7.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs5.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path8.resolve(
-            path8.dirname(resolvedScriptPath),
+          executableDir = path4.resolve(
+            path4.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            let legacyName = path8.basename(
+            let legacyName = path4.basename(
               this._scriptPath,
-              path8.extname(this._scriptPath)
+              path4.extname(this._scriptPath)
             );
             legacyName !== this._name && (localFile = findFile(
               executableDir,
@@ -1466,7 +1466,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path8.extname(executableFile));
+        launchWithNode = sourceExt.includes(path4.extname(executableFile));
         let proc;
         process2.platform !== "win32" ? launchWithNode ? (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.argv[0], args, { stdio: "inherit" })) : proc = childProcess.spawn(executableFile, args, { stdio: "inherit" }) : (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.execPath, args, { stdio: "inherit" })), proc.killed || ["SIGUSR1", "SIGUSR2", "SIGTERM", "SIGINT", "SIGHUP"].forEach((signal) => {
           process2.on(signal, () => {
@@ -2094,7 +2094,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        return this._name = path8.basename(filename, path8.extname(filename)), this;
+        return this._name = path4.basename(filename, path4.extname(filename)), this;
       }
       /**
        * Get or set the directory for searching for executable subcommands of this command.
@@ -2107,8 +2107,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path9) {
-        return path9 === void 0 ? this._executableDir : (this._executableDir = path9, this);
+      executableDir(path5) {
+        return path5 === void 0 ? this._executableDir : (this._executableDir = path5, this);
       }
       /**
        * Return program help documentation.
@@ -2274,58 +2274,259 @@ var import_index = __toESM(require_commander(), 1), {
 } = import_index.default;
 
 // src/index.ts
-var path7 = __toESM(require("node:path"));
+var path3 = __toESM(require("node:path"));
+
+// src/config.ts
+var import_node_crypto2 = require("node:crypto");
 
 // src/paths.ts
-var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request");
+var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), import_node_crypto = require("node:crypto"), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request"), JSON_PATHS = /* @__PURE__ */ new Set([CONFIG_PATH, STATUS_PATH, PID_PATH, STOP_REQUEST_PATH]), MAX_STATE_BYTES = 64 * 1024, normalized = (p) => process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p);
+function safeDirectory() {
+  try {
+    let s = fs.lstatSync(CONFIG_DIR);
+    return s.isDirectory() && !s.isSymbolicLink() && normalized(fs.realpathSync(CONFIG_DIR)) === normalized(CONFIG_DIR);
+  } catch {
+    return !1;
+  }
+}
 function ensureConfigDir() {
-  fs.mkdirSync(CONFIG_DIR, { recursive: !0, mode: 448 });
+  if (fs.mkdirSync(CONFIG_DIR, { recursive: !0, mode: 448 }), !safeDirectory()) throw new Error("Tracker state directory is unavailable.");
   try {
     fs.chmodSync(CONFIG_DIR, 448);
   } catch {
   }
 }
 function writeJsonAtomic(filePath, data) {
+  if (!JSON_PATHS.has(filePath)) throw new Error("Unsupported tracker state file.");
+  let raw = JSON.stringify(data, null, 2);
+  if (Buffer.byteLength(raw) > MAX_STATE_BYTES) throw new Error("Tracker state exceeds its bound.");
   ensureConfigDir();
-  let dir = path.dirname(filePath), tmpPath = path.join(
-    dir,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
-  );
-  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), { mode: 384 }), fs.renameSync(tmpPath, filePath);
   try {
-    fs.chmodSync(filePath, 384);
-  } catch {
+    let s = fs.lstatSync(filePath);
+    if (!s.isFile() || s.isSymbolicLink() || s.nlink !== 1) throw new Error("Tracker state file is unavailable.");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  let temporary = path.join(CONFIG_DIR, `.${path.basename(filePath)}.${(0, import_node_crypto.randomUUID)()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, raw, { mode: 384, flag: "wx" }), fs.renameSync(temporary, filePath);
+  } finally {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+    }
   }
 }
 function removeFile(filePath) {
-  try {
-    fs.unlinkSync(filePath);
-  } catch (err) {
-    if (err && err.code !== "ENOENT") throw err;
-  }
+  if (!(!JSON_PATHS.has(filePath) || !safeDirectory()))
+    try {
+      fs.unlinkSync(filePath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
 }
 function readJson(filePath) {
+  let fd;
   try {
-    let raw = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(raw);
-  } catch (err) {
-    return err && err.code === "ENOENT", null;
+    if (!JSON_PATHS.has(filePath) || !safeDirectory()) return null;
+    let before = fs.lstatSync(filePath);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > MAX_STATE_BYTES) return null;
+    fd = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > MAX_STATE_BYTES || !safeDirectory()) return null;
+    let buffer = Buffer.alloc(opened.size + 1), bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    return bytes !== opened.size ? null : JSON.parse(buffer.subarray(0, bytes).toString("utf8"));
+  } catch {
+    return null;
+  } finally {
+    if (fd !== void 0)
+      try {
+        fs.closeSync(fd);
+      } catch {
+      }
   }
+}
+
+// src/privacy.ts
+var COLLECTION_POLICY = "ai-session-metadata-v1", SUPPORTED_TOOLS = ["claude-code", "codex"];
+var CLAUDE_MODELS = /* @__PURE__ */ new Set([
+  "claude-fable-5-1",
+  "claude-fable-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-opus-4-5-20251101",
+  "claude-opus-4-5",
+  "claude-sonnet-5",
+  "claude-sonnet-4-6",
+  "claude-sonnet-4-5-20250929",
+  "claude-sonnet-4-5",
+  "claude-haiku-4-5-20251001",
+  "claude-haiku-4-5"
+]), CODEX_MODELS = /* @__PURE__ */ new Set([
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.5-pro",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gpt-5.4-pro",
+  "gpt-5.2",
+  "gpt-5.2-pro",
+  "gpt-5.1",
+  "gpt-5",
+  "gpt-5-2025-08-07",
+  "gpt-5-mini",
+  "gpt-5-nano",
+  "gpt-5-pro",
+  "gpt-4.1",
+  "gpt-4.1-2025-04-14",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "gpt-4o",
+  "gpt-4o-2024-08-06",
+  "gpt-4o-2024-05-13",
+  "gpt-4o-mini",
+  "o1",
+  "o1-pro",
+  "o3-pro",
+  "o3",
+  "o4-mini",
+  "o3-mini",
+  "gpt-5-codex",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1-codex-max",
+  "gpt-5.2-codex",
+  "gpt-5.3-codex"
+]);
+function objectRecord(value) {
+  return value !== null && typeof value == "object" && !Array.isArray(value) ? value : null;
+}
+function isSupportedTool(tool) {
+  return tool === "claude-code" || tool === "codex";
+}
+function safeModel(value, tool) {
+  return typeof value != "string" ? null : (tool === "claude-code" ? CLAUDE_MODELS.has(value) : tool === "codex" ? CODEX_MODELS.has(value) : CLAUDE_MODELS.has(value) || CODEX_MODELS.has(value)) ? value : null;
+}
+function isCount(value, maximum = 1e9) {
+  return typeof value == "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
+}
+function eventTime(value, now, maxAgeMs = 3e5) {
+  if (typeof value != "string" || value.length > 35 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+  let at = Date.parse(value);
+  return Number.isFinite(at) && at <= now + 5e3 && at >= now - Math.min(maxAgeMs, 3e5) ? Math.min(at, now) : null;
+}
+function safeAlias(value) {
+  return typeof value == "string" && value.length <= 64 && /^[A-Za-z0-9]/.test(value) && !/[^A-Za-z0-9_. -]/.test(value) && value.trim() === value && !value.includes("..") && !["__proto__", "prototype", "constructor"].includes(value) ? value : null;
+}
+function folderFromCwd(value) {
+  if (typeof value != "string" || value.length > 1024 || /[\x00-\x1f\x7f]/.test(value) || !/^(?:[A-Za-z]:[\\/]|\/(?!\/))/.test(value)) return null;
+  let parts = value.replace(/\\/g, "/").split("/");
+  return parts.some((part) => part === "." || part === "..") ? null : safeAlias(parts.filter(Boolean).at(-1));
+}
+function safeApiOrigin(value) {
+  if (typeof value != "string" || value.length > 2048 || /[\s\x00-\x1f\x7f]/.test(value)) return null;
+  try {
+    let url = new URL(value);
+    return url.username || url.password || url.search || url.hash || url.pathname !== "/" && url.pathname !== "" || url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) ? null : url.origin;
+  } catch {
+    return null;
+  }
+}
+function safeDeviceToken(value) {
+  return typeof value == "string" && value.length >= 1 && value.length <= 512 && !/[^A-Za-z0-9._~-]/.test(value);
+}
+function projectUsage(value) {
+  let u = objectRecord(value);
+  return !u || !isSupportedTool(u.tool) || u.estimated === !0 || !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta) ? null : {
+    tool: u.tool,
+    model: safeModel(u.model, u.tool),
+    tokensInputDelta: u.tokensInputDelta,
+    tokensOutputDelta: u.tokensOutputDelta
+  };
+}
+function projectHeartbeat(value, now = Date.now()) {
+  let p = objectRecord(value);
+  if (!p || !isSupportedTool(p.tool) || !["heartbeat", "session_start", "session_end"].includes(String(p.eventType))) return null;
+  let alias = safeAlias(p.projectAlias), at = eventTime(p.occurredAt, now);
+  if (!alias || at === null) return null;
+  let result = {
+    eventType: p.eventType,
+    projectAlias: alias,
+    tool: p.tool,
+    model: safeModel(p.model, p.tool),
+    occurredAt: new Date(at).toISOString()
+  };
+  if (result.eventType !== "heartbeat") return result;
+  if (!Array.isArray(p.usage) || p.usage.length > 30) return null;
+  let usage = [];
+  for (let entry of p.usage) {
+    let u = projectUsage(entry);
+    if (!u) return null;
+    (u.tokensInputDelta || u.tokensOutputDelta) && usage.push(u);
+  }
+  let input = usage.reduce((sum, u) => sum + u.tokensInputDelta, 0), output = usage.reduce((sum, u) => sum + u.tokensOutputDelta, 0);
+  if (!isCount(input) || !isCount(output)) return null;
+  if (result.usage = usage, result.tokensInputDelta = input, result.tokensOutputDelta = output, p.tools !== void 0) {
+    if (!Array.isArray(p.tools) || p.tools.length > SUPPORTED_TOOLS.length) return null;
+    result.tools = [];
+    for (let entry of p.tools) {
+      let tool = objectRecord(entry);
+      if (!tool || !isSupportedTool(tool.tool)) return null;
+      result.tools.push({ tool: tool.tool, model: safeModel(tool.model, tool.tool), projectAlias: safeAlias(tool.projectAlias) });
+    }
+  }
+  return result;
 }
 
 // src/config.ts
 var DEFAULT_API_URL = process.env.VIBEHUB_API_URL ?? "https://server-production-cc06.up.railway.app", DEFAULT_HEARTBEAT_INTERVAL_MS = 3e4, DEFAULT_IDLE_THRESHOLD_MS = 3e5;
+function projectConfig(value) {
+  let c = objectRecord(value), apiUrl = safeApiOrigin(c?.apiUrl);
+  if (!c || !apiUrl || !safeDeviceToken(c.deviceToken)) return null;
+  let aliases = c.projectAliases === void 0 ? {} : objectRecord(c.projectAliases);
+  if (!aliases || Object.keys(aliases).length > 100) return null;
+  let projectAliases = {};
+  for (let [folder, alias] of Object.entries(aliases)) {
+    if (!safeAlias(folder) || !safeAlias(alias)) return null;
+    projectAliases[folder] = alias;
+  }
+  for (let key of ["heartbeatIntervalMs", "idleThresholdMs"]) {
+    let n = c[key];
+    if (n !== void 0 && (typeof n != "number" || !Number.isSafeInteger(n) || n < 1 || n > 864e5)) return null;
+  }
+  return {
+    apiUrl,
+    deviceToken: c.deviceToken,
+    projectAliases,
+    ...c.heartbeatIntervalMs !== void 0 ? { heartbeatIntervalMs: c.heartbeatIntervalMs } : {},
+    ...c.idleThresholdMs !== void 0 ? { idleThresholdMs: c.idleThresholdMs } : {}
+  };
+}
+function configFingerprint(config) {
+  return (0, import_node_crypto2.createHash)("sha256").update(JSON.stringify({
+    apiUrl: config.apiUrl,
+    deviceToken: config.deviceToken,
+    aliases: Object.entries(config.projectAliases).sort(([a], [b]) => a.localeCompare(b)),
+    idle: idleThresholdMs(config)
+  })).digest("hex");
+}
 function readConfig() {
-  return readJson(CONFIG_PATH);
+  return projectConfig(readJson(CONFIG_PATH));
 }
 function requireConfig() {
   let config = readConfig();
-  return config || (console.error(
-    "Not logged in. Run `vibehub-tracker login <deviceToken>` first."
-  ), process.exit(1)), config;
+  return config || (console.error("Not logged in or config invalid. Run `vibehub-tracker login <deviceToken>` first."), process.exit(1)), config;
 }
 function writeConfig(config) {
-  writeJsonAtomic(CONFIG_PATH, config);
+  let safe = projectConfig(config);
+  if (!safe) throw new Error("Invalid tracker config.");
+  writeJsonAtomic(CONFIG_PATH, safe);
 }
 function deleteConfig() {
   removeFile(CONFIG_PATH);
@@ -2334,821 +2535,533 @@ function heartbeatIntervalMs(config) {
   return config.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 }
 function idleThresholdMs(config) {
-  return config.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS;
+  return Math.min(config.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS, 3e5);
 }
 
 // src/daemon.ts
-var import_node_child_process2 = require("node:child_process"), import_node_console = require("node:console"), fs6 = __toESM(require("node:fs"));
+var import_node_child_process = require("node:child_process"), import_node_console = require("node:console"), fs4 = __toESM(require("node:fs"));
 
 // src/adapters/claudeCode.ts
-var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path"));
+var import_node_crypto3 = require("node:crypto");
 
 // src/adapters/jsonlTail.ts
-var import_node_fs = __toESM(require("node:fs")), import_node_path = __toESM(require("node:path")), JsonlTailer = class {
-  constructor(options = {}) {
-    this.options = options;
+var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util = require("node:util"), MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 256, MAX_FILE_BYTES = 256 * 1024 * 1024, utf8 = new import_node_util.TextDecoder("utf-8", { fatal: !0 }), samePath = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
+  constructor(source) {
+    this.source = source;
+    this.configRoot = import_node_path.default.join(this.home, source === "claude-code" ? ".claude" : ".codex"), this.root = import_node_path.default.join(this.configRoot, source === "claude-code" ? "projects" : "sessions"), this.overrideName = source === "claude-code" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
   }
-  options;
-  offsets = /* @__PURE__ */ new Map();
-  partial = /* @__PURE__ */ new Map();
-  recentFiles(root, maxAgeMs) {
-    let out = [];
-    if (!import_node_fs.default.existsSync(root)) return out;
-    let cutoff = Date.now() - maxAgeMs, visit = (dir, depth) => {
-      let entries;
+  source;
+  home = import_node_path.default.resolve(import_node_os.default.homedir());
+  configRoot;
+  root;
+  overrideName;
+  states = /* @__PURE__ */ new Map();
+  listed = /* @__PURE__ */ new Set();
+  nextGeneration = 1;
+  clear() {
+    this.states.clear(), this.listed.clear();
+  }
+  generation(file) {
+    return this.states.get(file)?.generation ?? 0;
+  }
+  rootsAllowed() {
+    let override = process.env[this.overrideName];
+    return override && (!import_node_path.default.isAbsolute(override) || !samePath(override, this.configRoot)) || !import_node_path.default.isAbsolute(this.home) || /^(?:\\\\|\/\/)/.test(this.home) ? !1 : [this.home, this.configRoot, this.root].every((dir) => this.unlinkedDirectory(dir));
+  }
+  unlinkedDirectory(dir) {
+    try {
+      let s = import_node_fs.default.lstatSync(dir);
+      return s.isDirectory() && !s.isSymbolicLink() && samePath(import_node_fs.default.realpathSync(dir), dir);
+    } catch {
+      return !1;
+    }
+  }
+  layout(parts, isDirectory) {
+    if (parts.some((p) => !p || p.length > 200 || /[\x00-\x20\x7f\\/:]/.test(p) || p === "." || p === "..")) return !1;
+    if (this.source === "claude-code")
+      return isDirectory ? parts.length <= 1 && parts.every((p) => /^[A-Za-z0-9_-]+$/.test(p)) : parts.length === 2 && /^[A-Za-z0-9_-]+$/.test(parts[0]) && /^[A-Za-z0-9_-]+\.jsonl$/.test(parts[1]);
+    let directories = [/^\d{4}$/, /^(?:0[1-9]|1[0-2])$/, /^(?:0[1-9]|[12]\d|3[01])$/], count = isDirectory ? parts.length : parts.length - 1;
+    return count > 3 || !isDirectory && count !== 3 || !parts.slice(0, count).every((p, i) => directories[i].test(p)) ? !1 : isDirectory || /^rollout-[A-Za-z0-9_-]+\.jsonl$/.test(parts[3]);
+  }
+  checkedPath(file, isDirectory) {
+    if (!this.rootsAllowed()) return null;
+    let relative = import_node_path.default.relative(this.root, file);
+    if (relative.startsWith("..") || import_node_path.default.isAbsolute(relative)) return null;
+    let parts = relative ? relative.split(import_node_path.default.sep) : [];
+    if (!this.layout(parts, isDirectory)) return null;
+    let current = this.root;
+    for (let part of isDirectory ? parts : parts.slice(0, -1))
+      if (current = import_node_path.default.join(current, part), !this.unlinkedDirectory(current)) return null;
+    try {
+      let s = import_node_fs.default.lstatSync(file, { bigint: !0 });
+      return (isDirectory ? !s.isDirectory() || s.isSymbolicLink() : !regularFile(s)) ? null : samePath(import_node_fs.default.realpathSync(file), file) ? s : null;
+    } catch {
+      return null;
+    }
+  }
+  /** Bounded directory metadata enumeration ONLY within the exact layouts above. */
+  files(signal) {
+    this.listed.clear();
+    let remaining = MAX_DIRECTORY_ENTRIES, candidates = [], walk = (dir, depth) => {
+      if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
+      let handle;
       try {
-        entries = import_node_fs.default.readdirSync(dir, { withFileTypes: !0 });
-      } catch {
-        return;
-      }
-      for (let e of entries) {
-        let full = import_node_path.default.join(dir, e.name);
-        if (e.isDirectory())
-          depth < 4 && visit(full, depth + 1);
-        else if (e.isFile() && e.name.endsWith(".jsonl"))
-          try {
-            import_node_fs.default.statSync(full).mtimeMs >= cutoff && out.push(full);
-          } catch {
+        if (handle = import_node_fs.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return;
+        let entries = [], entry;
+        for (; remaining-- > 0 && !signal?.aborted && (entry = handle.readSync()); ) entries.push(entry);
+        entries.sort((a, b) => b.name.localeCompare(a.name));
+        for (let e of entries) {
+          if (signal?.aborted) break;
+          let file = import_node_path.default.join(dir, e.name);
+          if (!e.isSymbolicLink()) {
+            if (e.isDirectory() && depth < (this.source === "claude-code" ? 1 : 3))
+              walk(file, depth + 1);
+            else if (e.isFile()) {
+              let s = this.checkedPath(file, !1);
+              s && candidates.push({ file, mtime: Number(s.mtimeMs) });
+            }
           }
+        }
+      } catch {
+      } finally {
+        try {
+          handle?.closeSync();
+        } catch {
+        }
       }
     };
-    return visit(root, 0), out;
+    walk(this.root, 0);
+    for (let { file } of candidates.sort((a, b) => b.mtime - a.mtime).slice(0, MAX_LOG_FILES)) this.listed.add(file);
+    for (let file of this.states.keys()) this.listed.has(file) || this.states.delete(file);
+    return [...this.listed];
   }
-  readNewLines(file) {
-    let size;
-    try {
-      size = import_node_fs.default.statSync(file).size;
-    } catch {
-      return [];
+  prime(fd, s) {
+    let size = Number(s.size), skipPartial = !1;
+    if (size > 0) {
+      let last = Buffer.alloc(1);
+      skipPartial = import_node_fs.default.readSync(fd, last, 0, 1, size - 1) !== 1 || last[0] !== 10;
     }
-    let known2 = this.offsets.get(file);
-    if (known2 === void 0)
-      return this.offsets.set(file, size), [];
-    if (size < known2)
-      return this.offsets.set(file, 0), this.partial.delete(file), this.readNewLines(file);
-    if (size === known2) return [];
-    let length = size - known2, maxChunk = this.options.maxChunkBytes ?? Number.POSITIVE_INFINITY;
-    if (length > maxChunk)
-      return this.offsets.set(file, size), this.partial.delete(file), [];
-    let buf = Buffer.alloc(length), fd = null;
+    return {
+      dev: s.dev,
+      ino: s.ino,
+      offset: size,
+      size,
+      mtime: s.mtimeNs,
+      skipPartial,
+      generation: this.nextGeneration++
+    };
+  }
+  readNewLines(file, visit, signal) {
+    if (signal?.aborted || !this.listed.has(file)) return;
+    let fd;
     try {
-      fd = import_node_fs.default.openSync(file, "r"), import_node_fs.default.readSync(fd, buf, 0, length, known2);
+      let before = this.checkedPath(file, !1);
+      if (!before) {
+        this.states.delete(file);
+        return;
+      }
+      fd = import_node_fs.default.openSync(file, import_node_fs.default.constants.O_RDONLY | (import_node_fs.default.constants.O_NOFOLLOW ?? 0) | (import_node_fs.default.constants.O_NONBLOCK ?? 0));
+      let s = import_node_fs.default.fstatSync(fd, { bigint: !0 }), after = this.checkedPath(file, !1);
+      if (!regularFile(s) || !after || !sameFile(before, s) || !sameFile(s, after) || signal?.aborted) {
+        this.states.delete(file);
+        return;
+      }
+      let size = Number(s.size), cursor = this.states.get(file);
+      if (!cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_CHUNK_BYTES) {
+        this.states.set(file, this.prime(fd, s));
+        return;
+      }
+      if (size <= cursor.offset) return;
+      let start = cursor.offset, buffer = Buffer.alloc(size - start), bytes = import_node_fs.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checkedPath(file, !1);
+      if (signal?.aborted || !current || !sameFile(s, current)) {
+        this.states.delete(file);
+        return;
+      }
+      cursor.size = size, cursor.mtime = s.mtimeNs;
+      let lineStart = 0, records = 0;
+      for (; lineStart < bytes && !signal?.aborted; ) {
+        let end = buffer.indexOf(10, lineStart);
+        if (end < 0 || end >= bytes) break;
+        if (!cursor.skipPartial && end - lineStart <= MAX_LINE_BYTES && records++ < MAX_RECORDS_PER_FILE)
+          try {
+            visit(JSON.parse(utf8.decode(buffer.subarray(lineStart, end))), cursor.generation);
+          } catch {
+          }
+        cursor.skipPartial = !1, lineStart = end + 1;
+      }
+      cursor.offset = start + lineStart, (cursor.skipPartial || bytes - lineStart > MAX_LINE_BYTES) && (cursor.offset = start + bytes, cursor.skipPartial = !0);
     } catch {
-      return [];
+      this.states.delete(file);
     } finally {
-      fd !== null && import_node_fs.default.closeSync(fd);
-    }
-    this.offsets.set(file, size);
-    let lines = ((this.partial.get(file) ?? "") + buf.toString("utf8")).split(`
-`);
-    this.partial.set(file, lines.pop() ?? "");
-    let parsed = [], maxLine = this.options.maxLineChars ?? Number.POSITIVE_INFINITY;
-    for (let line of lines) {
-      let trimmed = line.trim();
-      if (trimmed && !(trimmed.length > maxLine))
+      if (fd !== void 0)
         try {
-          parsed.push(JSON.parse(trimmed));
+          import_node_fs.default.closeSync(fd);
         } catch {
         }
     }
-    return parsed;
-  }
-  mtime(file) {
-    try {
-      return import_node_fs.default.statSync(file).mtimeMs;
-    } catch {
-      return 0;
-    }
-  }
-}, RecentIds = class {
-  constructor(max = 2e3) {
-    this.max = max;
-  }
-  max;
-  ids = /* @__PURE__ */ new Set();
-  order = [];
-  /** Returns true if the id was new. */
-  add(id) {
-    if (this.ids.has(id)) return !1;
-    if (this.ids.add(id), this.order.push(id), this.order.length > this.max) {
-      let oldest = this.order.shift();
-      oldest && this.ids.delete(oldest);
-    }
-    return !0;
   }
 };
 
 // src/adapters/usage.ts
-function normalizeModel(model) {
-  if (typeof model != "string") return null;
-  let m = model.trim();
-  return !m || m === "<synthetic>" || m.toLowerCase() === "unknown" ? null : m;
-}
 var UsageAccumulator = class {
   buckets = /* @__PURE__ */ new Map();
-  /**
-   * `estimated` marks counts the adapter derived rather than read (Quadcode logs
-   * carry no token numbers). It is sticky per bucket: once any contribution to a
-   * (model) bucket is an estimate the whole bucket is reported as estimated,
-   * because the two cannot be told apart downstream.
-   */
-  add(model, tokensInputDelta, tokensOutputDelta, estimated = !1) {
-    let key = model ?? "", b = this.buckets.get(key) ?? { model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-    b.tokensInputDelta += tokensInputDelta, b.tokensOutputDelta += tokensOutputDelta, estimated && (b.estimated = !0), this.buckets.set(key, b);
+  add(model, input, output, estimated = !1) {
+    if (estimated || !isCount(input) || !isCount(output) || !isCount(this.totalInput + input) || !isCount(this.totalOutput + output)) return !1;
+    let knownModel = safeModel(model), key = knownModel ?? "";
+    if (!this.buckets.has(key) && this.buckets.size >= 30) return !1;
+    let previous = this.buckets.get(key);
+    return this.buckets.set(key, {
+      model: knownModel,
+      tokensInputDelta: (previous?.tokensInputDelta ?? 0) + input,
+      tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + output
+    }), !0;
   }
   toList() {
-    return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0);
+    return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0).map((u) => ({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta }));
   }
   get totalInput() {
-    let n = 0;
-    for (let u of this.buckets.values()) n += u.tokensInputDelta;
-    return n;
+    return [...this.buckets.values()].reduce((n, u) => n + u.tokensInputDelta, 0);
   }
   get totalOutput() {
-    let n = 0;
-    for (let u of this.buckets.values()) n += u.tokensOutputDelta;
-    return n;
+    return [...this.buckets.values()].reduce((n, u) => n + u.tokensOutputDelta, 0);
   }
 };
-function asCount(n) {
-  return typeof n == "number" && Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
-}
 
 // src/adapters/claudeCode.ts
 var ClaudeCodeAdapter = class {
   constructor(recentWindowMs) {
     this.recentWindowMs = recentWindowMs;
-    let configDir = process.env.CLAUDE_CONFIG_DIR || import_node_path2.default.join(import_node_os.default.homedir(), ".claude");
-    this.roots = [import_node_path2.default.join(configDir, "projects")];
   }
   recentWindowMs;
   name = "claude-code";
-  tailer = new JsonlTailer();
-  seen = new RecentIds();
-  roots;
-  /** Last known cwd/model per file, so activity without usage still resolves a project. */
+  tailer = new JsonlTailer("claude-code");
   fileMeta = /* @__PURE__ */ new Map();
-  async poll() {
-    let byFile = /* @__PURE__ */ new Map();
-    for (let root of this.roots)
-      for (let file of this.tailer.recentFiles(root, this.recentWindowMs)) {
-        let mtime = this.tailer.mtime(file), meta = this.fileMeta.get(file) ?? peekMeta(file), usage = new UsageAccumulator(), lastTs = 0;
-        for (let raw of this.tailer.readNewLines(file)) {
-          let line = raw;
-          line.cwd && (meta.cwd = line.cwd);
-          let ts = line.timestamp ? Date.parse(line.timestamp) : NaN;
-          if (Number.isNaN(ts) || (lastTs = Math.max(lastTs, ts)), line.type !== "assistant" || !line.message) continue;
-          let id = line.message.id, u = line.message.usage;
-          if (!u || !id) continue;
-          let model = normalizeModel(line.message.model);
-          model !== null && (meta.model = model), this.seen.add(id) && usage.add(
-            model,
-            asCount(u.input_tokens) + asCount(u.cache_read_input_tokens) + asCount(u.cache_creation_input_tokens),
-            asCount(u.output_tokens)
-          );
-        }
-        this.fileMeta.set(file, meta), byFile.set(file, {
-          tool: this.name,
-          cwd: meta.cwd,
-          projectHint: meta.cwd ? null : projectFromSlug(root, file),
-          model: meta.model,
-          // mtime is the freshest signal (user prompts don't carry usage but do touch the file).
-          lastActivityAt: Math.max(mtime, lastTs),
-          tokensInputDelta: usage.totalInput,
-          tokensOutputDelta: usage.totalOutput,
-          usage: usage.toList(),
-          confidence: "activity"
-        });
-      }
-    return [...byFile.values()];
+  receipts = /* @__PURE__ */ new Map();
+  clear() {
+    this.tailer.clear(), this.fileMeta.clear(), this.receipts.clear();
   }
-}, PEEK_BYTES = 128 * 1024;
-function peekMeta(file) {
-  let meta = { cwd: null, model: null }, fd = null;
-  try {
-    let size = import_node_fs2.default.statSync(file).size, start = Math.max(0, size - PEEK_BYTES), buf = Buffer.alloc(size - start);
-    fd = import_node_fs2.default.openSync(file, "r"), import_node_fs2.default.readSync(fd, buf, 0, buf.length, start);
-    let lines = buf.toString("utf8").split(`
-`);
-    start > 0 && lines.shift();
-    for (let raw of lines) {
-      let trimmed = raw.trim();
-      if (!trimmed) continue;
-      let line;
-      try {
-        line = JSON.parse(trimmed);
-      } catch {
+  async poll(now = Date.now(), signal) {
+    let files = this.tailer.files(signal), present = new Set(files);
+    for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
+    for (let [id, receipt] of this.receipts) now - receipt.at > 3e5 && this.receipts.delete(id);
+    let out = [];
+    for (let file of files) {
+      if (signal?.aborted) break;
+      let meta = this.fileMeta.get(file), usage = new UsageAccumulator();
+      if (this.tailer.readNewLines(file, (raw, generation) => {
+        let line = objectRecord(raw);
+        if (!line || line.type !== "assistant") return;
+        let message = objectRecord(line.message), counts = objectRecord(message?.usage), at = eventTime(line.timestamp, now, this.recentWindowMs);
+        if (!message || message.role !== "assistant" || !counts || at === null || typeof message.id != "string" || message.id.length > 128 || !/^msg_[A-Za-z0-9_-]+$/.test(message.id) || /\s/.test(message.id) || message.model === "<synthetic>" || !isCount(counts.input_tokens) || !isCount(counts.output_tokens) || !isCount(counts.cache_read_input_tokens ?? 0) || !isCount(counts.cache_creation_input_tokens ?? 0)) return;
+        let input = counts.input_tokens + (counts.cache_read_input_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0), output = counts.output_tokens;
+        if (!isCount(input)) return;
+        let projectHint = folderFromCwd(line.cwd);
+        if (!projectHint || (meta?.generation === generation && meta.projectHint !== projectHint && (meta.invalidProject = !0), meta?.generation === generation && meta.invalidProject)) return;
+        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto3.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
+        if (previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output)) return;
+        let inputDelta = input - (previous?.input ?? 0), outputDelta = output - (previous?.output ?? 0);
+        if (!(!(inputDelta || outputDelta) || !usage.add(model, inputDelta, outputDelta))) {
+          for (this.receipts.set(id, { input, output, model, at }); this.receipts.size > 2048; ) this.receipts.delete(this.receipts.keys().next().value);
+          (!meta || meta.generation !== generation) && (meta = { generation, projectHint, model: null, lastActivityAt: 0, invalidProject: !1 }), meta.projectHint = folderFromCwd(line.cwd), meta.model = model, meta.lastActivityAt = Math.max(meta.lastActivityAt, at);
+        }
+      }, signal), !meta || meta.generation !== this.tailer.generation(file)) {
+        this.fileMeta.delete(file);
         continue;
       }
-      if (line.cwd && (meta.cwd = line.cwd), line.type !== "assistant" || !line.message?.usage) continue;
-      let model = normalizeModel(line.message.model);
-      model !== null && (meta.model = model);
-    }
-  } catch {
-  } finally {
-    fd !== null && import_node_fs2.default.closeSync(fd);
-  }
-  return meta;
-}
-function projectFromSlug(root, file) {
-  let rel = import_node_path2.default.relative(root, file).split(import_node_path2.default.sep)[0];
-  if (!rel) return null;
-  let parts = rel.split("-").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : null;
-}
-
-// src/adapters/codex.ts
-var import_node_os2 = __toESM(require("node:os")), import_node_path3 = __toESM(require("node:path"));
-var CodexAdapter = class {
-  constructor(recentWindowMs) {
-    this.recentWindowMs = recentWindowMs;
-    let home = process.env.CODEX_HOME || import_node_path3.default.join(import_node_os2.default.homedir(), ".codex");
-    this.root = import_node_path3.default.join(home, "sessions");
-  }
-  recentWindowMs;
-  name = "codex";
-  tailer = new JsonlTailer();
-  root;
-  fileMeta = /* @__PURE__ */ new Map();
-  async poll() {
-    let out = [];
-    for (let file of this.tailer.recentFiles(this.root, this.recentWindowMs)) {
-      let meta = this.fileMeta.get(file) ?? { cwd: null, model: null, totalIn: -1, totalOut: -1 }, usage = new UsageAccumulator(), lastTs = 0;
-      for (let raw of this.tailer.readNewLines(file)) {
-        let line = raw, ts = line.timestamp ? Date.parse(line.timestamp) : NaN;
-        Number.isNaN(ts) || (lastTs = Math.max(lastTs, ts));
-        let p = line.payload;
-        if (!p) continue;
-        p.cwd && (meta.cwd = p.cwd);
-        let model = normalizeModel(p.model);
-        if (model !== null && (meta.model = model), line.type === "event_msg" && p.type === "token_count" && p.info) {
-          let total = p.info.total_token_usage;
-          if (total) {
-            let tin = asCount(total.input_tokens) + asCount(total.cached_input_tokens), tout = asCount(total.output_tokens);
-            if (meta.totalIn >= 0)
-              usage.add(meta.model, Math.max(0, tin - meta.totalIn), Math.max(0, tout - meta.totalOut));
-            else if (p.info.last_token_usage) {
-              let last = p.info.last_token_usage;
-              usage.add(
-                meta.model,
-                asCount(last.input_tokens) + asCount(last.cached_input_tokens),
-                asCount(last.output_tokens)
-              );
-            }
-            meta.totalIn = tin, meta.totalOut = tout;
-          }
-        }
-      }
-      this.fileMeta.set(file, meta), out.push({
+      this.fileMeta.set(file, meta), !(meta.invalidProject || now - meta.lastActivityAt > Math.min(this.recentWindowMs, 3e5)) && out.push({
         tool: this.name,
-        cwd: meta.cwd,
-        projectHint: null,
+        cwd: null,
+        projectHint: meta.projectHint,
         model: meta.model,
-        lastActivityAt: Math.max(this.tailer.mtime(file), lastTs),
+        lastActivityAt: meta.lastActivityAt,
+        observedAt: meta.lastActivityAt,
         tokensInputDelta: usage.totalInput,
         tokensOutputDelta: usage.totalOutput,
         usage: usage.toList(),
         confidence: "activity"
       });
     }
-    return out;
+    return signal?.aborted ? [] : out;
   }
 };
 
-// src/adapters/processes.ts
-var import_node_child_process = require("node:child_process"), import_node_util = require("node:util"), exec = (0, import_node_util.promisify)(import_node_child_process.execFile), RULES = [
-  { tool: "cursor", names: ["cursor"], titleSuffixes: ["cursor"] },
-  { tool: "vscode", names: ["code", "code - insiders"], titleSuffixes: ["visual studio code", "visual studio code - insiders"] },
-  { tool: "windsurf", names: ["windsurf"], titleSuffixes: ["windsurf"] },
-  { tool: "zed", names: ["zed"], titleSuffixes: ["zed"] },
-  { tool: "quadcode", names: ["genui", "quadcode", "quadcode ai"], titleSuffixes: ["quadcode ai"] },
-  { tool: "claude-code", names: ["claude"], titleSuffixes: [], logBacked: !0 },
-  { tool: "codex", names: ["codex"], titleSuffixes: [], logBacked: !0 },
-  { tool: "chatgpt", names: ["chatgpt"], titleSuffixes: ["chatgpt"] },
-  // xAI Grok desktop/CLI. No log adapter, so it's presence-only with a null model.
-  { tool: "grok", names: ["grok"], titleSuffixes: ["grok"] }
-], JUNK_TITLE_PATTERNS = [
-  /wndname$/i,
-  // OleMainThreadWndName, OleDdeWndName, …
-  /^default ime$/i,
-  /^msctfime ui$/i,
-  /^m$/i,
-  /^dde server window$/i,
-  /gdi\+ window/i,
-  /broadcasteventwindow/i,
-  // .NET-BroadcastEventWindow.*
-  /^cicmarshalwnd$/i,
-  /mediacontextnotificationwindow/i,
-  /^chrome_widgetwin/i,
-  /^hidden window$/i,
-  /^\.net-/i
-];
-function isRealWindowTitle(title) {
-  let t = title?.trim();
-  return !t || t === "N/A" ? !1 : !JUNK_TITLE_PATTERNS.some((re) => re.test(t));
-}
-var ProcessAdapter = class {
-  constructor(idleAfterMs) {
-    this.idleAfterMs = idleAfterMs;
-  }
-  idleAfterMs;
-  name = "processes";
-  seen = /* @__PURE__ */ new Map();
-  async poll() {
-    try {
-      let procs = process.platform === "win32" ? await listWindows() : await listUnix(), now = Date.now(), out = /* @__PURE__ */ new Map();
-      for (let rule of RULES) {
-        let matches = procs.filter((p) => rule.names.includes(p.name));
-        if (matches.length === 0) continue;
-        let titled = matches.find((p) => isRealWindowTitle(p.title)), title = titled ? titled.title.trim() : null, prev = this.seen.get(rule.tool), changedAt = !prev || prev.title !== title ? now : prev.changedAt;
-        this.seen.set(rule.tool, { title, changedAt });
-        let idle = now - changedAt > this.idleAfterMs;
-        out.set(rule.tool, {
-          tool: rule.tool,
-          cwd: titled?.cwd ?? matches.find((p) => p.cwd)?.cwd ?? null,
-          projectHint: title ? projectFromTitle(title, rule.titleSuffixes) : null,
-          model: null,
-          lastActivityAt: changedAt,
-          // The process exists right now, whatever its title last did.
-          observedAt: now,
-          // Presence-only tools burn no tokens we can see; log adapters own usage.
-          tokensInputDelta: 0,
-          tokensOutputDelta: 0,
-          usage: [],
-          confidence: rule.logBacked || idle || !title ? "presence" : "activity"
-        });
-      }
-      return [...out.values()];
-    } catch {
-      return [];
-    }
-  }
-}, WATCHED_NAMES = [...new Set(RULES.flatMap((r) => r.names))], POWERSHELL_TIMEOUT_MS = 2e4, TASKLIST_TIMEOUT_MS = 2e4, PS_TIMEOUT_MS = 1e4, LSOF_TIMEOUT_MS = 5e3;
-async function listWindows() {
-  try {
-    return await listWindowsPowerShell();
-  } catch {
-    return listWindowsTasklist();
-  }
-}
-async function listWindowsPowerShell() {
-  let script = `$n=@(${WATCHED_NAMES.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}); Get-Process | Where-Object { $_.MainWindowTitle -or ($n -contains $_.ProcessName) } | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress`, { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    maxBuffer: 8 * 1024 * 1024,
-    windowsHide: !0,
-    timeout: POWERSHELL_TIMEOUT_MS
-  }), text = stdout.trim();
-  if (!text) return [];
-  let parsed = JSON.parse(text), rows = Array.isArray(parsed) ? parsed : [parsed], out = [];
-  for (let row of rows) {
-    if (!row || typeof row != "object") continue;
-    let r = row;
-    if (typeof r.ProcessName != "string" || typeof r.Id != "number") continue;
-    let title = typeof r.MainWindowTitle == "string" && r.MainWindowTitle.trim() ? r.MainWindowTitle : null;
-    out.push({ name: r.ProcessName.toLowerCase(), pid: r.Id, title, cwd: null });
-  }
-  return out;
-}
-async function listWindowsTasklist() {
-  let { stdout } = await exec("tasklist", ["/v", "/fo", "csv", "/nh"], {
-    maxBuffer: 8388608,
-    windowsHide: !0,
-    timeout: TASKLIST_TIMEOUT_MS
-  }), out = [];
-  for (let line of stdout.split(/\r?\n/)) {
-    if (!line.startsWith('"')) continue;
-    let cols = line.slice(1, -1).split('","');
-    if (cols.length < 9) continue;
-    let image = cols[0].toLowerCase().replace(/\.exe$/, ""), title = cols[cols.length - 1];
-    out.push({ name: image, pid: Number(cols[1]), title: title === "N/A" ? null : title, cwd: null });
-  }
-  return out;
-}
-async function listUnix() {
-  let { stdout } = await exec("ps", ["-axo", "pid=,ppid=,comm="], { maxBuffer: 8388608, timeout: PS_TIMEOUT_MS }), rows = stdout.split(`
-`).map((l) => l.trim()).filter(Boolean).map((l) => {
-    let m = l.match(/^(\d+)\s+(\d+)\s+(.*)$/);
-    if (!m) return null;
-    let comm = m[3], base = comm.split("/").pop() ?? comm;
-    return { pid: Number(m[1]), ppid: Number(m[2]), name: base.toLowerCase(), comm };
-  }).filter((r) => r !== null), children = /* @__PURE__ */ new Map();
-  for (let r of rows) children.set(r.ppid, [...children.get(r.ppid) ?? [], r.pid]);
-  let byPid = new Map(rows.map((r) => [r.pid, r])), shells = /* @__PURE__ */ new Set(["zsh", "bash", "fish", "sh"]), out = [];
-  for (let r of rows) {
-    if (r.name.includes("helper") || !RULES.find((x) => x.names.includes(r.name))) continue;
-    let cwd = null, stack = [...children.get(r.pid) ?? []], best = -1;
-    for (; stack.length; ) {
-      let pid = stack.pop(), p = byPid.get(pid);
-      p && (shells.has(p.name) && pid > best && (best = pid), stack.push(...children.get(pid) ?? []));
-    }
-    best > 0 && (cwd = await cwdOf(best)), out.push({ name: r.name, pid: r.pid, title: null, cwd });
-  }
-  return out;
-}
-async function cwdOf(pid) {
-  try {
-    let { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { timeout: LSOF_TIMEOUT_MS }), line = stdout.split(`
-`).find((l) => l.startsWith("n"));
-    return line ? line.slice(1) : null;
-  } catch {
-    return null;
-  }
-}
-function projectFromTitle(title, suffixes) {
-  if (!isRealWindowTitle(title)) return null;
-  let t = title.replace(/^[●•*]\s*/, "").trim(), lower = t.toLowerCase();
-  for (let s of suffixes) {
-    if (lower.endsWith(` - ${s}`)) {
-      t = t.slice(0, t.length - s.length - 3).trim();
-      break;
-    }
-    if (lower === s) return null;
-  }
-  if (!t) return null;
-  let parts = t.split(" - ").map((p) => p.trim()).filter(Boolean);
-  if (parts.length === 0) return null;
-  let candidate = parts[parts.length - 1].replace(/\s*\[.*?\]\s*$/, "").trim();
-  return !candidate || !isRealWindowTitle(candidate) ? null : /[a-z0-9]/i.test(candidate) ? candidate : null;
-}
-
-// src/adapters/quadcode.ts
-var import_node_fs3 = __toESM(require("node:fs")), import_node_os3 = __toESM(require("node:os")), import_node_path4 = __toESM(require("node:path"));
-var CHARS_PER_TOKEN = 4, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_LINE_CHARS = 2 * 1024 * 1024, QuadcodeAdapter = class {
+// src/adapters/codex.ts
+var emptyMeta = (generation) => ({
+  generation,
+  invalidProject: !1,
+  contextModel: null,
+  contextProject: null,
+  contextAt: 0,
+  model: null,
+  projectHint: null,
+  input: null,
+  output: null,
+  counterAt: 0,
+  lastActivityAt: 0
+}), CodexAdapter = class {
   constructor(recentWindowMs) {
     this.recentWindowMs = recentWindowMs;
-    this.roots = quadcodeRoots();
   }
   recentWindowMs;
-  name = "quadcode";
-  tailer = new JsonlTailer({ maxChunkBytes: MAX_CHUNK_BYTES, maxLineChars: MAX_LINE_CHARS });
-  roots;
+  name = "codex";
+  tailer = new JsonlTailer("codex");
   fileMeta = /* @__PURE__ */ new Map();
-  /** projectDir -> resolved project path; git probing is filesystem work, do it once. */
-  projectPaths = /* @__PURE__ */ new Map();
-  async poll() {
-    let out = [], cutoff = Date.now() - this.recentWindowMs;
-    for (let root of this.roots) {
-      let logs = chatLogs(root).map((l) => ({ ...l, mtime: this.tailer.mtime(l.file) })), currentChat = /* @__PURE__ */ new Map();
-      for (let l of logs) {
-        let prev = currentChat.get(l.projectDir);
-        (!prev || l.mtime > prev.mtime) && currentChat.set(l.projectDir, { file: l.file, mtime: l.mtime });
-      }
-      let editsSeen = /* @__PURE__ */ new Map(), editsMtimeFor = (projectDir) => {
-        let at = editsSeen.get(projectDir);
-        return at === void 0 && (at = fileVersionsMtime(projectDir), editsSeen.set(projectDir, at)), at;
-      };
-      for (let { file, projectDir, mtime: chatMtime } of logs) {
-        let mtime = currentChat.get(projectDir)?.file === file ? Math.max(chatMtime, editsMtimeFor(projectDir)) : chatMtime;
-        if (mtime < cutoff) {
-          this.tailer.readNewLines(file);
-          continue;
-        }
-        let meta = this.fileMeta.get(file) ?? { model: peekModel(file), projectPath: this.projectPathFor(projectDir) }, usage = new UsageAccumulator(), sawLine = !1;
-        for (let raw of this.tailer.readNewLines(file)) {
-          let line = raw;
-          if (line.is_status_message) continue;
-          let text = typeof line.message == "string" ? line.message : "";
-          if (text)
-            if (sawLine = !0, line.method === "LLM") {
-              let model = modelOf(line);
-              model !== null && (meta.model = model), usage.add(model, 0, estimateTokens(stripToolResults(text)), !0);
-            } else line.method === "USER" && usage.add(meta.model, estimateTokens(text), 0, !0);
-        }
-        this.fileMeta.set(file, meta), out.push({
-          tool: this.name,
-          cwd: meta.projectPath,
-          projectHint: null,
-          model: meta.model,
-          // The append is the activity, and mtime is when it happened (see 2 above).
-          lastActivityAt: mtime,
-          observedAt: sawLine ? Date.now() : void 0,
-          tokensInputDelta: usage.totalInput,
-          tokensOutputDelta: usage.totalOutput,
-          usage: usage.toList(),
-          confidence: "activity"
-        });
-      }
-    }
-    return out;
+  clear() {
+    this.tailer.clear(), this.fileMeta.clear();
   }
-  /**
-   * Project alias source, in order (round 6 Amendment 1, deviation 3): the
-   * Quadcode project folder if it is itself a git repo; else the nearest
-   * enclosing repo; else the single git repo directly inside it — that is the
-   * `Vibemunity/vibehub` case, where every other adapter reports `vibehub` from
-   * its cwd and Quadcode would otherwise disagree with them about the same work;
-   * else the folder itself.
-   */
-  projectPathFor(projectDir) {
-    let cached = this.projectPaths.get(projectDir);
-    if (cached) return cached;
-    let resolved = projectDir;
-    if (!isGitRepo(projectDir)) {
-      let enclosing = nearestEnclosingRepo(projectDir);
-      if (enclosing)
-        resolved = enclosing;
-      else {
-        let inner = soleInnerRepo(projectDir);
-        inner && (resolved = inner);
-      }
-    }
-    return this.projectPaths.set(projectDir, resolved), resolved;
-  }
-};
-function quadcodeRoots() {
-  let override = process.env.QUADCODE_HOME;
-  if (override) return [override];
-  let home = import_node_os3.default.homedir(), roots = [];
-  if (process.platform === "win32") {
-    let appData = process.env.APPDATA || import_node_path4.default.join(home, "AppData", "Roaming");
-    roots.push(import_node_path4.default.join(appData, "QuadcodeAI"));
-  } else process.platform === "darwin" ? roots.push(import_node_path4.default.join(home, "Library", "Application Support", "QuadcodeAI")) : roots.push(import_node_path4.default.join(home, ".config", "QuadcodeAI"));
-  return roots.push(import_node_path4.default.join(home, ".quadcodeai")), roots;
-}
-function chatLogs(root) {
-  let out = [], appsDir = import_node_path4.default.join(root, "apps");
-  for (let project of dirs(appsDir)) {
-    let projectDir = import_node_path4.default.join(appsDir, project), chatsDir = import_node_path4.default.join(projectDir, ".quadcodeai", ".data", "chats");
-    for (let section of dirs(chatsDir)) {
-      if (!section.endsWith(".files")) continue;
-      let sectionDir = import_node_path4.default.join(chatsDir, section), entries;
-      try {
-        entries = import_node_fs3.default.readdirSync(sectionDir, { withFileTypes: !0 });
-      } catch {
+  async poll(now = Date.now(), signal) {
+    let files = this.tailer.files(signal), present = new Set(files);
+    for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
+    let out = [];
+    for (let file of files) {
+      if (signal?.aborted) break;
+      let meta = this.fileMeta.get(file), usage = new UsageAccumulator();
+      if (this.tailer.readNewLines(file, (raw, generation) => {
+        let line = objectRecord(raw), payload = objectRecord(line?.payload), at = eventTime(line?.timestamp, now, this.recentWindowMs);
+        if (!line || !payload || at === null) return;
+        if (line.type === "turn_context") {
+          if ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.contextAt) return;
+          let project = folderFromCwd(payload.cwd);
+          (!project || meta.contextProject !== null && meta.contextProject !== project) && (meta.invalidProject = !0), meta.contextModel = safeModel(payload.model, "codex"), meta.contextProject = project, meta.contextAt = at;
+          return;
+        }
+        if (line.type !== "event_msg" || payload.type !== "token_count") return;
+        let info = objectRecord(payload.info), total = objectRecord(info?.total_token_usage);
+        if (!total || !isCount(total.input_tokens, 1e12) || !isCount(total.output_tokens, 1e12) || ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.counterAt)) return;
+        let input = total.input_tokens, output = total.output_tokens, baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output, inputDelta = baseline ? 0 : input - meta.input, outputDelta = baseline ? 0 : output - meta.output;
+        if (meta.input = input, meta.output = output, meta.counterAt = at, baseline || meta.invalidProject || !(inputDelta || outputDelta)) return;
+        let hasContext = meta.contextProject !== null && now - meta.contextAt <= 3e5;
+        if (!hasContext) return;
+        let model = meta.contextModel;
+        usage.add(model, inputDelta, outputDelta) && (meta.model = model, meta.projectHint = hasContext ? meta.contextProject : null, meta.lastActivityAt = Math.max(meta.lastActivityAt, at));
+      }, signal), !meta || meta.generation !== this.tailer.generation(file)) {
+        this.fileMeta.delete(file);
         continue;
       }
-      for (let e of entries)
-        e.isFile() && e.name.endsWith(".jsonl") && out.push({ file: import_node_path4.default.join(sectionDir, e.name), projectDir });
+      this.fileMeta.set(file, meta), !(meta.invalidProject || !meta.lastActivityAt || now - meta.lastActivityAt > Math.min(this.recentWindowMs, 3e5)) && out.push({
+        tool: this.name,
+        cwd: null,
+        projectHint: meta.projectHint,
+        model: meta.model,
+        lastActivityAt: meta.lastActivityAt,
+        observedAt: meta.lastActivityAt,
+        tokensInputDelta: usage.totalInput,
+        tokensOutputDelta: usage.totalOutput,
+        usage: usage.toList(),
+        confidence: "activity"
+      });
     }
-  }
-  return out;
-}
-function fileVersionsMtime(projectDir) {
-  try {
-    return import_node_fs3.default.statSync(import_node_path4.default.join(projectDir, ".quadcodeai", ".data", "file_versions")).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-function dirs(parent) {
-  try {
-    return import_node_fs3.default.readdirSync(parent, { withFileTypes: !0 }).filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch {
-    return [];
-  }
-}
-var isGitRepo = (dir) => {
-  try {
-    return import_node_fs3.default.existsSync(import_node_path4.default.join(dir, ".git"));
-  } catch {
-    return !1;
+    return signal?.aborted ? [] : out;
   }
 };
-function nearestEnclosingRepo(from) {
-  let dir = import_node_path4.default.dirname(from);
-  for (let i = 0; i < 8; i += 1) {
-    if (isGitRepo(dir)) return dir;
-    let parent = import_node_path4.default.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-function soleInnerRepo(dir) {
-  let found = [];
-  for (let name of dirs(dir)) {
-    if (name.startsWith(".")) continue;
-    let full = import_node_path4.default.join(dir, name);
-    if (isGitRepo(full) && found.push(full), found.length > 1) return null;
-  }
-  return found.length === 1 ? found[0] : null;
-}
-function estimateTokens(text) {
-  return text ? Math.round(text.length / CHARS_PER_TOKEN) : 0;
-}
-function stripToolResults(text) {
-  let OPEN = "<TOOL_RESULT>", CLOSE = "</TOOL_RESULT>", out = "", i = 0;
-  for (; ; ) {
-    let start = text.indexOf(OPEN, i);
-    if (start === -1)
-      return out += text.slice(i), out;
-    out += text.slice(i, start);
-    let end = text.indexOf(CLOSE, start + OPEN.length);
-    if (end === -1) return out;
-    i = end + CLOSE.length;
-  }
-}
-function modelOf(line) {
-  let variations = Array.isArray(line.variations) ? line.variations : [];
-  if (variations.length === 0) return null;
-  let idx = typeof line.variation_index == "number" && line.variation_index >= 0 && line.variation_index < variations.length ? line.variation_index : 0;
-  return normalizeModel(variations[idx]?.model_name);
-}
-var PEEK_BYTES2 = 512 * 1024;
-function peekModel(file) {
-  let fd = null;
-  try {
-    let size = import_node_fs3.default.statSync(file).size, start = Math.max(0, size - PEEK_BYTES2), buf = Buffer.alloc(size - start);
-    fd = import_node_fs3.default.openSync(file, "r"), import_node_fs3.default.readSync(fd, buf, 0, buf.length, start);
-    let text = buf.toString("utf8"), KEY = '"model_name":', at = text.lastIndexOf(KEY);
-    if (at === -1) return null;
-    let openQuote = text.indexOf('"', at + KEY.length);
-    if (openQuote === -1) return null;
-    let closeQuote = text.indexOf('"', openQuote + 1);
-    return closeQuote === -1 ? null : normalizeModel(text.slice(openQuote + 1, closeQuote));
-  } catch {
-    return null;
-  } finally {
-    fd !== null && import_node_fs3.default.closeSync(fd);
-  }
-}
 
 // src/detector.ts
-var LOG_BACKED_TOOLS = /* @__PURE__ */ new Set(["claude-code", "codex", "quadcode"]), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, isLogBacked = (o) => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool), newest = (list) => list.reduce((best, o) => !best || o.lastActivityAt > best.lastActivityAt ? o : best, null), usageKey = (tool, model) => `${tool}\0${model ?? ""}`, ADAPTER_POLL_TIMEOUT_MS = 45e3, TIMED_OUT = /* @__PURE__ */ Symbol("adapter poll timed out");
-async function pollAdapter(adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
-  let timer;
+var ADAPTER_POLL_TIMEOUT_MS = 45e3, busyAdapters = /* @__PURE__ */ new WeakSet(), newest = (list) => list.reduce(
+  (best, observation) => !best || observation.lastActivityAt > best.lastActivityAt ? observation : best,
+  null
+), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, usageKey = (tool, model) => `${tool}\0${model ?? ""}`;
+async function pollAdapter(adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS, now = Date.now(), signal) {
+  if (signal?.aborted || busyAdapters.has(adapter)) return [];
+  let controller = new AbortController(), timer, finishCancelled, cancel = () => {
+    controller.abort(), finishCancelled?.();
+  };
+  signal?.addEventListener("abort", cancel, { once: !0 }), busyAdapters.add(adapter);
   try {
-    let settled = await Promise.race([
-      adapter.poll(),
-      new Promise((resolve2) => {
-        timer = setTimeout(() => resolve2(TIMED_OUT), timeoutMs);
-      })
-    ]);
-    return settled === TIMED_OUT ? (console.warn(`tracker: adapter ${adapter.name} did not answer within ${timeoutMs} ms; skipped this tick`), []) : settled;
-  } catch (err) {
-    return console.warn(`tracker: adapter ${adapter.name} failed this tick:`, err instanceof Error ? err.message : err), [];
+    let cancelled = new Promise((resolve3) => {
+      finishCancelled = () => resolve3([]), timer = setTimeout(() => {
+        console.warn("tracker: AI source poll timed out; unavailable this tick"), cancel();
+      }, timeoutMs);
+    }), poll = Promise.resolve().then(() => adapter.poll(now, controller.signal)).finally(() => busyAdapters.delete(adapter)), result = await Promise.race([poll, cancelled]);
+    return controller.signal.aborted || !Array.isArray(result) ? [] : result.slice(0, MAX_LOG_FILES);
+  } catch {
+    return console.warn("tracker: AI source poll failed; unavailable this tick"), [];
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer), signal?.removeEventListener("abort", cancel);
   }
+}
+function projectObservation(o, now, windowMs) {
+  if (!o || !isSupportedTool(o.tool) || o.confidence !== "activity" || o.cwd !== null || !Number.isSafeInteger(o.lastActivityAt) || o.lastActivityAt < now - windowMs || o.lastActivityAt > now + 5e3 || !Array.isArray(o.usage) || o.usage.length > 30) return null;
+  let usage = [];
+  for (let entry of o.usage) {
+    let u = projectUsage({
+      tool: o.tool,
+      model: entry?.model,
+      tokensInputDelta: entry?.tokensInputDelta,
+      tokensOutputDelta: entry?.tokensOutputDelta,
+      estimated: entry?.estimated
+    });
+    if (!u) return null;
+    usage.push({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta });
+  }
+  let input = usage.reduce((n, u) => n + u.tokensInputDelta, 0), output = usage.reduce((n, u) => n + u.tokensOutputDelta, 0);
+  return !isCount(input) || !isCount(output) || input !== o.tokensInputDelta || output !== o.tokensOutputDelta ? null : {
+    tool: o.tool,
+    model: safeModel(o.model, o.tool),
+    cwd: null,
+    projectHint: safeAlias(o.projectHint),
+    confidence: "activity",
+    lastActivityAt: Math.min(now, o.lastActivityAt),
+    observedAt: Math.min(now, o.lastActivityAt),
+    tokensInputDelta: input,
+    tokensOutputDelta: output,
+    usage
+  };
 }
 var Detector = class {
   constructor(activeWindowMs, adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
-    this.activeWindowMs = activeWindowMs;
     this.adapterTimeoutMs = adapterTimeoutMs;
-    this.adapters = [
-      new ClaudeCodeAdapter(activeWindowMs * 6),
-      // scan a wider window so idle sessions still resolve
-      new CodexAdapter(activeWindowMs * 6),
-      // Quadcode appends only at turn boundaries and a single turn can run for hours,
-      // so its logs are scanned over a much wider window than the others. Stale files
-      // never become presence candidates (that still needs activity inside
-      // activeWindowMs) — they exist so the tool keeps its model and project while its
-      // own log is silent mid-turn. See identityFor below.
-      new QuadcodeAdapter(activeWindowMs * 72),
-      new ProcessAdapter(activeWindowMs)
-    ];
+    this.activeWindowMs = Math.min(Math.max(1, activeWindowMs), 3e5), this.adapters = [new ClaudeCodeAdapter(this.activeWindowMs), new CodexAdapter(this.activeWindowMs)];
   }
-  activeWindowMs;
   adapterTimeoutMs;
   adapters;
-  async detect(now = Date.now(), current) {
-    let all = (await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs)))).flat();
-    if (all.length === 0) return null;
-    let usage = /* @__PURE__ */ new Map(), tokensIn = 0, tokensOut = 0;
-    for (let o of all) {
-      tokensIn += o.tokensInputDelta, tokensOut += o.tokensOutputDelta;
-      for (let u of o.usage) {
-        if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) continue;
-        let key = usageKey(o.tool, u.model), bucket = usage.get(key) ?? { tool: o.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-        bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, u.estimated && (bucket.estimated = !0), usage.set(key, bucket);
+  cancellation = null;
+  generation = 0;
+  activeWindowMs;
+  clear() {
+    this.generation += 1, this.cancellation?.abort();
+    for (let adapter of this.adapters) adapter.clear?.();
+  }
+  async detect(now = Date.now(), current, allowed = () => !0, signal) {
+    let generation = this.generation, controller = new AbortController();
+    this.cancellation?.abort(), this.cancellation = controller;
+    let cancel = () => controller.abort();
+    signal?.addEventListener("abort", cancel, { once: !0 }), signal?.aborted && cancel();
+    let results;
+    try {
+      results = await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs, now, controller.signal)));
+    } finally {
+      signal?.removeEventListener("abort", cancel);
+    }
+    if (controller.signal.aborted || generation !== this.generation) return null;
+    let all = results.flat().map((o) => projectObservation(o, now, this.activeWindowMs)).filter((o) => o !== null).filter(allowed);
+    if (!all.length) return null;
+    let usage = /* @__PURE__ */ new Map(), input = 0, output = 0;
+    for (let o of all) for (let u of o.usage) {
+      if (!(u.tokensInputDelta || u.tokensOutputDelta)) continue;
+      let key = usageKey(o.tool, u.model);
+      if (!usage.has(key) && usage.size >= 30 || !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta)) continue;
+      let previous = usage.get(key);
+      usage.set(key, {
+        tool: o.tool,
+        model: u.model,
+        tokensInputDelta: (previous?.tokensInputDelta ?? 0) + u.tokensInputDelta,
+        tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + u.tokensOutputDelta
+      }), input += u.tokensInputDelta, output += u.tokensOutputDelta;
+    }
+    let seen = /* @__PURE__ */ new Map();
+    for (let o of all)
+      for (let model of /* @__PURE__ */ new Set([o.model, ...o.usage.map((u) => u.model)])) {
+        let key = usageKey(o.tool, model);
+        (!seen.has(key) || seen.get(key).lastSeenAt < o.lastActivityAt) && seen.set(key, { tool: o.tool, model, lastSeenAt: o.lastActivityAt, cwd: null, projectHint: o.projectHint });
       }
+    let pick = null;
+    if (current && !all.some((o) => o.tool !== current.tool && hasTokens(o))) {
+      let same = all.filter((o) => o.tool === current.tool), inProject = same.filter((o) => o.projectHint === current.projectHint);
+      pick = newest(inProject.filter(hasTokens)) ?? newest(same.filter(hasTokens)) ?? newest(inProject) ?? newest(same);
     }
-    let seen = /* @__PURE__ */ new Map(), note = (tool, model, at, where) => {
-      let key = usageKey(tool, model), prev = seen.get(key);
-      (!prev || at > prev.lastSeenAt) && seen.set(key, { tool, model, lastSeenAt: at, cwd: where?.cwd ?? prev?.cwd, projectHint: where?.projectHint ?? prev?.projectHint });
-    }, sightingOf = (o) => Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0);
-    for (let o of all) {
-      let where = { cwd: o.cwd, projectHint: o.projectHint };
-      note(o.tool, o.model, sightingOf(o), where);
-      for (let u of o.usage) u.model !== o.model && note(o.tool, u.model, now, where);
-    }
-    let freshestByTool = /* @__PURE__ */ new Map();
-    for (let o of all) {
-      let prev = freshestByTool.get(o.tool);
-      (!prev || sightingOf(o) > sightingOf(prev)) && freshestByTool.set(o.tool, o);
-    }
-    for (let [tool, freshest] of freshestByTool) {
-      if (freshest.model !== null) continue;
-      let identity2 = identityFor(freshest, all);
-      identity2.model !== null && note(tool, identity2.model, sightingOf(freshest), { cwd: identity2.cwd, projectHint: identity2.projectHint });
-    }
-    let fresh = (o) => now - o.lastActivityAt <= this.activeWindowMs, candidates = all.filter((o) => o.confidence === "activity" && fresh(o)), pick = null;
-    if (current) {
-      let same = candidates.filter((c) => c.tool === current.tool), anotherToolBurned = candidates.some((c) => c.tool !== current.tool && hasTokens(c));
-      same.length > 0 && !anotherToolBurned && (pick = bestForCurrent(same, current));
-    }
-    if (!pick) {
-      let logBacked = candidates.filter(isLogBacked);
-      pick = newest(logBacked.filter(hasTokens)) ?? newest(logBacked) ?? newest(candidates);
-    }
-    let active = pick !== null;
-    if (pick || (pick = newest(all)), !pick) return null;
-    let identity = identityFor(pick, all);
-    return {
+    return pick ??= newest(all.filter(hasTokens)) ?? newest(all), pick ? {
       tool: pick.tool,
-      model: identity.model,
-      cwd: identity.cwd,
-      projectHint: identity.projectHint,
-      active,
+      model: pick.model,
+      cwd: null,
+      projectHint: pick.projectHint,
+      active: !0,
       lastActivityAt: pick.lastActivityAt,
-      tokensInputDelta: tokensIn,
-      tokensOutputDelta: tokensOut,
+      tokensInputDelta: input,
+      tokensOutputDelta: output,
       usage: [...usage.values()],
-      seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-    };
+      seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, 30)
+    } : null;
   }
 };
-function identityFor(pick, all) {
-  let identity = { model: pick.model, cwd: pick.cwd, projectHint: pick.projectHint };
-  if (identity.model !== null && identity.cwd !== null) return identity;
-  let sameTool = all.filter((o) => o !== pick && o.tool === pick.tool).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  for (let o of sameTool)
-    if (identity.model === null && o.model !== null && (identity.model = o.model), identity.cwd === null && o.cwd !== null && (identity.cwd = o.cwd, identity.projectHint = null), identity.model !== null && identity.cwd !== null) break;
-  if (identity.projectHint === null && identity.cwd === null) {
-    let hinted = sameTool.find((o) => o.projectHint !== null);
-    hinted && (identity.projectHint = hinted.projectHint);
-  }
-  return identity;
-}
-function bestForCurrent(same, current) {
-  let sameProject = (o) => current.cwd !== null ? o.cwd === current.cwd : o.cwd === null && current.projectHint !== null && o.projectHint === current.projectHint, inProject = same.filter(sameProject);
-  return newest(inProject.filter(hasTokens)) ?? newest(same.filter(hasTokens)) ?? newest(inProject) ?? newest(same);
-}
 
 // src/projectAlias.ts
-var path6 = __toESM(require("node:path")), HIDDEN = "hidden", UNKNOWN_PROJECT_ALIAS = "unknown";
+var HIDDEN = "hidden", UNKNOWN_PROJECT_ALIAS = "unknown";
 function resolveProjectAlias(cwd, config, hint = null) {
-  let folderName = cwd ? path6.basename(cwd) : hint?.trim() || null;
-  if (!folderName) return UNKNOWN_PROJECT_ALIAS;
-  let override = config.projectAliases?.[folderName];
-  return override === HIDDEN ? null : (override ?? folderName).slice(0, 64);
-}
-
-// src/queue.ts
-var MAX_QUEUE_LENGTH = 500;
-function readQueue() {
-  return readJson(QUEUE_PATH) ?? [];
-}
-function writeQueue(queue) {
-  writeJsonAtomic(QUEUE_PATH, queue);
-}
-function enqueue(event) {
-  let queue = readQueue();
-  for (queue.push(event); queue.length > MAX_QUEUE_LENGTH; ) queue.shift();
-  writeQueue(queue);
-}
-async function flushQueue(send) {
-  let queue = readQueue(), delivered = 0, authRejected = !1;
-  for (; queue.length > 0; ) {
-    let result = await send(queue[0]);
-    if (result.authRejected) {
-      authRejected = !0, queue.length = 0;
-      break;
-    }
-    if (!result.ok) break;
-    queue.shift(), delivered++;
-  }
-  return writeQueue(queue), { delivered, remaining: queue.length, authRejected };
+  let folder = folderFromCwd(cwd) ?? safeAlias(hint), matches = folder ? Object.entries(config.projectAliases ?? {}).filter(([key]) => key.toLowerCase() === folder.toLowerCase()).map(([, value]) => value) : [];
+  return matches.includes(HIDDEN) ? null : (matches.length === 1 ? safeAlias(matches[0]) : null) ?? UNKNOWN_PROJECT_ALIAS;
 }
 
 // src/statusFile.ts
 var OFFLINE_STATUS = {
+  collectionPolicy: COLLECTION_POLICY,
+  connected: !1,
   status: "offline",
   projectAlias: null,
   tool: null,
   model: null,
   sessionStartedAt: null,
-  updatedAt: (/* @__PURE__ */ new Date(0)).toISOString()
+  updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(),
+  sources: []
 };
+function iso(value) {
+  if (typeof value != "string" || value.length !== 24) return null;
+  let at = Date.parse(value);
+  return Number.isFinite(at) && new Date(at).toISOString() === value ? value : null;
+}
+function projectStatus(value) {
+  let s = objectRecord(value);
+  if (!s) return { ...OFFLINE_STATUS };
+  let active = s.status === "active" && isSupportedTool(s.tool) && safeAlias(s.projectAlias) !== null, sources = [];
+  if (active && Array.isArray(s.sources)) for (let raw of s.sources.slice(0, 30)) {
+    let source = objectRecord(raw);
+    !source || !isSupportedTool(source.tool) || eventTime(source.lastSeenAt, Date.now(), 3e5) === null || sources.push({ tool: source.tool, model: safeModel(source.model, source.tool), lastSeenAt: new Date(eventTime(source.lastSeenAt, Date.now(), 3e5)).toISOString() });
+  }
+  return {
+    collectionPolicy: COLLECTION_POLICY,
+    ...typeof s.configFingerprint == "string" && /^[a-f0-9]{64}$/.test(s.configFingerprint) ? { configFingerprint: s.configFingerprint } : {},
+    connected: s.connected === !0 && iso(s.lastConnectionSeenAt) !== null && eventTime(s.lastConnectionSeenAt, Date.now(), 9e4) !== null,
+    ...iso(s.lastConnectionCheckAt) ? { lastConnectionCheckAt: iso(s.lastConnectionCheckAt) } : {},
+    ...iso(s.lastConnectionSeenAt) ? { lastConnectionSeenAt: iso(s.lastConnectionSeenAt) } : {},
+    status: active ? "active" : s.status === "offline" ? "offline" : "idle",
+    projectAlias: active ? safeAlias(s.projectAlias) : null,
+    tool: active ? s.tool : null,
+    model: active ? safeModel(s.model, s.tool) : null,
+    sessionStartedAt: active ? iso(s.sessionStartedAt) : null,
+    updatedAt: iso(s.updatedAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    ...typeof s.authRejected == "boolean" ? { authRejected: s.authRejected } : {},
+    sources
+  };
+}
 function readStatus() {
-  return readJson(STATUS_PATH) ?? { ...OFFLINE_STATUS, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+  let raw = objectRecord(readJson(STATUS_PATH)), config = readConfig();
+  return !raw || raw.collectionPolicy !== COLLECTION_POLICY || !config || raw.configFingerprint !== configFingerprint(config) ? { ...OFFLINE_STATUS } : projectStatus(raw);
 }
 function writeStatus(status) {
-  writeJsonAtomic(STATUS_PATH, status);
+  writeJsonAtomic(STATUS_PATH, projectStatus(status));
 }
 function writeOfflineStatus() {
-  writeStatus({ ...OFFLINE_STATUS, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
+  let config = readConfig();
+  writeStatus({ ...OFFLINE_STATUS, ...config ? { configFingerprint: configFingerprint(config) } : {}, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
 }
 function markAuthRejected(rejected) {
-  let current = readStatus();
-  current.authRejected !== rejected && writeStatus({ ...current, authRejected: rejected });
+  let config = readConfig();
+  if (!config) return;
+  let current = rejected ? OFFLINE_STATUS : readStatus();
+  writeStatus({
+    ...current,
+    configFingerprint: configFingerprint(config),
+    authRejected: rejected,
+    ...rejected ? { connected: !1 } : {},
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
 }
 
 // src/stopRequest.ts
-var fs5 = __toESM(require("node:fs"));
+var fs3 = __toESM(require("node:fs"));
 function requestStop() {
   writeJsonAtomic(STOP_REQUEST_PATH, { requestedAt: (/* @__PURE__ */ new Date()).toISOString(), byPid: process.pid });
 }
 function isStopRequested() {
-  return fs5.existsSync(STOP_REQUEST_PATH);
+  return fs3.existsSync(STOP_REQUEST_PATH);
 }
 function clearStopRequest() {
   removeFile(STOP_REQUEST_PATH);
 }
 
 // src/heartbeat.ts
-var SOURCES_WINDOW_MS = 600 * 1e3, MODEL_SWITCH_POLLS = 2, STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3;
+var STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3;
 function createLoopState(config) {
-  let activeWindowMs = config ? idleThresholdMs(config) : 3e5;
+  let valid = projectConfig(config), activeWindowMs = valid ? idleThresholdMs(valid) : 3e5;
   return {
     activeSession: null,
     lastActivityAt: null,
@@ -3157,235 +3070,232 @@ function createLoopState(config) {
     sourcesSeen: /* @__PURE__ */ new Map(),
     modelChallenger: null,
     activeWindowMs,
-    stopping: !1
+    stopping: !1,
+    epoch: 0,
+    binding: valid ? configFingerprint(valid) : null,
+    requestAbort: null,
+    loadConfig: readConfig
   };
 }
-var usageKey2 = (tool, model) => `${tool}\0${model ?? ""}`;
-function addPendingUsage(state, u) {
-  if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) return;
-  let key = usageKey2(u.tool, u.model), bucket = state.pendingUsage.get(key) ?? { tool: u.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-  bucket.tokensInputDelta += u.tokensInputDelta, bucket.tokensOutputDelta += u.tokensOutputDelta, u.estimated && (bucket.estimated = !0), state.pendingUsage.set(key, bucket);
+function clearCollectedState(state, config) {
+  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.sourcesSeen.clear(), state.modelChallenger = null, state.binding = config ? configFingerprint(config) : null, config && idleThresholdMs(config) !== state.activeWindowMs && (state.activeWindowMs = idleThresholdMs(config), state.detector = new Detector(state.activeWindowMs));
 }
-var MAX_TOOLS = 10;
-function buildTools(state, config, primary, now) {
-  let byTool = /* @__PURE__ */ new Map();
-  byTool.set(primary.tool, { tool: primary.tool, model: primary.model, projectAlias: primary.projectAlias });
-  let fresh = [...state.sourcesSeen.values()].filter((s) => now - s.lastSeenAt <= state.activeWindowMs).sort((a, b) => b.lastSeenAt - a.lastSeenAt), perTool = /* @__PURE__ */ new Map();
-  for (let s of fresh) {
-    let chosen = perTool.get(s.tool);
-    (!chosen || chosen.model === null && s.model !== null) && perTool.set(s.tool, s);
-  }
-  for (let s of perTool.values())
-    if (!byTool.has(s.tool) && (byTool.set(s.tool, {
-      tool: s.tool,
-      model: s.model,
-      projectAlias: resolveProjectAlias(s.cwd ?? null, config, s.projectHint ?? null)
-    }), byTool.size >= MAX_TOOLS))
-      break;
-  return [...byTool.values()];
-}
-function takePendingUsage(state) {
-  let usage = [], tokensInputDelta = 0, tokensOutputDelta = 0;
-  for (let u of state.pendingUsage.values())
-    u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0 || (usage.push({ ...u }), tokensInputDelta += u.tokensInputDelta, tokensOutputDelta += u.tokensOutputDelta);
-  return state.pendingUsage.clear(), { usage, tokensInputDelta, tokensOutputDelta };
-}
-function noteSources(state, seen, now) {
-  for (let s of seen) {
-    let key = usageKey2(s.tool, s.model), prev = state.sourcesSeen.get(key);
-    (!prev || s.lastSeenAt > prev.lastSeenAt) && state.sourcesSeen.set(key, { ...s });
-  }
-  for (let [key, s] of state.sourcesSeen)
-    now - s.lastSeenAt > SOURCES_WINDOW_MS && state.sourcesSeen.delete(key);
-  return [...state.sourcesSeen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).map((s) => ({ tool: s.tool, model: s.model, lastSeenAt: new Date(s.lastSeenAt).toISOString() }));
-}
-async function postHeartbeat(apiUrl, deviceToken, payload) {
+function sameConfig(config, load) {
   try {
-    let res = await fetch(
-      `${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/heartbeat`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${deviceToken}`
-        },
-        body: JSON.stringify(payload),
-        // A stalled connection must not freeze the loop (ticks never overlap);
-        // a timeout is a plain failure → queued and retried next tick.
-        signal: AbortSignal.timeout(15e3)
-      }
-    );
-    return { ok: res.ok, authRejected: res.status === 401 };
+    let current = projectConfig(load());
+    return current !== null && configFingerprint(current) === configFingerprint(config);
+  } catch {
+    return !1;
+  }
+}
+async function requestTracker(apiUrl, deviceToken, payload, signal, retiring = !1) {
+  let origin = safeApiOrigin(apiUrl);
+  if (!origin || !safeDeviceToken(deviceToken) || signal?.aborted) return { ok: !1, authRejected: !1 };
+  let controller = new AbortController(), cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: !0 });
+  let timer = setTimeout(cancel, 15e3);
+  try {
+    let res = await fetch(`${origin}/api/v1/tracker/${payload ? "heartbeat" : "connection"}`, {
+      method: retiring ? "DELETE" : "POST",
+      redirect: "error",
+      headers: { Authorization: `Bearer ${deviceToken}`, ...payload ? { "Content-Type": "application/json" } : {} },
+      ...payload ? { body: JSON.stringify(payload) } : {},
+      signal: controller.signal
+    }), authRejected = res.status === 401 || res.status === 403;
+    if (!payload && res.ok) {
+      let receipt = objectRecord(await res.json()), at = typeof receipt?.lastSeenAt == "string" ? eventTime(receipt.lastSeenAt, Date.now(), 9e4) : null, valid = receipt?.protocol === "connection-v1" && receipt.connected === !retiring && (retiring && receipt.lastSeenAt === null || at !== null);
+      return {
+        ok: !controller.signal.aborted && valid,
+        authRejected: !1,
+        ...valid && !retiring && at !== null ? { connectionLastSeenAt: new Date(at).toISOString() } : {}
+      };
+    }
+    try {
+      await res.body?.cancel();
+    } catch {
+    }
+    return { ok: !controller.signal.aborted && res.ok, authRejected };
   } catch {
     return { ok: !1, authRejected: !1 };
+  } finally {
+    clearTimeout(timer), signal?.removeEventListener("abort", cancel);
   }
+}
+async function postHeartbeat(apiUrl, deviceToken, payload, signal) {
+  let safe = projectHeartbeat(payload);
+  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: !1, authRejected: !1 };
+}
+function verifyConnection(config, signal) {
+  return requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+}
+function retireConnection(config, signal) {
+  return requestTracker(config.apiUrl, config.deviceToken, void 0, signal, !0);
 }
 async function sendOrQueue(config, payload) {
-  let result = await postHeartbeat(config.apiUrl, config.deviceToken, payload);
-  if (result.authRejected) {
-    markAuthRejected(!0);
-    return;
-  }
-  if (!result.ok) {
-    enqueue({ payload, apiUrl: config.apiUrl, deviceToken: config.deviceToken });
-    return;
-  }
-  markAuthRejected(!1);
+  let safe = projectConfig(config);
+  if (!safe || !sameConfig(safe, readConfig)) return;
+  let result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload);
+  sameConfig(safe, readConfig) && (result.ok || result.authRejected) && markAuthRejected(result.authRejected);
 }
-async function flushOfflineQueue() {
-  let result = await flushQueue(
-    (event) => postHeartbeat(event.apiUrl, event.deviceToken, event.payload)
-  );
-  return result.authRejected && markAuthRejected(!0), result;
+function sessionEvent(eventType, session, occurredAt) {
+  return { eventType, projectAlias: session.projectAlias, tool: session.tool, model: session.model, occurredAt };
 }
-function endActiveSession(config, session, occurredAt) {
-  return sendOrQueue(config, {
-    eventType: "session_end",
-    projectAlias: session.projectAlias,
+function buildTools(state, config) {
+  let session = state.activeSession;
+  if (!session) return [];
+  let tools = /* @__PURE__ */ new Map([[session.tool, {
     tool: session.tool,
     model: session.model,
-    occurredAt
+    projectAlias: session.projectAlias
+  }]]);
+  for (let source of state.sourcesSeen.values()) {
+    if (!isSupportedTool(source.tool) || tools.has(source.tool)) continue;
+    let alias = resolveProjectAlias(null, config, source.projectHint ?? null);
+    alias !== null && tools.set(source.tool, { tool: source.tool, model: safeModel(source.model, source.tool), projectAlias: alias });
+  }
+  return [...tools.values()];
+}
+function writeSnapshot(state, config, connected, rejected = !1, receipt) {
+  let now = (/* @__PURE__ */ new Date()).toISOString(), session = connected ? state.activeSession : null;
+  writeStatus({
+    configFingerprint: config ? configFingerprint(config) : void 0,
+    connected,
+    lastConnectionCheckAt: now,
+    lastConnectionSeenAt: connected ? receipt : void 0,
+    status: connected ? session ? "active" : "idle" : "offline",
+    projectAlias: session?.projectAlias ?? null,
+    tool: session?.tool ?? null,
+    model: session?.model ?? null,
+    sessionStartedAt: session?.startedAt ?? null,
+    updatedAt: now,
+    authRejected: rejected,
+    sources: session ? [...state.sourcesSeen.values()].map((s) => ({
+      tool: s.tool,
+      model: s.model,
+      lastSeenAt: new Date(s.lastSeenAt).toISOString()
+    })) : []
   });
 }
-function resolvePresenceModel(state, detection, tool, alias, now) {
-  let session = state.activeSession, candidate = detection.model ?? session?.model ?? null;
-  if (!session || session.projectAlias !== alias || session.tool !== tool || session.model === null || candidate === null || candidate === session.model)
-    return state.modelChallenger = null, candidate;
-  let current = session.model, burned = (model) => detection.usage.some((u) => u.tool === tool && u.model === model && (u.tokensInputDelta > 0 || u.tokensOutputDelta > 0)), currentLastSeen = state.sourcesSeen.get(usageKey2(tool, current))?.lastSeenAt ?? 0;
-  if (now - currentLastSeen > state.activeWindowMs)
-    return state.modelChallenger = null, candidate;
-  if (burned(candidate) && !burned(current)) {
-    let polls = state.modelChallenger?.model === candidate ? state.modelChallenger.polls + 1 : 1;
-    if (polls >= MODEL_SWITCH_POLLS)
-      return state.modelChallenger = null, candidate;
-    state.modelChallenger = { model: candidate, polls };
-  } else
-    state.modelChallenger = null;
-  return current;
-}
 async function tick(config, state) {
-  await flushOfflineQueue();
-  let current = state.activeSession ? { tool: state.activeSession.tool, cwd: state.activeSession.cwd, projectHint: state.activeSession.projectHint } : void 0, detection = await state.detector.detect(Date.now(), current), now = Date.now(), nowIso = new Date(now).toISOString();
-  if (detection)
-    for (let u of detection.usage) addPendingUsage(state, u);
   if (state.stopping) return;
-  let sources = noteSources(state, detection?.seen ?? [], now), alias = detection ? resolveProjectAlias(detection.cwd, config, detection.projectHint) : null;
-  if (detection && detection.active && alias !== null) {
-    let tool = detection.tool, model = resolvePresenceModel(state, detection, tool, alias, now);
-    !state.activeSession || state.activeSession.projectAlias !== alias || state.activeSession.tool !== tool || // model null → known is a refinement, not a new session
-    state.activeSession.model !== model && state.activeSession.model !== null ? (state.activeSession && await endActiveSession(config, state.activeSession, nowIso), state.activeSession = {
-      projectAlias: alias,
-      tool,
-      model,
-      startedAt: nowIso,
-      cwd: detection.cwd,
-      projectHint: detection.projectHint
-    }, await sendOrQueue(config, {
-      eventType: "session_start",
-      projectAlias: alias,
-      tool,
-      model,
-      occurredAt: nowIso
-    })) : state.activeSession && (state.activeSession.model = model, state.activeSession.cwd = detection.cwd, state.activeSession.projectHint = detection.projectHint);
-    let session = state.activeSession, pending = takePendingUsage(state);
-    await sendOrQueue(config, {
+  let safe = projectConfig(config);
+  if (!safe || !sameConfig(safe, state.loadConfig)) {
+    clearCollectedState(state), writeSnapshot(state, void 0, !1);
+    return;
+  }
+  state.binding !== configFingerprint(safe) && clearCollectedState(state, safe), state.requestAbort?.abort();
+  let controller = new AbortController();
+  state.requestAbort = controller;
+  let epoch = ++state.epoch, allowed = () => state.stopping || controller.signal.aborted || state.epoch !== epoch ? !1 : sameConfig(safe, state.loadConfig) ? !0 : (clearCollectedState(state), writeSnapshot(state, void 0, !1), !1), failed = (result) => {
+    clearCollectedState(state, safe), writeSnapshot(state, safe, !1, result.authRejected);
+  }, send = async (payload) => {
+    if (!allowed()) return !1;
+    let result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    return allowed() ? result.ok ? !0 : (failed(result), !1) : !1;
+  };
+  try {
+    let connection = await verifyConnection(safe, controller.signal);
+    if (!allowed()) return;
+    if (!connection.ok) {
+      failed(connection);
+      return;
+    }
+    let current = state.activeSession ? { tool: state.activeSession.tool, cwd: null, projectHint: state.activeSession.projectHint } : void 0, detection = await state.detector.detect(
+      Date.now(),
+      current,
+      (o) => resolveProjectAlias(null, safe, o.projectHint) !== null,
+      controller.signal
+    );
+    if (!allowed()) return;
+    state.pendingUsage.clear(), state.sourcesSeen.clear(), state.modelChallenger = null;
+    let now = (/* @__PURE__ */ new Date()).toISOString(), alias = detection ? resolveProjectAlias(null, safe, detection.projectHint) : null;
+    if (!detection || !detection.active || alias === null || !isSupportedTool(detection.tool)) {
+      if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
+      state.activeSession = null, state.lastActivityAt = null, allowed() && writeSnapshot(state, safe, !0, !1, connection.connectionLastSeenAt);
+      return;
+    }
+    for (let s of detection.seen) state.sourcesSeen.set(`${s.tool}\0${s.model ?? ""}`, {
+      tool: s.tool,
+      model: s.model,
+      lastSeenAt: s.lastSeenAt,
+      cwd: null,
+      projectHint: s.projectHint ?? null
+    });
+    let model = safeModel(detection.model, detection.tool);
+    if (!state.activeSession || state.activeSession.tool !== detection.tool || state.activeSession.projectAlias !== alias || state.activeSession.model !== model) {
+      if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
+      let session = {
+        tool: detection.tool,
+        model,
+        projectAlias: alias,
+        startedAt: now,
+        cwd: null,
+        projectHint: detection.projectHint
+      };
+      if (!await send(sessionEvent("session_start", session, now))) return;
+      state.activeSession = session;
+    }
+    if (!await send({
       eventType: "heartbeat",
       projectAlias: alias,
-      tool,
+      tool: detection.tool,
       model,
-      tokensInputDelta: pending.tokensInputDelta,
-      tokensOutputDelta: pending.tokensOutputDelta,
-      usage: pending.usage,
-      tools: buildTools(state, config, { tool, model, projectAlias: alias }, now),
-      occurredAt: nowIso
-    }), state.lastActivityAt = now, writeStatus({
-      status: "active",
-      projectAlias: alias,
-      tool,
-      model,
-      sessionStartedAt: session.startedAt,
-      updatedAt: nowIso,
-      authRejected: readStatus().authRejected,
-      sources
-    });
-    return;
+      tokensInputDelta: detection.tokensInputDelta,
+      tokensOutputDelta: detection.tokensOutputDelta,
+      usage: detection.usage,
+      tools: buildTools(state, safe),
+      occurredAt: now
+    })) return;
+    state.lastActivityAt = detection.lastActivityAt, allowed() && writeSnapshot(state, safe, !0, !1, connection.connectionLastSeenAt);
+  } finally {
+    state.requestAbort === controller && (state.requestAbort = null);
   }
-  if (state.modelChallenger = null, !state.activeSession) {
-    writeSourcesIfChanged(sources, nowIso);
-    return;
-  }
-  let idleAfter = idleThresholdMs(config);
-  if (state.lastActivityAt !== null && now - state.lastActivityAt >= idleAfter) {
-    let ended = state.activeSession;
-    await endActiveSession(config, ended, nowIso), state.activeSession = null, writeStatus({
-      status: "idle",
-      projectAlias: ended.projectAlias,
-      tool: ended.tool,
-      model: ended.model,
-      sessionStartedAt: ended.startedAt,
-      updatedAt: nowIso,
-      authRejected: readStatus().authRejected,
-      sources
-    });
-    return;
-  }
-  writeSourcesIfChanged(sources, nowIso);
 }
-function writeSourcesIfChanged(sources, nowIso) {
-  let current = readStatus();
-  (current.sources ?? []).length === sources.length && (current.sources ?? []).every((s, i) => s.tool === sources[i].tool && s.model === sources[i].model) || writeStatus({ ...current, updatedAt: nowIso, sources });
-}
-function settleWithin(p, ms) {
-  return new Promise((resolve2) => {
-    let timer = setTimeout(resolve2, ms), done = () => {
-      clearTimeout(timer), resolve2();
+function settleWithin(promise, ms) {
+  return new Promise((resolve3) => {
+    let timer = setTimeout(resolve3, ms), done = () => {
+      clearTimeout(timer), resolve3();
     };
-    p.then(done, done);
+    promise.then(done, done);
   });
 }
 var MIN_TICK_WATCHDOG_MS = 9e4, tickWatchdogMs = (intervalMs) => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS), LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"];
 function refreshConfig(active, loaded) {
-  if (!loaded || typeof loaded.apiUrl != "string" || !loaded.apiUrl) return { config: active, changed: [] };
-  if (typeof loaded.deviceToken != "string" || !loaded.deviceToken) return { config: active, changed: [] };
-  let next = { ...loaded, projectAliases: loaded.projectAliases ?? {} }, changed = LIVE_FIELDS.filter(
-    (field) => field === "projectAliases" ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {}) : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : next[field] !== active[field]
-  );
-  return changed.length > 0 ? { config: next, changed: [...changed] } : { config: active, changed: [] };
+  let next = projectConfig(loaded);
+  if (!next) return { config: active, changed: [], paused: !0 };
+  let changed = LIVE_FIELDS.filter((field) => field === "projectAliases" ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {}) : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : next[field] !== active[field]);
+  return { config: changed.length ? next : active, changed: [...changed], paused: !1 };
 }
 function runLoop(initialConfig, options = {}) {
-  let loadConfig = options.loadConfig ?? readConfig, runTick = options.runTick ?? tick, config = initialConfig, state = createLoopState(config), intervalMs = heartbeatIntervalMs(config), watchdogMs = options.watchdogMs ?? tickWatchdogMs(intervalMs), inFlight = null, ticks = 0, stopRequestSeen = !1, adoptCurrentConfig = () => {
-    let refreshed = refreshConfig(config, loadConfig());
-    return refreshed.changed.length > 0 && console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`), config = refreshed.config, config;
-  }, checkStopRequest = () => stopRequestSeen ? !0 : isStopRequested() ? (stopRequestSeen = !0, console.log("tracker: stop requested (stop.request found)"), options.onStopRequest?.(), !0) : !1, safeTick = () => {
+  let loadConfig = options.loadConfig ?? readConfig, runTick = options.runTick ?? tick, config = initialConfig, state = createLoopState(config);
+  state.loadConfig = loadConfig;
+  let intervalMs = heartbeatIntervalMs(config), watchdogMs = options.watchdogMs ?? tickWatchdogMs(intervalMs), inFlight = null, ticks = 0, stopRequestSeen = !1, checkStopRequest = () => stopRequestSeen || state.stopping ? !0 : isStopRequested() ? (stopRequestSeen = !0, state.epoch += 1, state.requestAbort?.abort(), state.detector.clear(), console.log("tracker: stop requested (stop.request found)"), options.onStopRequest?.(), !0) : !1, safeTick = () => {
     if (state.stopping || checkStopRequest()) return;
-    if (inFlight) {
-      let stuckFor = Date.now() - inFlight.startedAt;
-      if (stuckFor <= watchdogMs) {
-        console.debug(`tracker: previous tick still in flight after ${intervalMs} ms; skipping this tick`);
-        return;
-      }
-      console.warn(
-        `tracker: tick #${inFlight.seq} has been in flight for ${stuckFor} ms (watchdog ${watchdogMs} ms); abandoning it and starting a new tick`
-      ), inFlight = null;
+    let loaded = null;
+    try {
+      loaded = loadConfig();
+    } catch {
     }
-    let startedAt = Date.now();
-    ticks += 1;
-    let mine = {
-      seq: ticks,
-      startedAt,
-      done: runTick(adoptCurrentConfig(), state).catch((err) => {
-        console.error("tracker: heartbeat tick failed:", err);
-      }).finally(() => {
-        let took = Date.now() - startedAt;
-        inFlight === mine ? inFlight = null : console.warn(`tracker: abandoned tick #${mine.seq} finished late after ${took} ms`), took > intervalMs && console.warn(`tracker: tick took ${took} ms (interval ${intervalMs} ms)`);
-      })
-    };
+    let refreshed = refreshConfig(config, loaded);
+    if (refreshed.paused) {
+      clearCollectedState(state), inFlight = null, writeSnapshot(state, void 0, !1);
+      return;
+    }
+    if (refreshed.changed.length && (console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`), clearCollectedState(state, refreshed.config), inFlight = null), config = refreshed.config, inFlight) {
+      if (Date.now() - inFlight.startedAt <= watchdogMs) return;
+      console.warn(`tracker: tick #${inFlight.seq} exceeded watchdog ${watchdogMs} ms; cancelling it`), clearCollectedState(state, config), inFlight = null;
+    }
+    let startedAt = Date.now(), mine = { seq: ++ticks, startedAt, done: Promise.resolve().then(() => runTick(config, state)).catch(() => {
+      inFlight === mine && (console.error("tracker: heartbeat tick failed; collection paused"), clearCollectedState(state), writeSnapshot(state, void 0, !1));
+    }).finally(() => {
+      inFlight === mine ? inFlight = null : console.warn(`tracker: cancelled tick #${mine.seq} finished late`);
+    }) };
     inFlight = mine;
   };
   safeTick();
   let interval = setInterval(safeTick, intervalMs), stopWatch = setInterval(checkStopRequest, STOP_REQUEST_POLL_MS);
   return { stop: async () => {
-    clearInterval(interval), clearInterval(stopWatch), state.stopping = !0, inFlight && await settleWithin(inFlight.done, IN_FLIGHT_GRACE_MS), state.activeSession && (await endActiveSession(config, state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), state.activeSession = null), writeOfflineStatus(), clearStopRequest();
+    clearInterval(interval), clearInterval(stopWatch), state.stopping = !0, state.epoch += 1, state.requestAbort?.abort(), state.detector.clear(), inFlight && await settleWithin(inFlight.done, IN_FLIGHT_GRACE_MS), state.activeSession && sameConfig(config, loadConfig) && await postHeartbeat(config.apiUrl, config.deviceToken, sessionEvent("session_end", state.activeSession, (/* @__PURE__ */ new Date()).toISOString()), AbortSignal.timeout(2e3)), sameConfig(config, loadConfig) && await retireConnection(config, AbortSignal.timeout(2e3)), clearCollectedState(state), writeOfflineStatus(), clearStopRequest();
   } };
 }
 
@@ -3404,7 +3314,7 @@ var STALE_DAEMON_EXPLANATION = {
 };
 
 // src/daemon.ts
-var STOP_WAIT_MS = 8e3, STOP_POLL_MS = 200, sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
+var STOP_WAIT_MS = 8e3, STOP_POLL_MS = 200, sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
 function readPid() {
   return readJson(PID_PATH)?.pid ?? null;
 }
@@ -3421,7 +3331,7 @@ function daemonStatus() {
 }
 function fileMtimeMs(filePath) {
   try {
-    return fs6.statSync(filePath).mtimeMs;
+    return fs4.statSync(filePath).mtimeMs;
   } catch {
     return null;
   }
@@ -3462,7 +3372,7 @@ async function startDaemon(entryPath) {
   writeJsonAtomic(PID_PATH, { pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() }), console.log(`Tracker started (pid ${pid}). Logs: ${LOG_PATH}`);
 }
 function spawnDetachedDirect(entryPath) {
-  let logFd = fs6.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath, "run-loop"], {
+  let logFd = fs4.openSync(LOG_PATH, "a"), child = (0, import_node_child_process.spawn)(process.execPath, [entryPath, "run-loop"], {
     detached: !0,
     stdio: ["ignore", logFd, logFd],
     windowsHide: !0
@@ -3472,7 +3382,7 @@ function spawnDetachedDirect(entryPath) {
 function spawnDetachedWindows(entryPath) {
   let psQuote = (s) => `'${s.replace(/'/g, "''")}'`, script = `$p = Start-Process -FilePath ${psQuote(process.execPath)} -ArgumentList @(${psQuote(`"${entryPath}"`)}, 'run-loop') -WindowStyle Hidden -PassThru; $p.Id`;
   try {
-    let result = (0, import_node_child_process2.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    let result = (0, import_node_child_process.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
       windowsHide: !0,
       timeout: 2e4
@@ -3484,7 +3394,7 @@ function spawnDetachedWindows(entryPath) {
 }
 function redirectConsoleToLog() {
   ensureConfigDir();
-  let out = fs6.createWriteStream(LOG_PATH, { flags: "a" });
+  let out = fs4.createWriteStream(LOG_PATH, { flags: "a" });
   globalThis.console = new import_node_console.Console({ stdout: out, stderr: out });
 }
 async function endLingeringSession() {
@@ -3558,10 +3468,13 @@ function describeSources(sources) {
 
 // src/index.ts
 var CONFIG_PATH_LABEL = "~/.vibehub/config.json", STATUS_PATH_LABEL = "~/.vibehub/status.json", program2 = new Command();
-program2.name("vibehub-tracker").description("VibeHub local activity tracker");
+program2.name("vibehub-tracker").description("VibeHub AI-session metadata tracker");
 async function verifyToken(apiUrl, deviceToken) {
   try {
-    let res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/verify`, {
+    let origin = safeApiOrigin(apiUrl);
+    if (!origin || !safeDeviceToken(deviceToken)) return { ok: !1, rejected: !0, detail: "Invalid tracker configuration" };
+    let res = await fetch(`${origin}/api/v1/tracker/verify`, {
+      redirect: "error",
       headers: { Authorization: `Bearer ${deviceToken}` },
       signal: AbortSignal.timeout(15e3)
     });
@@ -3595,18 +3508,21 @@ program2.command("set <projectFolder> <alias>").description(`remap a project fol
     alias === HIDDEN ? `"${projectFolder}" will be hidden from presence.` : `"${projectFolder}" will be shown as "${alias}".`
   );
 });
-program2.command("start").description("poll for active coding-tool processes and send heartbeats").action(async () => {
-  requireConfig(), await startDaemon(path7.resolve(__filename));
+program2.command("start").description("track supported Claude Code / Codex session-log metadata and send heartbeats").action(async () => {
+  requireConfig(), await startDaemon(path3.resolve(__filename));
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {
-  if (!readConfig()) {
+  let config = readConfig();
+  if (!config) {
     console.log("Not logged in. Run `vibehub-tracker login <deviceToken>` first.");
     return;
   }
   let status = readStatus(), { running, pid } = daemonStatus();
-  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status !== "offline" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
-  let seeingCutoff = Date.now() - 600 * 1e3, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
-  seeing.length > 0 ? console.log(`Seeing:  ${describeSources(seeing)}`) : running && console.log("Seeing:  nothing in the last 10 min (no AI tool open, no Claude Code / Codex log activity)"), status.authRejected ? (console.log("Connected: no - token rejected by the server."), console.log("  Create a new token in VibeHub > Settings > Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.authRejected === !1 ? console.log("Connected: yes") : console.log("Connected: not yet - waiting for the first heartbeat. Open an AI tool session and check again in ~30s.") : console.log("Connected: no - daemon isn't running. Run `vibehub-tracker start`.");
+  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status === "active" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`), console.log("Scope:   supported AI-session activity only (Claude Code, Codex)");
+  let seeingCutoff = Date.now() - 3e5, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
+  seeing.length > 0 ? console.log(`Seeing:  ${describeSources(seeing)}`) : running && console.log("Seeing:  no recent supported AI usage records (AI-only idle; other apps are not observed)");
+  let freshCheck = Date.parse(status.lastConnectionCheckAt ?? "") >= Date.now() - Math.max(9e4, 3 * (config.heartbeatIntervalMs ?? 3e4));
+  status.authRejected ? (console.log("Connected: no - token rejected by the server."), console.log("  Create a new token in VibeHub > Settings > Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.connected && freshCheck ? (console.log("Connected: yes"), console.log("  Recent server-accepted daemon connection; does not imply an active AI session.")) : console.log("Connected: not yet - waiting for a successful daemon connection check; no AI activity is required.") : console.log("Connected: no - daemon isn't running. Run `vibehub-tracker start`.");
 });
 program2.command("stop").description("stop the running tracker daemon (waits for it to end the session cleanly)").action(async () => {
   await stopDaemon();

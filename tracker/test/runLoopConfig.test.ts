@@ -11,13 +11,14 @@
 // any daemon actually running against it — is never read or written by this file.
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, describe, it } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { after, describe, it, mock } from "node:test";
 import type { TrackerConfig } from "../src/types";
 
-const sandbox = mkdtempSync(join(tmpdir(), "vibehub-tracker-loop-"));
+const tempRoot = resolve(__dirname, "../../../.temp/vibehub-ai-only");
+mkdirSync(tempRoot, { recursive: true });
+const sandbox = mkdtempSync(join(tempRoot, "loop-"));
 process.env.HOME = sandbox;
 process.env.USERPROFILE = sandbox;
 process.env.HOMEDRIVE = sandbox.slice(0, 2);
@@ -33,7 +34,12 @@ if (!CONFIG_DIR.startsWith(sandbox)) {
 }
 const { refreshConfig, runLoop } = require("../src/heartbeat") as typeof import("../src/heartbeat");
 
-after(() => rmSync(sandbox, { recursive: true, force: true }));
+const forbidden = (): never => { throw new Error("Live network/process calls are forbidden in isolated loop tests"); };
+mock.method(globalThis, "fetch", async () => forbidden());
+mock.method(process, "kill", forbidden);
+for (const method of ["exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync"])
+  mock.method(require("node:child_process"), method, forbidden);
+after(() => { mock.restoreAll(); rmSync(sandbox, { recursive: true, force: true }); });
 
 const config = (overrides: Partial<TrackerConfig> = {}): TrackerConfig => ({
   apiUrl: "http://127.0.0.1:1",
@@ -112,10 +118,11 @@ describe("refreshConfig", () => {
     assert.deepEqual(result.changed, []);
   });
 
-  it("keeps the last good config when config.json is gone", () => {
+  it("pauses when config.json is gone; old values are only a comparison baseline", () => {
     const active = config();
     const result = refreshConfig(active, null);
     assert.equal(result.config, active);
+    assert.equal(result.paused, true);
     assert.deepEqual(result.changed, []);
   });
 
@@ -130,6 +137,7 @@ describe("refreshConfig", () => {
     for (const half of broken) {
       const result = refreshConfig(active, half as TrackerConfig);
       assert.equal(result.config, active, `adopted a broken config: ${JSON.stringify(half)}`);
+      assert.equal(result.paused, true);
       assert.deepEqual(result.changed, []);
     }
   });
@@ -174,27 +182,22 @@ describe("runLoop config swap", () => {
     );
   });
 
-  it("keeps heartbeating with the last good token if config.json disappears", async () => {
+  it("pauses instead of retaining collection permission when config.json disappears", async () => {
     const tokens: string[] = [];
     let onDisk: TrackerConfig | null = config({ heartbeatIntervalMs: 20 });
     const loop = runLoop(onDisk, {
       loadConfig: () => onDisk,
-      runTick: async (tickConfig) => {
-        tokens.push(tickConfig.deviceToken);
-      },
+      runTick: async (tickConfig) => { tokens.push(tickConfig.deviceToken); },
     });
     try {
       await waitUntil(() => tokens.length >= 1, "the first tick");
-      onDisk = null; // deleted, unreadable, or caught mid-write
+      onDisk = null;
       const before = tokens.length;
-      await waitUntil(() => tokens.length > before + 1, "two more ticks");
-    } finally {
-      await loop.stop();
-    }
-    assert.ok(
-      tokens.every((token) => token === "token-A"),
-      `every tick should keep the last good token, saw: ${JSON.stringify(tokens)}`,
-    );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(tokens.length, before, "no tick may use cached credentials after config removal");
+      onDisk = config({ heartbeatIntervalMs: 20, deviceToken: "token-B" });
+      await waitUntil(() => tokens.includes("token-B"), "valid configuration to resume collection");
+    } finally { await loop.stop(); }
   });
 
   it("follows apiUrl to a new server without a restart", async () => {

@@ -61,7 +61,8 @@ describe("pollAdapter", () => {
       log.restore();
     }
     assert.equal(log.lines.length, 1, `expected exactly one log line, got ${JSON.stringify(log.lines)}`);
-    assert.match(log.lines[0], /wedged/);
+    assert.match(log.lines[0], /AI source poll timed out/);
+    assert.doesNotMatch(log.lines[0], /wedged/);
   });
 
   it("does not let a late rejection from an abandoned poll escape", async () => {
@@ -97,13 +98,11 @@ describe("pollAdapter", () => {
       log.restore();
     }
     assert.equal(log.lines.length, 1);
-    assert.match(log.lines[0], /broken/);
-    assert.match(log.lines[0], /poll blew up/);
+    assert.match(log.lines[0], /AI source poll failed/);
+    assert.doesNotMatch(log.lines[0], /broken|poll blew up/, "raw source/error content must never reach logs");
   });
 
-  it("defaults to a ceiling above the process adapter's own budget", () => {
-    // PowerShell 20 s + the tasklist fallback 20 s: the backstop must not preempt a
-    // fallback that is legitimately still running.
-    assert.ok(ADAPTER_POLL_TIMEOUT_MS > 40_000, `expected > 40000, got ${ADAPTER_POLL_TIMEOUT_MS}`);
+  it("keeps a finite compatibility timeout for an unavailable AI source", () => {
+    assert.equal(ADAPTER_POLL_TIMEOUT_MS, 45_000);
   });
 });

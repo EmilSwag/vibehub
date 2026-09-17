@@ -1,43 +1,63 @@
+import { configFingerprint, readConfig } from "./config";
 import { readJson, STATUS_PATH, writeJsonAtomic } from "./paths";
-import type { StatusFile } from "./types";
+import { COLLECTION_POLICY, eventTime, isSupportedTool, MAX_EVENT_AGE_MS, MAX_USAGE_ENTRIES, objectRecord, safeAlias, safeModel } from "./privacy";
+import type { StatusFile, StatusSource } from "./types";
 
-export const OFFLINE_STATUS: StatusFile = {
-  status: "offline",
-  projectAlias: null,
-  tool: null,
-  model: null,
-  sessionStartedAt: null,
-  updatedAt: new Date(0).toISOString(),
-};
+export const OFFLINE_STATUS: StatusFile = { collectionPolicy: COLLECTION_POLICY, connected: false,
+  status: "offline", projectAlias: null, tool: null, model: null, sessionStartedAt: null,
+  updatedAt: new Date(0).toISOString(), sources: [] };
 
-/** Reads status.json, or a fresh "offline" snapshot if it has never been written. */
+function iso(value: unknown): string | null {
+  if (typeof value !== "string" || value.length !== 24) return null;
+  const at = Date.parse(value);
+  return Number.isFinite(at) && new Date(at).toISOString() === value ? value : null;
+}
+
+/** Persist constructed metadata, never an object spread from logs or an old file. */
+function projectStatus(value: unknown): StatusFile {
+  const s = objectRecord(value);
+  if (!s) return { ...OFFLINE_STATUS };
+  const active = s.status === "active" && isSupportedTool(s.tool) && safeAlias(s.projectAlias) !== null;
+  const sources: StatusSource[] = [];
+  if (active && Array.isArray(s.sources)) for (const raw of s.sources.slice(0, MAX_USAGE_ENTRIES)) {
+    const source = objectRecord(raw);
+    if (!source || !isSupportedTool(source.tool) || eventTime(source.lastSeenAt, Date.now(), MAX_EVENT_AGE_MS) === null) continue;
+    sources.push({ tool: source.tool, model: safeModel(source.model, source.tool), lastSeenAt: new Date(eventTime(source.lastSeenAt, Date.now(), MAX_EVENT_AGE_MS)!).toISOString() });
+  }
+  return { collectionPolicy: COLLECTION_POLICY,
+    ...(typeof s.configFingerprint === "string" && /^[a-f0-9]{64}$/.test(s.configFingerprint)
+      ? { configFingerprint: s.configFingerprint } : {}),
+    connected: s.connected === true && iso(s.lastConnectionSeenAt) !== null &&
+      eventTime(s.lastConnectionSeenAt, Date.now(), 90000) !== null,
+    ...(iso(s.lastConnectionCheckAt) ? { lastConnectionCheckAt: iso(s.lastConnectionCheckAt)! } : {}),
+    ...(iso(s.lastConnectionSeenAt) ? { lastConnectionSeenAt: iso(s.lastConnectionSeenAt)! } : {}),
+    status: active ? "active" : s.status === "offline" ? "offline" : "idle",
+    projectAlias: active ? safeAlias(s.projectAlias) : null,
+    tool: active ? s.tool as string : null,
+    model: active ? safeModel(s.model, s.tool as "claude-code" | "codex") : null,
+    sessionStartedAt: active ? iso(s.sessionStartedAt) : null,
+    updatedAt: iso(s.updatedAt) ?? new Date(0).toISOString(),
+    ...(typeof s.authRejected === "boolean" ? { authRejected: s.authRejected } : {}), sources };
+}
+
+/** Old collector snapshots are NOT evidence, and are not used by CLI stop fallback. */
 export function readStatus(): StatusFile {
-  const status = readJson<StatusFile>(STATUS_PATH);
-  return status ?? { ...OFFLINE_STATUS, updatedAt: new Date().toISOString() };
+  const raw = objectRecord(readJson<unknown>(STATUS_PATH));
+  const config = readConfig();
+  if (!raw || raw.collectionPolicy !== COLLECTION_POLICY || !config || raw.configFingerprint !== configFingerprint(config)) {
+    return { ...OFFLINE_STATUS };
+  }
+  return projectStatus(raw);
 }
-
-export function writeStatus(status: StatusFile): void {
-  writeJsonAtomic(STATUS_PATH, status);
-}
-
+export function writeStatus(status: StatusFile): void { writeJsonAtomic(STATUS_PATH, projectStatus(status)); }
 export function writeOfflineStatus(): void {
-  writeStatus({ ...OFFLINE_STATUS, updatedAt: new Date().toISOString() });
+  const config = readConfig();
+  writeStatus({ ...OFFLINE_STATUS, ...(config ? { configFingerprint: configFingerprint(config) } : {}), updatedAt: new Date().toISOString() });
 }
-
-/**
- * Flips the `authRejected` flag without touching the rest of the status —
- * called on every send attempt (live or queued-retry) so `status` reflects
- * the current token's health, not just whatever the last heartbeat reported.
- */
 export function markAuthRejected(rejected: boolean): void {
-  const current = readStatus();
-  // Strict equality on purpose: `undefined` ("never attempted yet") must NOT be
-  // treated as equal to `false` ("confirmed good") — collapsing them here (an
-  // earlier version of this used `?? false`) meant the very first successful
-  // send after login never actually got persisted, since undefined already
-  // looked like a match for `false` and the write was skipped as a no-op.
-  // `status` then stayed stuck reporting "not yet" forever, even once the
-  // tracker was genuinely connected.
-  if (current.authRejected === rejected) return;
-  writeStatus({ ...current, authRejected: rejected });
+  const config = readConfig();
+  if (!config) return;
+  const current = rejected ? OFFLINE_STATUS : readStatus();
+  writeStatus({ ...current, configFingerprint: configFingerprint(config), authRejected: rejected,
+    ...(rejected ? { connected: false } : {}), updatedAt: new Date().toISOString() });
 }

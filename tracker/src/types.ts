@@ -21,6 +21,15 @@ export interface StatusSource {
 }
 
 export interface StatusFile {
+  /** Local provenance marker; legacy snapshots cannot be reused for outgoing events. */
+  collectionPolicy?: string;
+  /** Digest of the local config; prevents reusing status after account/alias changes. */
+  configFingerprint?: string;
+  /** Result of the daemon's accepted connection-v1 receipt, not proof of AI activity. */
+  connected?: boolean;
+  lastConnectionCheckAt?: string;
+  /** Server time from a validated connection-v1 receipt; separate from AI activity. */
+  lastConnectionSeenAt?: string;
   status: PresenceStatus;
   projectAlias: string | null;
   tool: string | null;

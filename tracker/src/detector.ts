@@ -1,334 +1,154 @@
 import { ClaudeCodeAdapter } from "./adapters/claudeCode";
 import { CodexAdapter } from "./adapters/codex";
-import { ProcessAdapter } from "./adapters/processes";
-import { QuadcodeAdapter } from "./adapters/quadcode";
+import { MAX_LOG_FILES } from "./adapters/jsonlTail";
 import type { Adapter, Observation } from "./adapters/types";
+import { isCount, isSupportedTool, MAX_EVENT_AGE_MS, MAX_FUTURE_SKEW_MS, MAX_USAGE_ENTRIES, projectUsage, safeAlias, safeModel } from "./privacy";
 
-/** Token deltas for one (tool, model) pair, merged across every observation this poll. */
-export interface DetectionUsage {
-  tool: string;
-  model: string | null;
-  tokensInputDelta: number;
-  tokensOutputDelta: number;
-  /** True when any contribution to this bucket was estimated rather than measured. */
-  estimated?: boolean;
-}
-
-/** A (tool, model) pair that exists right now or produced evidence recently. */
-export interface SeenSource {
-  tool: string;
-  model: string | null;
-  lastSeenAt: number;
-  /**
-   * Where that source was seen, so the heartbeat can resolve a project alias per
-   * tool for the round 6 `tools[]` list (same inputs `resolveProjectAlias` takes
-   * for the primary). Kept in memory only — a cwd is a full path and never leaves
-   * the machine (privacy invariant, index.ts header).
-   */
-  cwd?: string | null;
-  projectHint?: string | null;
-}
-
-/** What the heartbeat loop is currently reporting — input to the hysteresis rule. */
-export interface CurrentSession {
-  tool: string;
-  cwd: string | null;
-  projectHint: string | null;
-}
-
+export interface DetectionUsage { tool: string; model: string | null; tokensInputDelta: number; tokensOutputDelta: number; estimated?: boolean }
+export interface SeenSource { tool: string; model: string | null; lastSeenAt: number; cwd?: string | null; projectHint?: string | null }
+export interface CurrentSession { tool: string; cwd: string | null; projectHint: string | null }
 export interface Detection {
   tool: string;
   model: string | null;
   cwd: string | null;
   projectHint: string | null;
-  /** True = timestamped evidence of work within the active window. */
   active: boolean;
   lastActivityAt: number;
-  /** Legacy: sums across *all* observations (old servers only read these). */
   tokensInputDelta: number;
   tokensOutputDelta: number;
-  /** Precise attribution: same tokens split per (tool, model). Nonzero entries only. */
   usage: DetectionUsage[];
-  /** Every (tool, model) pair observed this poll, for `status.json`'s `sources`. */
   seen: SeenSource[];
 }
 
-/**
- * Tools whose `activity`-confidence observations can only come from a log adapter.
- * Safe to list a tool the process adapter also reports: presence-only observations
- * are filtered out before `isLogBacked` is ever consulted. Quadcode is here so a
- * chat append still outranks a bare window-title candidate when the log has not
- * named a model yet (a brand-new chat).
- */
-const LOG_BACKED_TOOLS = new Set(["claude-code", "codex", "quadcode"]);
-
+export const ADAPTER_POLL_TIMEOUT_MS = 45_000;
+const busyAdapters = new WeakSet<Adapter>();
+const newest = (list: Observation[]): Observation | null => list.reduce<Observation | null>(
+  (best, observation) => !best || observation.lastActivityAt > best.lastActivityAt ? observation : best, null);
 const hasTokens = (o: Observation): boolean => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0;
-
-/**
- * Log-backed = the observation proves *work*, not just an open window: it names
- * a model, it carried tokens, or it comes from a tool only a log adapter reports
- * as active (the process adapter marks `claude`/`codex` presence-only).
- */
-const isLogBacked = (o: Observation): boolean => o.model !== null || hasTokens(o) || LOG_BACKED_TOOLS.has(o.tool);
-
-const newest = (list: Observation[]): Observation | null =>
-  list.reduce<Observation | null>((best, o) => (!best || o.lastActivityAt > best.lastActivityAt ? o : best), null);
-
 const usageKey = (tool: string, model: string | null): string => `${tool}\u0000${model ?? ""}`;
 
-/**
- * Merges every adapter's observations into one answer per poll.
- *
- * Tokens: every observation's per-model deltas are merged by (tool, model) into
- * `usage` — several sessions may burn tokens at once and every one counts, but
- * each is booked under the tool/model that actually produced it, never under
- * whichever window happened to be "current". `tokensInputDelta`/`OutputDelta`
- * are the plain sums, kept for servers that predate `usage`.
- *
- * Presence (which single activity the user is "in"), in order:
- *  1. Candidates are observations with `activity` confidence whose
- *     `lastActivityAt` is inside `activeWindowMs`. Presence-only observations
- *     (editor open, static title; `claude`/`codex` processes) never qualify.
- *  2. Hysteresis: if the caller's current session tool is still among the
- *     candidates, keep that tool unless a candidate of *another* tool burned
- *     tokens this poll. Within the same tool, prefer the observation for the
- *     current project (cwd / projectHint), then one with tokens, then newest.
- *     This stops Claude Code inside Cursor's terminal from flipping
- *     claude-code ↔ cursor every poll: a window-title change only proves the
- *     window changed, a log line proves work.
- *  3. Otherwise prefer log-backed candidates over process-only ones — those
- *     with tokens this poll first, then newest — and fall back to the newest
- *     process-only candidate.
- *  4. No candidate at all: the newest observation of any kind, reported as
- *     `active: false` (editor open, nothing happening) so the loop can go idle.
- */
-/**
- * Round 11: the ceiling on how long ONE adapter may hold up a tick.
- *
- * Deliberately above the process adapter's own internal budget (PowerShell 20 s, then
- * the tasklist fallback 20 s), so this never preempts a fallback that is legitimately
- * in progress. It is the backstop for the case those timeouts cannot cover: an adapter
- * wedged somewhere with no timeout of its own (a stat on a disconnected network drive,
- * a promise that simply never settles). Above this the tick gives up on that adapter
- * and reports what the others found, which is strictly better than reporting nothing.
- */
-export const ADAPTER_POLL_TIMEOUT_MS = 45_000;
-
-const TIMED_OUT = Symbol("adapter poll timed out");
-
-/**
- * One adapter's poll, bounded. Never throws and never returns late: on timeout the
- * adapter contributes nothing to this tick and says so once. The abandoned poll keeps
- * running (fs/exec work is not cancellable) and its result is discarded; the adapters
- * are all stateful tailers that re-read from their own offsets, so the next tick picks
- * up whatever this one dropped.
- */
-export async function pollAdapter(adapter: Adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS): Promise<Observation[]> {
+/** Bounded, cancellable and non-overlapping. A late source cannot feed a later tick. */
+export async function pollAdapter(
+  adapter: Adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS, now = Date.now(), signal?: AbortSignal
+): Promise<Observation[]> {
+  if (signal?.aborted || busyAdapters.has(adapter)) return [];
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let finishCancelled: (() => void) | undefined;
+  const cancel = (): void => { controller.abort(); finishCancelled?.(); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  busyAdapters.add(adapter);
   try {
-    // Promise.race attaches a handler to the adapter's promise, so a rejection that
-    // arrives after the timeout is already handled and cannot crash the daemon.
-    const settled = await Promise.race([
-      adapter.poll(),
-      new Promise<typeof TIMED_OUT>((resolve) => {
-        timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
-      }),
-    ]);
-    if (settled === TIMED_OUT) {
-      console.warn(`tracker: adapter ${adapter.name} did not answer within ${timeoutMs} ms; skipped this tick`);
-      return [];
-    }
-    return settled;
-  } catch (err) {
-    // The Adapter contract says poll() never throws. If one does, that is a bug worth
-    // one line rather than the silence this used to keep.
-    console.warn(`tracker: adapter ${adapter.name} failed this tick:`, err instanceof Error ? err.message : err);
+    const cancelled = new Promise<Observation[]>((resolve) => {
+      finishCancelled = () => resolve([]);
+      timer = setTimeout(() => {
+        console.warn("tracker: AI source poll timed out; unavailable this tick");
+        cancel();
+      }, timeoutMs);
+    });
+    const poll = Promise.resolve().then(() => adapter.poll(now, controller.signal))
+      .finally(() => busyAdapters.delete(adapter));
+    const result = await Promise.race([poll, cancelled]);
+    return controller.signal.aborted || !Array.isArray(result) ? [] : result.slice(0, MAX_LOG_FILES);
+  } catch {
+    console.warn("tracker: AI source poll failed; unavailable this tick");
     return [];
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
   }
 }
 
+/** Runtime projection as well as types: no raw fields survive an adapter boundary. */
+function projectObservation(o: Observation, now: number, windowMs: number): Observation | null {
+  if (!o || !isSupportedTool(o.tool) || o.confidence !== "activity" || o.cwd !== null ||
+      !Number.isSafeInteger(o.lastActivityAt) || o.lastActivityAt < now - windowMs ||
+      o.lastActivityAt > now + MAX_FUTURE_SKEW_MS || !Array.isArray(o.usage) || o.usage.length > MAX_USAGE_ENTRIES) return null;
+  const usage = [];
+  for (const entry of o.usage) {
+    const u = projectUsage({ tool: o.tool, model: entry?.model, tokensInputDelta: entry?.tokensInputDelta,
+      tokensOutputDelta: entry?.tokensOutputDelta, estimated: entry?.estimated });
+    if (!u) return null;
+    usage.push({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta });
+  }
+  const input = usage.reduce((n, u) => n + u.tokensInputDelta, 0);
+  const output = usage.reduce((n, u) => n + u.tokensOutputDelta, 0);
+  if (!isCount(input) || !isCount(output) || input !== o.tokensInputDelta || output !== o.tokensOutputDelta) return null;
+  return { tool: o.tool, model: safeModel(o.model, o.tool), cwd: null, projectHint: safeAlias(o.projectHint),
+    confidence: "activity", lastActivityAt: Math.min(now, o.lastActivityAt), observedAt: Math.min(now, o.lastActivityAt),
+    tokensInputDelta: input, tokensOutputDelta: output, usage };
+}
+
+/** Only fresh, supported AI usage evidence. There is no editor/process fallback. */
 export class Detector {
   private adapters: Adapter[];
+  private cancellation: AbortController | null = null;
+  private generation = 0;
+  private activeWindowMs: number;
 
-  constructor(
-    private activeWindowMs: number,
-    /** Per-adapter ceiling for one poll. Injected by tests; see pollAdapter. */
-    private adapterTimeoutMs: number = ADAPTER_POLL_TIMEOUT_MS
-  ) {
-    this.adapters = [
-      new ClaudeCodeAdapter(activeWindowMs * 6), // scan a wider window so idle sessions still resolve
-      new CodexAdapter(activeWindowMs * 6),
-      // Quadcode appends only at turn boundaries and a single turn can run for hours,
-      // so its logs are scanned over a much wider window than the others. Stale files
-      // never become presence candidates (that still needs activity inside
-      // activeWindowMs) — they exist so the tool keeps its model and project while its
-      // own log is silent mid-turn. See identityFor below.
-      new QuadcodeAdapter(activeWindowMs * 72),
-      new ProcessAdapter(activeWindowMs),
-    ];
+  constructor(activeWindowMs: number, private adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
+    this.activeWindowMs = Math.min(Math.max(1, activeWindowMs), MAX_EVENT_AGE_MS);
+    this.adapters = [new ClaudeCodeAdapter(this.activeWindowMs), new CodexAdapter(this.activeWindowMs)];
   }
 
-  async detect(now = Date.now(), current?: CurrentSession): Promise<Detection | null> {
-    const results = await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs)));
-    const all = results.flat();
-    if (all.length === 0) return null;
+  clear(): void {
+    this.generation += 1;
+    this.cancellation?.abort();
+    for (const adapter of this.adapters) adapter.clear?.();
+  }
 
-    // --- token attribution -------------------------------------------------
+  async detect(
+    now = Date.now(), current?: CurrentSession, allowed: (observation: Observation) => boolean = () => true, signal?: AbortSignal
+  ): Promise<Detection | null> {
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.cancellation?.abort();
+    this.cancellation = controller;
+    const cancel = (): void => controller.abort();
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) cancel();
+    let results: Observation[][];
+    try {
+      results = await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs, now, controller.signal)));
+    } finally { signal?.removeEventListener("abort", cancel); }
+    if (controller.signal.aborted || generation !== this.generation) return null;
+    // Hidden sources are removed BEFORE tokens, source lists or selection are built.
+    const all = results.flat().map((o) => projectObservation(o, now, this.activeWindowMs))
+      .filter((o): o is Observation => o !== null).filter(allowed);
+    if (!all.length) return null;
     const usage = new Map<string, DetectionUsage>();
-    let tokensIn = 0;
-    let tokensOut = 0;
-    for (const o of all) {
-      tokensIn += o.tokensInputDelta;
-      tokensOut += o.tokensOutputDelta;
-      for (const u of o.usage) {
-        if (u.tokensInputDelta <= 0 && u.tokensOutputDelta <= 0) continue;
-        const key = usageKey(o.tool, u.model);
-        const bucket = usage.get(key) ?? { tool: o.tool, model: u.model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-        bucket.tokensInputDelta += u.tokensInputDelta;
-        bucket.tokensOutputDelta += u.tokensOutputDelta;
-        if (u.estimated) bucket.estimated = true;
-        usage.set(key, bucket);
-      }
+    let input = 0;
+    let output = 0;
+    for (const o of all) for (const u of o.usage) {
+      if (!(u.tokensInputDelta || u.tokensOutputDelta)) continue;
+      const key = usageKey(o.tool, u.model);
+      if ((!usage.has(key) && usage.size >= MAX_USAGE_ENTRIES) ||
+          !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta)) continue;
+      const previous = usage.get(key);
+      usage.set(key, { tool: o.tool, model: u.model,
+        tokensInputDelta: (previous?.tokensInputDelta ?? 0) + u.tokensInputDelta,
+        tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + u.tokensOutputDelta });
+      input += u.tokensInputDelta; output += u.tokensOutputDelta;
     }
-
-    // --- sources seen (for `vibehub-tracker status`) -----------------------
     const seen = new Map<string, SeenSource>();
-    const note = (
-      tool: string,
-      model: string | null,
-      at: number,
-      where?: { cwd: string | null; projectHint: string | null }
-    ) => {
-      const key = usageKey(tool, model);
-      const prev = seen.get(key);
-      if (!prev || at > prev.lastSeenAt) {
-        seen.set(key, { tool, model, lastSeenAt: at, cwd: where?.cwd ?? prev?.cwd, projectHint: where?.projectHint ?? prev?.projectHint });
+    for (const o of all) {
+      for (const model of new Set([o.model, ...o.usage.map((u) => u.model)])) {
+        const key = usageKey(o.tool, model);
+        if (!seen.has(key) || seen.get(key)!.lastSeenAt < o.lastActivityAt) {
+          seen.set(key, { tool: o.tool, model, lastSeenAt: o.lastActivityAt, cwd: null, projectHint: o.projectHint });
+        }
       }
-    };
-    const sightingOf = (o: Observation) => Math.max(o.lastActivityAt, o.observedAt ?? 0, hasTokens(o) ? now : 0);
-    for (const o of all) {
-      const where = { cwd: o.cwd, projectHint: o.projectHint };
-      note(o.tool, o.model, sightingOf(o), where);
-      for (const u of o.usage) if (u.model !== o.model) note(o.tool, u.model, now, where);
     }
-
-    // A tool can be plainly open while its own log is silent — Quadcode appends only
-    // at turn boundaries, so a multi-hour turn writes nothing and the only *fresh*
-    // sighting is the process one, which knows no model and no project. Left alone,
-    // the tool's model and project age out of `sources` (and therefore out of the
-    // heartbeat's tools[] and the `status` "Seeing:" line) while the user is still
-    // sitting in it.
-    //
-    // So for each tool whose freshest sighting lacks a model, re-note its best-known
-    // identity at *that sighting's* time. The timestamp is when the tool was last seen,
-    // not when the model line was written — which is exactly what "this tool is open,
-    // and this is what it is" should mean.
-    const freshestByTool = new Map<string, Observation>();
-    for (const o of all) {
-      const prev = freshestByTool.get(o.tool);
-      if (!prev || sightingOf(o) > sightingOf(prev)) freshestByTool.set(o.tool, o);
-    }
-    for (const [tool, freshest] of freshestByTool) {
-      if (freshest.model !== null) continue;
-      const identity = identityFor(freshest, all);
-      if (identity.model === null) continue;
-      note(tool, identity.model, sightingOf(freshest), { cwd: identity.cwd, projectHint: identity.projectHint });
-    }
-
-    // --- presence selection ------------------------------------------------
-    const fresh = (o: Observation) => now - o.lastActivityAt <= this.activeWindowMs;
-    const candidates = all.filter((o) => o.confidence === "activity" && fresh(o));
-
     let pick: Observation | null = null;
-
-    if (current) {
-      const same = candidates.filter((c) => c.tool === current.tool);
-      const anotherToolBurned = candidates.some((c) => c.tool !== current.tool && hasTokens(c));
-      if (same.length > 0 && !anotherToolBurned) pick = bestForCurrent(same, current);
+    if (current && !all.some((o) => o.tool !== current.tool && hasTokens(o))) {
+      const same = all.filter((o) => o.tool === current.tool);
+      const inProject = same.filter((o) => o.projectHint === current.projectHint);
+      pick = newest(inProject.filter(hasTokens)) ?? newest(same.filter(hasTokens)) ?? newest(inProject) ?? newest(same);
     }
-
-    if (!pick) {
-      const logBacked = candidates.filter(isLogBacked);
-      pick = newest(logBacked.filter(hasTokens)) ?? newest(logBacked) ?? newest(candidates);
-    }
-
-    const active = pick !== null;
-    if (!pick) pick = newest(all);
+    pick ??= newest(all.filter(hasTokens)) ?? newest(all);
     if (!pick) return null;
-
-    // A tool's *process* is visible continuously, but its *log* only speaks in bursts:
-    // Quadcode appends a record at turn boundaries, so a long turn writes nothing for
-    // minutes while the window stays open. When the process observation wins in that
-    // gap it knows the tool is open but neither the model nor the project, and presence
-    // would drop to "Quadcode AI, unknown project, no model" mid-turn.
-    //
-    // So fill only what the pick is missing from the freshest other observation of the
-    // SAME tool. This never overrides an established value and never crosses tools —
-    // it just stops a tool's identity flickering away between its own log writes.
-    const identity = identityFor(pick, all);
-
-    return {
-      tool: pick.tool,
-      model: identity.model,
-      cwd: identity.cwd,
-      projectHint: identity.projectHint,
-      active,
-      lastActivityAt: pick.lastActivityAt,
-      tokensInputDelta: tokensIn,
-      tokensOutputDelta: tokensOut,
-      usage: [...usage.values()],
-      seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt),
-    };
+    return { tool: pick.tool, model: pick.model, cwd: null, projectHint: pick.projectHint, active: true,
+      lastActivityAt: pick.lastActivityAt, tokensInputDelta: input, tokensOutputDelta: output,
+      usage: [...usage.values()], seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, MAX_USAGE_ENTRIES) };
   }
-}
-
-/**
- * The best-known identity for the picked observation's tool: its own values, with any
- * null filled from the freshest *other* observation of the same tool that does know
- * it. Fills only nulls, so a log adapter that named a model and project keeps them
- * even when a process observation happens to be the freshest evidence this poll.
- */
-function identityFor(
-  pick: Observation,
-  all: Observation[]
-): { model: string | null; cwd: string | null; projectHint: string | null } {
-  const identity = { model: pick.model, cwd: pick.cwd, projectHint: pick.projectHint };
-  if (identity.model !== null && identity.cwd !== null) return identity;
-
-  const sameTool = all
-    .filter((o) => o !== pick && o.tool === pick.tool)
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-
-  for (const o of sameTool) {
-    if (identity.model === null && o.model !== null) identity.model = o.model;
-    if (identity.cwd === null && o.cwd !== null) {
-      identity.cwd = o.cwd;
-      // cwd wins over a window-title hint, so drop a hint that would now be ignored.
-      identity.projectHint = null;
-    }
-    if (identity.model !== null && identity.cwd !== null) break;
-  }
-  if (identity.projectHint === null && identity.cwd === null) {
-    const hinted = sameTool.find((o) => o.projectHint !== null);
-    if (hinted) identity.projectHint = hinted.projectHint;
-  }
-  return identity;
-}
-
-/** Same tool as the current session: current project > tokens this poll > newest. */
-function bestForCurrent(same: Observation[], current: CurrentSession): Observation | null {
-  const sameProject = (o: Observation): boolean =>
-    current.cwd !== null
-      ? o.cwd === current.cwd
-      : o.cwd === null && current.projectHint !== null && o.projectHint === current.projectHint;
-
-  const inProject = same.filter(sameProject);
-  return (
-    newest(inProject.filter(hasTokens)) ??
-    newest(same.filter(hasTokens)) ??
-    newest(inProject) ??
-    newest(same)
-  );
 }

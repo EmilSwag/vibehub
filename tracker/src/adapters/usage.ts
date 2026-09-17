@@ -1,57 +1,34 @@
+import { countOrZero, isCount, MAX_USAGE_ENTRIES, safeModel } from "../privacy";
 import type { UsageDelta } from "./types";
 
-/**
- * Model ids that must never be reported as "the model": Claude Code writes
- * `"<synthetic>"` for locally generated assistant lines (aborts, tool-result
- * stubs), and older logs / other tools sometimes write "" or "unknown". Tokens
- * on such lines are still real spend, so they are bucketed under `null` rather
- * than dropped. Matches the server's own normalisation (see the heartbeat v2
- * contract in ../../README.md).
- */
-export function normalizeModel(model: string | null | undefined): string | null {
-  if (typeof model !== "string") return null;
-  const m = model.trim();
-  if (!m || m === "<synthetic>" || m.toLowerCase() === "unknown") return null;
-  return m;
-}
+/** Unknown and synthetic model IDs stay unknown; no trimming or family inference. */
+export function normalizeModel(model: unknown): string | null { return safeModel(model); }
 
-/** Accumulates per-model token deltas; `toList()` returns only nonzero buckets. */
+/** Measured, bounded counts only. No content-derived estimates or malformed values. */
 export class UsageAccumulator {
   private buckets = new Map<string, UsageDelta>();
 
-  /**
-   * `estimated` marks counts the adapter derived rather than read (Quadcode logs
-   * carry no token numbers). It is sticky per bucket: once any contribution to a
-   * (model) bucket is an estimate the whole bucket is reported as estimated,
-   * because the two cannot be told apart downstream.
-   */
-  add(model: string | null, tokensInputDelta: number, tokensOutputDelta: number, estimated = false): void {
-    const key = model ?? "";
-    const b = this.buckets.get(key) ?? { model, tokensInputDelta: 0, tokensOutputDelta: 0 };
-    b.tokensInputDelta += tokensInputDelta;
-    b.tokensOutputDelta += tokensOutputDelta;
-    if (estimated) b.estimated = true;
-    this.buckets.set(key, b);
+  add(model: string | null, input: number, output: number, estimated = false): boolean {
+    if (estimated || !isCount(input) || !isCount(output) ||
+        !isCount(this.totalInput + input) || !isCount(this.totalOutput + output)) return false;
+    const knownModel = safeModel(model);
+    const key = knownModel ?? "";
+    if (!this.buckets.has(key) && this.buckets.size >= MAX_USAGE_ENTRIES) return false;
+    const previous = this.buckets.get(key);
+    this.buckets.set(key, {
+      model: knownModel,
+      tokensInputDelta: (previous?.tokensInputDelta ?? 0) + input,
+      tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + output,
+    });
+    return true;
   }
 
   toList(): UsageDelta[] {
-    return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0);
+    return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0)
+      .map((u) => ({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta }));
   }
-
-  get totalInput(): number {
-    let n = 0;
-    for (const u of this.buckets.values()) n += u.tokensInputDelta;
-    return n;
-  }
-
-  get totalOutput(): number {
-    let n = 0;
-    for (const u of this.buckets.values()) n += u.tokensOutputDelta;
-    return n;
-  }
+  get totalInput(): number { return [...this.buckets.values()].reduce((n, u) => n + u.tokensInputDelta, 0); }
+  get totalOutput(): number { return [...this.buckets.values()].reduce((n, u) => n + u.tokensOutputDelta, 0); }
 }
 
-/** Non-negative integer, or 0 for anything malformed (server rejects negatives/floats). */
-export function asCount(n: unknown): number {
-  return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
-}
+export function asCount(value: unknown): number { return countOrZero(value); }

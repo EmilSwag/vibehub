@@ -7,11 +7,15 @@ import * as path from "node:path";
 //
 // Privacy invariant (do not break): only projectAlias, tool, model, token counts, and
 // timestamps ever leave this process — never a file path, file content, diff, or
-// prompt. See ../docs/ARCHITECTURE.md §3.
+// prompt. The default collector reads only supported Claude Code/Codex log roots.
+// Complete JSONL records may transiently contain conversation content; only an
+// explicit metadata allowlist survives. No process/window/OS-idle/git discovery.
+// Legacy public history is not erased or made trustworthy by this restriction.
 
 import { DEFAULT_API_URL, deleteConfig, readConfig, requireConfig, writeConfig } from "./config";
 import { daemonStatus, runForeground, startDaemon, stopDaemon } from "./daemon";
 import { HIDDEN } from "./projectAlias";
+import { MAX_EVENT_AGE_MS, safeApiOrigin, safeDeviceToken } from "./privacy";
 import { readStatus, writeOfflineStatus } from "./statusFile";
 import { describeSources } from "./toolLabels";
 import type { TrackerConfig } from "./types";
@@ -20,7 +24,7 @@ const CONFIG_PATH_LABEL = "~/.vibehub/config.json";
 const STATUS_PATH_LABEL = "~/.vibehub/status.json";
 
 const program = new Command();
-program.name("vibehub-tracker").description("VibeHub local activity tracker");
+program.name("vibehub-tracker").description("VibeHub AI-session metadata tracker");
 
 /**
  * Round 5: validates the token against the server before trusting it, so a bad
@@ -32,8 +36,11 @@ program.name("vibehub-tracker").description("VibeHub local activity tracker");
  */
 async function verifyToken(apiUrl: string, deviceToken: string): Promise<{ ok: boolean; rejected: boolean; detail: string }> {
   try {
-    // Bounded: a stalled network must fail fast (saved anyway below), never hang setup.
-    const res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/v1/tracker/verify`, {
+    const origin = safeApiOrigin(apiUrl);
+    if (!origin || !safeDeviceToken(deviceToken)) return { ok: false, rejected: true, detail: "Invalid tracker configuration" };
+    // Bounded verification only; redirects must not forward credentials elsewhere.
+    const res = await fetch(`${origin}/api/v1/tracker/verify`, {
+      redirect: "error",
       headers: { Authorization: `Bearer ${deviceToken}` },
       signal: AbortSignal.timeout(15000),
     });
@@ -108,7 +115,7 @@ program
 
 program
   .command("start")
-  .description("poll for active coding-tool processes and send heartbeats")
+  .description("track supported Claude Code / Codex session-log metadata and send heartbeats")
   .action(async () => {
     requireConfig();
     await startDaemon(path.resolve(__filename));
@@ -129,7 +136,7 @@ program
 
     console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`);
     console.log(`Status:  ${status.status}`);
-    if (status.status !== "offline") {
+    if (status.status === "active") {
       console.log(`Project: ${status.projectAlias}`);
       console.log(`Tool:    ${status.tool}`);
       console.log(`Model:   ${status.model}`);
@@ -137,32 +144,29 @@ program
     }
     console.log(`Updated: ${status.updatedAt}`);
 
-    // What the daemon has actually observed in the last 10 minutes — every tool
-    // and every raw model id — so "the profile shows the wrong model" can be
-    // checked against the source instead of guessed at.
-    const seeingCutoff = Date.now() - 10 * 60 * 1000;
+    console.log("Scope:   supported AI-session activity only (Claude Code, Codex)");
+    const seeingCutoff = Date.now() - MAX_EVENT_AGE_MS;
     const seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
     if (seeing.length > 0) {
       console.log(`Seeing:  ${describeSources(seeing)}`);
     } else if (running) {
-      console.log("Seeing:  nothing in the last 10 min (no AI tool open, no Claude Code / Codex log activity)");
+      console.log("Seeing:  no recent supported AI usage records (AI-only idle; other apps are not observed)");
     }
 
-    // Round 5: a rejected or never-yet-successful token used to fail completely
-    // silently — the daemon "ran," the card just never flipped, with nothing
-    // anywhere saying why. `authRejected` is set/cleared on every send attempt
-    // (heartbeat.ts); a literal "Connected:" line also gives the connect-prompt
-    // an AI agent pastes something unambiguous to check for.
+    // Keep the installer-readable line. An accepted connection-v1 transport
+    // receipt is independent of login verification and supported AI activity.
+    const freshCheck = Date.parse(status.lastConnectionCheckAt ?? "") >= Date.now() - Math.max(90000, 3 * (config.heartbeatIntervalMs ?? 30000));
     if (status.authRejected) {
       console.log("Connected: no - token rejected by the server.");
       console.log("  Create a new token in VibeHub > Settings > Tracker, then run:");
       console.log("  vibehub-tracker login <newToken>");
     } else if (!running) {
       console.log("Connected: no - daemon isn't running. Run `vibehub-tracker start`.");
-    } else if (status.authRejected === false) {
+    } else if (status.connected && freshCheck) {
       console.log("Connected: yes");
+      console.log("  Recent server-accepted daemon connection; does not imply an active AI session.");
     } else {
-      console.log("Connected: not yet - waiting for the first heartbeat. Open an AI tool session and check again in ~30s.");
+      console.log("Connected: not yet - waiting for a successful daemon connection check; no AI activity is required.");
     }
   });
 

@@ -1,7 +1,7 @@
 # vibehub-tracker
 
-Node/TypeScript CLI that runs on a developer's machine, polls for known
-coding-tool processes, and reports heartbeats to the VibeHub server. Full
+Node/TypeScript CLI that runs on a developer's machine, reads local Claude Code
+and Codex session logs, and reports heartbeats to the VibeHub server. Full
 protocol: [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §4. Build order
 this scaffold followed: [`../docs/BUILD_PLAN.md`](../docs/BUILD_PLAN.md) §6.
 
@@ -22,8 +22,8 @@ BUILD_PLAN.md §2.2) and pass it to `login`.
 
 `status` also prints a `Seeing:` line — every tool and raw model id the daemon
 observed in the last 10 minutes, e.g.
-`Seeing:  Claude Code (claude-fable-5-1, claude-opus-5), Cursor`. If the profile
-shows a model you don't expect, this is where to check what was actually seen.
+`Seeing:  Claude Code (claude-fable-5-1, claude-opus-5), Codex (gpt-5-codex)`. If the
+profile shows a model you don't expect, this is where to check what was actually seen.
 
 ## Local files (`~/.vibehub/`)
 
@@ -141,17 +141,22 @@ an extended offline stretch can't grow the file without bound.
 
 ## Detection adapters (`src/adapters/`, merged by `src/detector.ts`)
 
-Four sources feed one decision per tick. Log adapters win because they know
-*what* happened; the process adapter only knows something is *open*.
+**Current status: only `claudeCode` and `codex` are wired into the active detector.**
+`quadcode` and `processes` exist as adapter source files, but `Detector`'s constructor
+(`src/detector.ts`) instantiates only `ClaudeCodeAdapter`/`CodexAdapter`, so neither
+contributes to detection today — see `meta/facts/vibehub-ai-only-privacy.md` for the
+AI-only collection contract this repo currently ships. Their rows and the "Windows
+process listing" / "Quadcode specifics" notes below describe that adapter source for
+if/when either is explicitly re-enabled, not current behavior.
 
-| Adapter | Source | Gives |
-|---|---|---|
-| `claudeCode` | `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`) | project (from `cwd`), model, **real token counts per model** (input + cache read/creation, output), precise timestamps |
-| `codex` | `~/.codex/sessions/**/*.jsonl` (or `CODEX_HOME`) | project, model, token deltas from running `token_count` totals, attributed to the model of the latest `turn_context` |
-| `quadcode` | `<QuadcodeAI root>/apps/<Project>/.quadcodeai/.data/chats/*.files/*.jsonl` (or `QUADCODE_HOME`) | project (nearest git repo, else folder), model from `variations[].model_name`, **estimated** token counts — these logs contain no token numbers |
-| `processes` | Windows: one PowerShell `Get-Process` call (see below); macOS/Linux `ps` + `lsof` on the editor's integrated-terminal shell | tool is open (Cursor, VS Code, Windsurf, Zed, Quadcode AI, ChatGPT, Grok), project from `"file - project - Cursor"` titles; never any tokens |
+| Adapter | Source | Gives | Active? |
+|---|---|---|---|
+| `claudeCode` | `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`) | project (from `cwd`), model, **real token counts per model** (input + cache read/creation, output), precise timestamps | Yes |
+| `codex` | `~/.codex/sessions/**/*.jsonl` (or `CODEX_HOME`) | project, model, token deltas from running `token_count` totals, attributed to the model of the latest `turn_context` | Yes |
+| `quadcode` | `<QuadcodeAI root>/apps/<Project>/.quadcodeai/.data/chats/*.files/*.jsonl` (or `QUADCODE_HOME`) | project (nearest git repo, else folder), model from `variations[].model_name`, **estimated** token counts — these logs contain no token numbers | No |
+| `processes` | Windows: one PowerShell `Get-Process` call (see below); macOS/Linux `ps` + `lsof` on the editor's integrated-terminal shell | tool is open (Cursor, VS Code, Windsurf, Zed, Quadcode AI, ChatGPT, Grok), project from `"file - project - Cursor"` titles; never any tokens | No |
 
-**Quadcode specifics.** The log's own timestamp is the turn *start* and the line is
+**Quadcode specifics (inactive; not constructed by `Detector`).** The log's own timestamp is the turn *start* and the line is
 only appended once the turn ends (one observed record spanned 3h47m), so the **file
 append** is the activity signal, not the timestamp. Nothing is appended during a long
 turn — the `processes` adapter carries presence then. Estimation strips
@@ -162,7 +167,7 @@ names the chat model, and a media call names a meta-section id whose model lives
 file on disk. Logs embed base64 uploads inline, so appends over 8 MB and records over
 2 MB are skipped rather than read.
 
-**Windows process listing.** `tasklist /v` resolves every window title
+**Windows process listing (inactive; not constructed by `Detector`).** `tasklist /v` resolves every window title
 synchronously and was measured at ~54 s per call on a busy machine — longer than
 the 30 s tick. The adapter now runs a single
 `powershell.exe -NoProfile -NonInteractive -Command "Get-Process | Where-Object { $_.MainWindowTitle -or ($n -contains $_.ProcessName) } | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress"`
@@ -195,7 +200,11 @@ Rules:
   the next heartbeat's `usage`, even if a different tool is the "current"
   activity — Claude tokens are never booked under Cursor just because Cursor's
   window title changed last.
-- **Presence** (the one activity reported at the top level of the payload):
+- **Presence** (the one activity reported at the top level of the payload). The rules
+  below were written when `processes`/`quadcode` could also feed candidates; with only
+  the two active log adapters, "window title changed" and "process-only" candidates do
+  not currently occur, but the same tool/project hysteresis applies between Claude Code
+  and Codex:
   1. Candidates are observations with `activity` confidence whose evidence is
      inside `idleThresholdMs` (default 5 min): a log line, or a window title that
      changed. An editor left open with a static title decays to idle;
@@ -255,7 +264,9 @@ is populated server-side from the GitHub API instead (ARCHITECTURE.md §2.12).
 
 ## Privacy invariant
 
-No file path, file content, diff, or prompt text is ever read into a payload
-sent to the server or written to `status.json` — only `projectAlias` (a name,
-derived from a folder **basename**, never a full path), `tool`, `model`, token
-*counts*, and timestamps. See ARCHITECTURE.md §3.
+Local parsing may temporarily read complete records from `~/.claude/projects` and
+`~/.codex/sessions` JSONL, which can contain prompts, code and tool output — those
+contents are never saved to `status.json`/`queue.json` or sent to the server. Only
+`projectAlias` (a name, derived from a folder **basename**, never a full path), `tool`,
+`model`, token *counts*, and timestamps leave the local read into a payload or local
+state file. See ARCHITECTURE.md §3.
