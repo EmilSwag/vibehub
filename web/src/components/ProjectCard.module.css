@@ -1,4 +1,10 @@
+.name,
+.description {
+  overflow-wrap: anywhere;
+}
+
 .card {
+  min-width: 0;
   background: var(--vh-surface);
   border: 1px solid var(--vh-border);
   border-radius: var(--vh-radius-lg);
@@ -16,7 +22,17 @@
   display: block;
 }
 
+.socialCover {
+  /* GitHub's wide social card contains text: don't crop its name or repo facts. */
+  object-fit: contain;
+}
+
+.description.repoDescription {
+  color: color-mix(in srgb, var(--vh-text-dim) 75%, var(--vh-text-faint));
+}
+
 .body {
+  min-width: 0;
   padding: var(--vh-space-4);
   display: flex;
   flex-direction: column;

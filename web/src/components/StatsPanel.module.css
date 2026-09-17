@@ -1,17 +1,22 @@
 /* Equal rows: a wrapping model name must not make one tile taller than the rest.
-   The card holds nothing but these four tiles now — the per-model rows moved to
+   The card holds nothing but these five tiles now — the per-model rows moved to
    their own block (RecentModels.module.css), so there is no bottom margin to
    separate them from. */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   grid-auto-rows: 1fr;
   gap: var(--vh-space-3);
 }
 
+/* 5 into 2 columns leaves the last tile (Tokens · fuel) alone on its own row —
+   give it the full row instead of a lone half-width well. */
 @media (max-width: 640px) {
   .tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tiles > *:last-child {
+    grid-column: span 2;
   }
 }
 

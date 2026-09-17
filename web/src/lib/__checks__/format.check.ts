@@ -4,6 +4,8 @@
 // node-only imports so it also type-checks under web/tsconfig.json (DOM lib only).
 
 import {
+  clampWords,
+  formatCount,
   daysSince,
   elapsedShort,
   humanizeModel,
@@ -216,6 +218,34 @@ eq("presenceStatusLabel(active)", presenceStatusLabel("active"), "Online");
 eq("presenceStatusLabel(idle)", presenceStatusLabel("idle"), "Idle");
 eq("presenceStatusLabel(offline)", presenceStatusLabel("offline"), "Offline");
 eq("presenceStatusLabel(undefined)", presenceStatusLabel(undefined), "Offline");
+
+// ---- project-card excerpts / counts ----
+eq("clampWords empty", clampWords(""), "");
+eq("clampWords whitespace", clampWords(" \t\n "), "");
+eq("clampWords normalizes whitespace", clampWords("  alpha\n\t beta  "), "alpha beta");
+eq("clampWords exact fit", clampWords("alpha beta", 10), "alpha beta");
+eq("clampWords whole-word boundary", clampWords("alpha beta gamma", 12), "alpha beta…");
+eq("clampWords boundary at budget", clampWords("abc def", 4), "abc…");
+eq("clampWords no partial word", clampWords("alpha beta gamma", 10), "alpha…");
+eq("clampWords long token", clampWords("abcdefgh", 5), "abcd…");
+eq("clampWords one character", clampWords("abcd", 1), "…");
+eq("clampWords zero budget", clampWords("abcd", 0), "");
+eq("clampWords negative budget", clampWords("abcd", -5), "");
+eq("clampWords fractional budget", clampWords("abcdefgh", 5.8), "abcd…");
+eq("clampWords Unicode is not split", clampWords("😀😀😀😀", 3), "😀😀…");
+eq("clampWords preserves plain-text punctuation", clampWords("Ship it. It's ready!"), "Ship it. It's ready!");
+const readme = "A small project that helps people ship useful things. ".repeat(8);
+const excerpt = clampWords(readme);
+eq("clampWords default budget", excerpt.length <= 180, true);
+eq("clampWords ellipsis", excerpt.endsWith("…"), true);
+eq("clampWords source prefix", readme.startsWith(excerpt.slice(0, -1)), true);
+eq("clampWords idempotent", clampWords(excerpt), excerpt);
+eq("formatCount zero", formatCount(0), "0");
+eq("formatCount small", formatCount(42), "42");
+eq("formatCount below thousand", formatCount(999), "999");
+eq("formatCount thousand", formatCount(1000), "1k");
+eq("formatCount 1.2k", formatCount(1234), "1.2k");
+eq("formatCount million", formatCount(1_200_000), "1.2M");
 
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);

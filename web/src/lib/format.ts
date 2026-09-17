@@ -277,6 +277,27 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+/** Compact repository counts, with the same lowercase k used by token totals. */
+export function formatCount(n: number): string {
+  return new Intl.NumberFormat(LOCALE, { notation: "compact", maximumFractionDigits: 1 })
+    .format(n).replace(/K$/, "k");
+}
+
+/** Plain-text card excerpt, including the ellipsis in the budget. Keeps whole words
+ * where possible; a single overlong token is clipped without splitting surrogate pairs. */
+export function clampWords(raw: string, maxLength = 180): string {
+  const text = raw.trim().replace(/\s+/g, " ");
+  const limit = Math.max(0, Math.floor(maxLength));
+  if (!Number.isFinite(limit)) return text;
+  if (limit === 0) return "";
+  const chars = Array.from(text);
+  if (chars.length <= limit) return text;
+  const head = chars.slice(0, limit - 1).join("");
+  const boundary = head.lastIndexOf(" ");
+  const clipped = chars[limit - 1] === " " || boundary < 0 ? head : head.slice(0, boundary);
+  return `${clipped.trimEnd()}…`;
+}
+
 export function formatActiveTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);

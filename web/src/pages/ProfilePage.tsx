@@ -5,7 +5,8 @@ import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { projectsApi, usersApi, wallApi } from "../lib/api";
 import { safeHostname } from "../lib/format";
-import type { ExternalLink, LevelBreakdown, Project, User, WallComment as WallCommentType } from "../types";
+import { publicPresence } from "../lib/publicPresence";
+import type { ExternalLink, LevelBreakdown, PresenceStatus, Project, User, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { ArchetypeGlyph, archetypeBlurb, archetypeLabel } from "../components/ui/ArchetypeGlyph";
@@ -34,6 +35,13 @@ interface ProfileData {
   friendCount: number;
   level: number;
   levelBreakdown: LevelBreakdown;
+  /**
+   * Coarse fallback for a visitor who isn't self or a friend — the wire shape from
+   * `usersApi.get`, mirrored exactly (`lastSeenAt` required, unlike `publicPresence()`'s
+   * own deliberately looser `PublicPresenceSnapshot` parameter type). See
+   * `publicPresence()`.
+   */
+  presence?: { status: PresenceStatus; lastSeenAt: string | null };
 }
 
 /** Identity block placeholder — same four bands the loaded hero occupies, so the
@@ -170,7 +178,10 @@ export function ProfilePage() {
     return <p className={styles.notFound}>No profile at @{username}.</p>;
   }
 
-  const presence = presences.get(username);
+  // Self and friends: RealtimeContext's live map. Anyone else: the profile payload's own
+  // coarse snapshot, when the server sent one — never overrides a live entry, since the
+  // live map only ever holds self + accepted friends in the first place.
+  const presence = presences.get(username) ?? publicPresence(profile?.presence);
 
   // The page keeps one shape from the first frame — only the identity block swaps
   // skeleton for content, so nothing below it moves when the profile lands.
@@ -204,8 +215,11 @@ export function ProfilePage() {
 
               <span className={styles.username}>@{profile.user.username}</span>
 
-              {/* Only friends' presence is known to the client; anyone else gets no
-                  status rather than a misleading "Offline". */}
+              {/* Self and friends get RealtimeContext's live presence (status, activity,
+                  tools). Everyone else falls back to `publicPresence()` — the profile
+                  payload's own coarse, day/session-granular snapshot, which never carries
+                  activity/tool detail — and gets nothing at all when even that snapshot
+                  is absent (an older server, or someone who has never been online). */}
               {presence && (
                 <div className={styles.presenceRow}>
                   <PresenceBlock presence={presence} variant="hero" showLastSeen className={styles.presence} />

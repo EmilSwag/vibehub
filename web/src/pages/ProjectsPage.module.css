@@ -67,7 +67,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: var(--vh-space-4);
   /* Posts, not a table: a short card should not stretch to a long one's height. */
   align-items: start;

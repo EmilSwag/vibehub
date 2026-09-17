@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
 import { projectsApi } from "../lib/api";
 import { stagger, useExitTransition } from "../lib/motion";
+import { arrivalToast, externalArrivals } from "../lib/projectArrivals";
 import type { Project } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -19,6 +20,10 @@ export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const changedProjectIds = useRef(new Set<string>());
+  // Last snapshot's ids, so a later refresh can tell "always been there" apart from
+  // "just appeared" — null until the first load resolves. See lib/projectArrivals.ts.
+  const knownProjectIds = useRef<Set<string> | null>(null);
   const [composer, setComposer] = useState<{ open: boolean; editing: Project | null }>({
     open: false,
     editing: null,
@@ -30,16 +35,55 @@ export function ProjectsPage() {
 
   useEffect(() => {
     if (!user) return;
-    projectsApi
-      .list(user.username)
-      .then(({ projects, likedIds }) => {
-        setProjects(projects);
-        setLikedIds(new Set(likedIds));
-      })
-      .finally(() => setLoading(false));
-  }, [user]);
+    const username = user.username;
+    let active = true;
+
+    function refresh() {
+      return projectsApi
+        .list(username)
+        .then(({ projects, likedIds }) => {
+          if (!active) return;
+          // A slow snapshot can predate a successful publish/edit/delete/like.
+          // Keep local changes first, then fill in the untouched older projects.
+          const changed = changedProjectIds.current;
+          // PublishFromAI posts straight to the API from an external agent — this
+          // tab only learns about it here, on the next snapshot. Toast it exactly
+          // like a local publish, but only once (never on the first-ever load).
+          const arrived = externalArrivals(projects, knownProjectIds.current, changed);
+          const toast = arrivalToast(arrived);
+          if (toast) pushToast({ ...toast, href: `/u/${username}` });
+          knownProjectIds.current = new Set(projects.map((p) => p.id));
+
+          setProjects((prev) => [
+            ...prev.filter((project) => changed.has(project.id)),
+            ...projects.filter((project) => !changed.has(project.id)),
+          ]);
+          setLikedIds((prev) => new Set([
+            ...likedIds.filter((id) => !changed.has(id)),
+            ...[...prev].filter((id) => changed.has(id)),
+          ]));
+        })
+        .catch(() => undefined)
+        .finally(() => { if (active) setLoading(false); });
+    }
+
+    void refresh();
+    // Catches the common case: copy the AI-publish prompt, alt-tab to the agent, come
+    // back — the tab regaining visibility is the one moment worth re-checking without
+    // polling the whole time it's in the background.
+    function onVisible() {
+      if (document.visibilityState === "visible") void refresh();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user, pushToast]);
 
   function saved(project: Project) {
+    changedProjectIds.current.add(project.id);
+    setLoading(false);
     setProjects((prev) => {
       const exists = prev.some((p) => p.id === project.id);
       return exists ? prev.map((p) => (p.id === project.id ? project : p)) : [project, ...prev];
@@ -55,12 +99,14 @@ export function ProjectsPage() {
   async function remove(project: Project) {
     if (!window.confirm(`Delete “${project.name}”? This can't be undone.`)) return;
     await projectsApi.remove(project.id);
+    changedProjectIds.current.add(project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
   }
 
   async function toggleLike(project: Project) {
     const liked = likedIds.has(project.id);
     const { likeCount } = liked ? await projectsApi.unlike(project.id) : await projectsApi.like(project.id);
+    changedProjectIds.current.add(project.id);
     setLikedIds((prev) => {
       const next = new Set(prev);
       if (liked) next.delete(project.id);

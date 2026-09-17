@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, projectsApi } from "../../lib/api";
 import { stagger } from "../../lib/motion";
-import type { RepoTree } from "../../types";
+import type { RepoLanguage, RepoTree } from "../../types";
+import { languagePercent as percent, languageShade as shadeFor } from "../../lib/repoLanguages";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import styles from "./RepoBrowser.module.css";
@@ -20,17 +21,13 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
-/** Strict monochrome: the share bar is one ink at descending opacity, never a hue.
- *  Index 0 is the dominant language and the darkest band. */
-const shadeFor = (index: number) => Math.max(0.14, 0.86 - index * 0.15);
-
 interface LanguageBand {
   name: string;
   share: number;
   shade: number;
 }
 
-function toBands(languages: { name: string; share: number }[]): LanguageBand[] {
+function toBands(languages: RepoLanguage[]): LanguageBand[] {
   const head = languages.slice(0, MAX_LANGUAGES);
   const tail = languages.slice(MAX_LANGUAGES);
   const bands = head.map((l, i) => ({ name: l.name, share: l.share, shade: shadeFor(i) }));
@@ -39,9 +36,7 @@ function toBands(languages: { name: string; share: number }[]): LanguageBand[] {
   return bands;
 }
 
-const percent = (share: number) => `${(share * 100).toFixed(share >= 0.1 ? 0 : 1)}%`;
-
-function Languages({ languages }: { languages: { name: string; share: number }[] }) {
+function Languages({ languages }: { languages: RepoLanguage[] }) {
   const bands = toBands(languages);
   if (bands.length === 0) return null;
 

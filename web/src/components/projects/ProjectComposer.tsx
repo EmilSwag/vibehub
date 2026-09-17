@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { projectsApi } from "../../lib/api";
+import { isHttpUrl, normalizeProjectUrl } from "../../lib/projectUrl";
 import type { GithubRepoSummary, Project, User } from "../../types";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
@@ -45,7 +46,10 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [urlErrors, setUrlErrors] = useState<Partial<Record<"repoUrl" | "liveUrl", string>>>({});
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const previewRepoUrl = normalizeProjectUrl(form.repoUrl);
+  const previewLiveUrl = normalizeProjectUrl(form.liveUrl);
 
   const localUrls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
   useEffect(() => () => localUrls.forEach((u) => URL.revokeObjectURL(u)), [localUrls]);
@@ -53,11 +57,14 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
   const allImages = [...existingUrls, ...localUrls];
   const slotsLeft = MAX_IMAGES - allImages.length;
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "repoUrl" || key === "liveUrl") setUrlErrors((prev) => ({ ...prev, [key]: undefined }));
+  };
 
   // Fills the URL and, only where the user hasn't typed anything yet, name/description too.
   function pickRepo(repo: GithubRepoSummary) {
+    setUrlErrors((prev) => ({ ...prev, repoUrl: undefined }));
     setForm((prev) => ({
       ...prev,
       repoUrl: repo.htmlUrl,
@@ -88,8 +95,8 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
     slug: "draft",
     name: form.name.trim() || "Untitled project",
     description: form.description.trim() || null,
-    repoUrl: form.repoUrl.trim() || null,
-    liveUrl: form.liveUrl.trim() || null,
+    repoUrl: previewRepoUrl && isHttpUrl(previewRepoUrl) ? previewRepoUrl : null,
+    liveUrl: previewLiveUrl && isHttpUrl(previewLiveUrl) ? previewLiveUrl : null,
     coverImageUrl: allImages[0] ?? null,
     imageUrls: allImages,
     isPublic: form.isPublic,
@@ -100,14 +107,26 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || saving) return;
-    setSaving(true);
     setError(null);
+    const repoUrl = normalizeProjectUrl(form.repoUrl);
+    const liveUrl = normalizeProjectUrl(form.liveUrl);
+    const invalidRepo = repoUrl !== null && !isHttpUrl(repoUrl);
+    const invalidLive = liveUrl !== null && !isHttpUrl(liveUrl);
+    setUrlErrors({
+      repoUrl: invalidRepo ? "Repo URL should look like github.com/you/project" : undefined,
+      liveUrl: invalidLive ? "Live URL should look like example.com/project" : undefined,
+    });
+    if (invalidRepo || invalidLive) {
+      e.currentTarget.querySelector<HTMLInputElement>(invalidRepo ? "#p-repo" : "#p-live")?.focus();
+      return;
+    }
+    setSaving(true);
     try {
       const body = {
         name: form.name.trim(),
         description: form.description.trim() || undefined,
-        repoUrl: form.repoUrl.trim() || undefined,
-        liveUrl: form.liveUrl.trim() || undefined,
+        repoUrl: repoUrl ?? undefined,
+        liveUrl: liveUrl ?? undefined,
         isPublic: form.isPublic,
       };
       let project: Project;
@@ -116,8 +135,8 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
         ({ project } = await projectsApi.update(editing.id, {
           name: body.name,
           description: body.description ?? "",
-          repoUrl: body.repoUrl ?? "",
-          liveUrl: body.liveUrl ?? "",
+          repoUrl,
+          liveUrl,
           isPublic: body.isPublic,
           ...(removed.length ? { imageUrls: existingUrls } : {}),
         }));
@@ -181,13 +200,17 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
             </div>
             <Input
               id="p-repo"
-              type="url"
               inputMode="url"
+              autoCapitalize="off"
+              spellCheck={false}
               value={form.repoUrl}
               onChange={(e) => set("repoUrl", e.target.value)}
-              placeholder="https://github.com/you/project"
+              placeholder="github.com/you/project"
+              aria-invalid={Boolean(urlErrors.repoUrl)}
+              aria-describedby={urlErrors.repoUrl ? "p-repo-hint p-repo-error" : "p-repo-hint"}
             />
-            <span className={styles.hint}>GitHub repos show recent pushes on the card.</span>
+            <span id="p-repo-hint" className={styles.hint}>Paste github.com/you/project — the card fills itself from the repo.</span>
+            {urlErrors.repoUrl && <p id="p-repo-error" className={styles.error} role="alert">{urlErrors.repoUrl}</p>}
           </div>
           <div>
             <FieldLabel htmlFor="p-live">
@@ -196,12 +219,16 @@ export function ProjectComposer({ owner, editing, onSaved, onCancel }: Props) {
             </FieldLabel>
             <Input
               id="p-live"
-              type="url"
               inputMode="url"
+              autoCapitalize="off"
+              spellCheck={false}
               value={form.liveUrl}
               onChange={(e) => set("liveUrl", e.target.value)}
-              placeholder="https://…"
+              placeholder="example.com/project"
+              aria-invalid={Boolean(urlErrors.liveUrl)}
+              aria-describedby={urlErrors.liveUrl ? "p-live-error" : undefined}
             />
+            {urlErrors.liveUrl && <p id="p-live-error" className={styles.error} role="alert">{urlErrors.liveUrl}</p>}
           </div>
         </div>
 

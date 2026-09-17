@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { statsApi } from "../lib/api";
-import { formatActiveTime, formatTokens, humanizeModel, modelFamily } from "../lib/format";
+import { formatActiveTime, formatTokens, humanizeModel, modelFamily, toolFamily, toolLabel } from "../lib/format";
 import { estimateTokenCost, isValidTokenCount } from "../lib/tokenCost";
+import { topToolOf, topToolShare } from "../lib/topTool";
 import type { UserStats } from "../types";
 import { Button } from "./ui/Button";
 import { ModelGlyph } from "./ui/ModelGlyph";
 import { StatTile } from "./ui/StatTile";
+import { ToolGlyph } from "./ui/ToolGlyph";
 import { TokenCost, TokenCostDetails } from "./ui/TokenCost";
 import styles from "./StatsPanel.module.css";
 
@@ -23,6 +25,10 @@ function Tiles({ stats, onTopModel }: TilesProps) {
   // no translation is needed between the two blocks — but a model the server cannot
   // name has no row to jump to, and the tile goes back to being a number.
   const topModel = stats ? humanizeModel(stats.topModel) : null;
+  // Ranked by active time, not clickable (no Models-block equivalent row to jump to).
+  // `topToolOf`/`topToolShare` already fold in the older-server byModel fallback.
+  const topTool = stats ? topToolOf(stats) : null;
+  const toolShare = stats ? topToolShare(stats) : null;
   // This response's own range and original input/output rows, not lifetime/presence.
   const cost = estimateTokenCost(stats?.byModel, stats?.totalTokens);
 
@@ -39,6 +45,14 @@ function Tiles({ stats, onTopModel }: TilesProps) {
           onClick={topModel && onTopModel ? () => onTopModel(topModel) : undefined}
           actionLabel={topModel ? `${topModel} — show it in Models` : undefined}
         />
+        <StatTile
+          label="Top tool"
+          kind="text"
+          loading={loading}
+          value={stats ? (topTool ? toolLabel(topTool) : "—") : undefined}
+          mark={topTool && <ToolGlyph family={toolFamily(topTool)} size={18} />}
+          companion={toolShare !== null ? `${Math.round(toolShare * 100)}% of time` : undefined}
+        />
         <StatTile label="Streak" loading={loading} value={stats ? `${stats.streak.currentStreak}d` : undefined} />
         <StatTile
           label="Tokens · fuel"
@@ -54,7 +68,7 @@ function Tiles({ stats, onTopModel }: TilesProps) {
 }
 
 /**
- * The profile's overall numbers — four tiles and their API estimate disclosure.
+ * The profile's overall numbers — five tiles and their API estimate disclosure.
  * The per-model breakdown is its own block (`RecentModels`, round 7): one card
  * answers "how much", the next answers "with what".
  */

@@ -10,8 +10,10 @@ import type {
   LevelBreakdown,
   Project,
   Presence,
+  PresenceStatus,
   PresenceTool,
   RepoActivity,
+  RepoDigest,
   RepoTree,
   SuggestedUser,
   TrackerStatus,
@@ -110,6 +112,13 @@ export const usersApi = {
       friendCount: number;
       level: number;
       levelBreakdown: LevelBreakdown;
+      /**
+       * Coarse (day/session-granular, not live) presence snapshot for a public visitor
+       * who isn't self or a friend — RealtimeContext's `presences` map has no entry for
+       * them. Optional: a server older than this round omits it, and so does a user
+       * who has never been online. See `lib/publicPresence.ts`.
+       */
+      presence?: { status: PresenceStatus; lastSeenAt: string | null };
     }>(`/api/v1/users/${encodeURIComponent(username)}`),
 
   /** People you might know (not me, not friends, no pending request). `invitedIds` = already invited by me. */
@@ -238,6 +247,10 @@ export const projectsApi = {
   get: (id: string) =>
     request<{ project: Project; owner: User; liked: boolean }>(`/api/v1/projects/${id}`),
   commits: (id: string) => request<RepoActivity>(`/api/v1/projects/${id}/commits`),
+  /** Optional card enrichment; unavailable/private repos are omitted by the card. */
+  digest: (id: string) => request<RepoDigest>(`/api/v1/projects/${encodeURIComponent(id)}/digest`, {
+    signal: AbortSignal.timeout(8000),
+  }),
   /**
    * One directory level of the project's GitHub repo (round 7). `path` is a repo
    * subpath, "" for the root. Public projects answer signed-out, same gate as
@@ -249,7 +262,7 @@ export const projectsApi = {
     request<RepoTree>(
       `/api/v1/projects/${id}/repo${path ? `?path=${encodeURIComponent(path)}` : ""}`
     ),
-  update: (id: string, body: Partial<{ name: string; description: string; repoUrl: string; liveUrl: string; isPublic: boolean; imageUrls: string[]; coverImageUrl: string | null }>) =>
+  update: (id: string, body: Partial<{ name: string; description: string; repoUrl: string | null; liveUrl: string | null; isPublic: boolean; imageUrls: string[]; coverImageUrl: string | null }>) =>
     request<{ project: Project }>(`/api/v1/projects/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),

@@ -240,6 +240,27 @@ export interface RepoTree {
   readme: RepoReadme | null;
 }
 
+/** GET /projects/:id/digest — optional GitHub enrichment for a project card. */
+export interface RepoDigest {
+  repo: { owner: string; repo: string };
+  url: string;
+  description: string | null;
+  homepage: string | null;
+  stars: number;
+  forks: number;
+  openIssues: number;
+  language: string | null;
+  languages: RepoLanguage[] | null;
+  topics: string[];
+  license: string | null;
+  defaultBranch: string;
+  createdAt: string | null;
+  pushedAt: string | null;
+  readme: RepoReadme | null;
+  socialImageUrl: string;
+  fetchedAt: string;
+}
+
 /** GET /users/me/github/repos row — the signed-in user's own GitHub repos (repo picker). */
 export interface GithubRepoSummary {
   fullName: string;
@@ -315,6 +336,20 @@ export interface StatByModel {
   lastActiveAt?: string | null;
 }
 
+/**
+ * One tool, summed across every model used inside it — the per-tool counterpart to
+ * `StatByModel`. `lastActiveAt` is always present (unlike `StatByModel`'s optional
+ * one) because a `UserStats` that sends `byTool` at all sends it fully computed;
+ * `null` means "known to have no activity in range", not "not computed".
+ */
+export interface StatByTool {
+  tool: string;
+  tokensInput: number;
+  tokensOutput: number;
+  activeSeconds: number;
+  lastActiveAt: string | null;
+}
+
 export interface GithubCommitDay {
   date: string;
   commitCount: number;
@@ -322,7 +357,26 @@ export interface GithubCommitDay {
 
 export interface UserStats {
   byModel: StatByModel[];
+  /**
+   * Pre-aggregated per-tool rollup. Optional because a server that predates this
+   * field doesn't send it — `lib/topTool.ts`'s `toolBuckets()` then aggregates
+   * `byModel` per `tool` client-side (summed tokens/activeSeconds, latest
+   * `lastActiveAt`) as an equivalent fallback, same convention as
+   * `StatByModel.lastActiveAt`'s own optionality. An explicitly empty `[]` is a real
+   * "nothing in range" answer and is used as-is, never treated as absent.
+   * See `[#plans.public-last-online-top-tool]`.
+   */
+  byTool?: StatByTool[];
   topModel: string | null;
+  /**
+   * Optional companion to `byTool` — the server's own precomputed leader. Omitted (or
+   * explicitly `null`) on a server that predates it, or one that sends `byTool` without
+   * a leader; `lib/topTool.ts`'s `topToolOf()` then falls back to the highest-ranked
+   * `toolBuckets()` entry either way — `??` treats an explicit `null` the same as a
+   * missing field here, deliberately: a leader is either named or derived, never left
+   * unresolved when the underlying data exists to derive one.
+   */
+  topTool?: string | null;
   totalTokens: number;
   totalActiveSeconds: number;
   streak: { currentStreak: number; longestStreak: number };

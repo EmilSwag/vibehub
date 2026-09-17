@@ -1,11 +1,14 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { formatShortDate } from "../lib/format";
+import { clampWords, formatShortDate } from "../lib/format";
+import { githubRepoOf } from "../lib/projectUrl";
+import { useProjectDigest } from "../lib/useProjectDigest";
 import type { Project, User } from "../types";
 import { Avatar } from "./ui/Avatar";
 import { Icon } from "./ui/Icon";
 import { ProjectCommits } from "./projects/ProjectCommits";
+import { ProjectDigest, ProjectDigestSkeleton } from "./projects/ProjectDigest";
 import styles from "./ProjectCard.module.css";
 
 interface Props {
@@ -17,7 +20,7 @@ interface Props {
   actions?: ReactNode;
   /** Lets a `.stagger` parent pass `--i` for the entrance delay. */
   style?: CSSProperties;
-  /** Composer preview: no network (commits), no like handler. */
+  /** Composer preview: no API calls or likes; a public GitHub social image may load. */
   previewMode?: boolean;
 }
 
@@ -30,14 +33,24 @@ function hostOf(url: string): string {
 }
 
 /**
- * The post. Cover = first screenshot; extra shots become a tappable strip that
- * swaps the cover. GitHub repos append a "pushes" strip fetched via our API.
+ * The post. Screenshots win over GitHub's social cover; extra shots stay tappable.
+ * Repo enrichment is optional and never replaces the author's own description.
  */
 export function ProjectCard({ project, owner, liked, onToggleLike, actions, style, previewMode }: Props) {
   const images = project.imageUrls.length ? project.imageUrls : project.coverImageUrl ? [project.coverImageUrl] : [];
   const [active, setActive] = useState(0);
-  const cover = images[Math.min(active, Math.max(0, images.length - 1))] ?? null;
-  const isGithub = /^https?:\/\/(www\.)?github\.com\//i.test(project.repoUrl ?? "");
+  const [failedSocialCover, setFailedSocialCover] = useState<string | null>(null);
+  const activeIndex = Math.min(active, Math.max(0, images.length - 1));
+  const imageCover = images[activeIndex] ?? null;
+  const repo = githubRepoOf(project.repoUrl);
+  const isGithub = repo !== null;
+  const socialCover = images.length === 0 && repo
+    ? `https://opengraph.githubassets.com/${encodeURIComponent(project.id)}/${repo.owner}/${repo.repo}`
+    : null;
+  const cover = imageCover ?? (socialCover !== failedSocialCover ? socialCover : null);
+  const { digest, loading: digestLoading } = useProjectDigest(project.id, project.repoUrl, previewMode);
+  const authoredDescription = project.description?.trim();
+  const description = authoredDescription || digest?.description?.trim() || clampWords(digest?.readme?.excerpt ?? "");
 
   return (
     <article className={styles.card} style={style}>
@@ -64,7 +77,15 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
             onClick={(e) => previewMode && e.preventDefault()}
             aria-label={project.name}
           >
-            <img key={cover} className={styles.cover} src={cover} alt="" loading="lazy" />
+            <img
+              key={cover}
+              className={[styles.cover, !imageCover && styles.socialCover].filter(Boolean).join(" ")}
+              src={cover}
+              alt=""
+              loading={previewMode ? "eager" : "lazy"}
+              referrerPolicy="no-referrer"
+              onError={socialCover ? () => setFailedSocialCover(socialCover) : undefined}
+            />
           </Link>
           {images.length > 1 && (
             <div className={styles.strip} role="tablist" aria-label="Screenshots">
@@ -73,8 +94,9 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
                   key={url}
                   type="button"
                   role="tab"
-                  aria-selected={i === active}
-                  className={[styles.thumb, i === active && styles.thumbActive].filter(Boolean).join(" ")}
+                  aria-label={`Screenshot ${i + 1}`}
+                  aria-selected={i === activeIndex}
+                  className={[styles.thumb, i === activeIndex && styles.thumbActive].filter(Boolean).join(" ")}
                   onClick={() => setActive(i)}
                 >
                   <img src={url} alt="" loading="lazy" />
@@ -95,7 +117,14 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
             {project.name}
           </Link>
         </h3>
-        {project.description && <p className={styles.description}>{project.description}</p>}
+        {description && (
+          <p
+            className={[styles.description, !authoredDescription && styles.repoDescription].filter(Boolean).join(" ")}
+            title={!authoredDescription ? "From the repo" : undefined}
+          >
+            {description}
+          </p>
+        )}
 
         {(project.repoUrl || project.liveUrl) && (
           <div className={styles.links}>
@@ -118,7 +147,8 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
           </div>
         )}
 
-        {isGithub && <ProjectCommits projectId={project.id} disabled={previewMode} />}
+        {digestLoading ? <ProjectDigestSkeleton /> : digest && <ProjectDigest digest={digest} />}
+        {isGithub && <ProjectCommits key={project.repoUrl} projectId={project.id} disabled={previewMode} />}
 
         <div className={styles.footer}>
           <button

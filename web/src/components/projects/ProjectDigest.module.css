@@ -1,0 +1,60 @@
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--vh-text-faint);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
+}
+
+.stat {
+  color: var(--vh-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-text);
+}
+
+.bar {
+  display: flex;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+}
+
+.band {
+  flex: none;
+  height: 100%;
+  background: var(--vh-text);
+}
