@@ -24,6 +24,11 @@ interface Props {
   previewMode?: boolean;
 }
 
+/** Two more tries after the first failure — 1.5 s, then 3 s. Measured: a busy
+ *  opengraph.githubassets.com fails in ~200 ms and serves the same URL fine moments later. */
+const SOCIAL_COVER_RETRIES = 2;
+const SOCIAL_COVER_RETRY_MS = 1500;
+
 function hostOf(url: string): string {
   try {
     return new URL(url).host.replace(/^www\./, "");
@@ -39,7 +44,10 @@ function hostOf(url: string): string {
 export function ProjectCard({ project, owner, liked, onToggleLike, actions, style, previewMode }: Props) {
   const images = project.imageUrls.length ? project.imageUrls : project.coverImageUrl ? [project.coverImageUrl] : [];
   const [active, setActive] = useState(0);
-  const [failedSocialCover, setFailedSocialCover] = useState<string | null>(null);
+  // GitHub renders the social card on first request and fails fast (~200 ms) when it
+  // is busy, so one error is not a verdict: remount the <img> a couple of times with a
+  // pause before giving up. `attempt` in the key forces the refetch; -1 means "gave up".
+  const [socialAttempt, setSocialAttempt] = useState(0);
   const activeIndex = Math.min(active, Math.max(0, images.length - 1));
   const imageCover = images[activeIndex] ?? null;
   const repo = githubRepoOf(project.repoUrl);
@@ -47,7 +55,14 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
   const socialCover = images.length === 0 && repo
     ? `https://opengraph.githubassets.com/${encodeURIComponent(project.id)}/${repo.owner}/${repo.repo}`
     : null;
-  const cover = imageCover ?? (socialCover !== failedSocialCover ? socialCover : null);
+  const cover = imageCover ?? (socialAttempt >= 0 ? socialCover : null);
+  const onSocialCoverError = () => {
+    if (socialAttempt >= SOCIAL_COVER_RETRIES) {
+      setSocialAttempt(-1);
+      return;
+    }
+    window.setTimeout(() => setSocialAttempt((a) => (a >= 0 ? a + 1 : a)), SOCIAL_COVER_RETRY_MS * (socialAttempt + 1));
+  };
   const { digest, loading: digestLoading } = useProjectDigest(project.id, project.repoUrl, previewMode);
   const authoredDescription = project.description?.trim();
   const description = authoredDescription || digest?.description?.trim() || clampWords(digest?.readme?.excerpt ?? "");
@@ -78,13 +93,13 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
             aria-label={project.name}
           >
             <img
-              key={cover}
+              key={imageCover ? cover : `${cover}#${socialAttempt}`}
               className={[styles.cover, !imageCover && styles.socialCover].filter(Boolean).join(" ")}
               src={cover}
               alt=""
               loading={previewMode ? "eager" : "lazy"}
               referrerPolicy="no-referrer"
-              onError={socialCover ? () => setFailedSocialCover(socialCover) : undefined}
+              onError={!imageCover ? onSocialCoverError : undefined}
             />
           </Link>
           {images.length > 1 && (
