@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { friendsApi, presenceApi } from "../lib/api";
 import { isCurrentAuth } from "../lib/authSession";
+import { mergeLastSeenAt } from "../lib/lastOnline";
 import { VibeHubSocket } from "../lib/ws";
 import { ToastStack } from "../components/ui/Toast";
 import { useAuth } from "./AuthContext";
@@ -153,6 +154,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           // undefined from a pre-round-6 server — readers call `toolsOf()`, which
           // falls back to the primary activity.
           tools: event.tools,
+          // Missing key means "unchanged" here, not "unknown"; an explicit null
+          // clears it. See lib/lastOnline.ts's mergeLastSeenAt for the rule and its
+          // synthetic (socket-free) test coverage.
+          lastSeenAt: mergeLastSeenAt(before?.lastSeenAt, event.lastSeenAt),
         });
         presencesRef.current = next;
         setPresences(next);

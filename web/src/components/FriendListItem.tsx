@@ -23,8 +23,9 @@ interface Props {
 
 /**
  * One friend: avatar · name · PresenceBlock (row) · faint "friends for N days".
- * Offline rows are one presence line tall, live rows four — the row grows, the
- * rhythm (16px padding, hairline divider, avatar pinned to the top) stays.
+ * Offline/idle rows are one presence line tall, two when a "Last online …" line
+ * has data to show; live rows four — the row grows, the rhythm (16px padding,
+ * hairline divider, avatar pinned to the top) stays.
  */
 export function FriendListItem({ user, daysAsFriends, presence, action, index }: Props) {
   return (
@@ -32,7 +33,7 @@ export function FriendListItem({ user, daysAsFriends, presence, action, index }:
       <Avatar src={user.avatarUrl} name={user.displayName} size={44} />
       <div className={styles.info}>
         <div className={styles.name}>{user.displayName}</div>
-        <PresenceBlock presence={presence} variant="row" />
+        <PresenceBlock presence={presence} variant="row" showLastSeen />
       </div>
       <div className={styles.side}>
         <span className={styles.meta}>friends for {daysAsFriends} days</span>

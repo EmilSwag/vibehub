@@ -32,18 +32,34 @@ const H = 3_600_000;
 // ---- fixtures ----
 const ME = { id: "u_me", username: "emil", displayName: "Emil", avatarUrl: "https://cdn/a.png" };
 
-const offline: PresenceSnapshot = { username: "emil", status: "offline", activity: null, tools: [] };
-const activeAt = (username: string, project: string, tool: string, model: string | null): PresenceSnapshot => ({
+const offline: PresenceSnapshot = { username: "emil", status: "offline", activity: null, tools: [], lastSeenAt: null };
+const activeAt = (
+  username: string,
+  project: string,
+  tool: string,
+  model: string | null,
+  lastSeenAt: string | null = at(11 * H).toISOString()
+): PresenceSnapshot => ({
   username,
   status: "active",
   activity: { projectAlias: project, tool, model, startedAt: at(10 * H).toISOString() },
   tools: [],
+  lastSeenAt,
 });
-const idleAt = (username: string): PresenceSnapshot => ({
+const idleAt = (username: string, lastSeenAt: string | null = at(11 * H).toISOString()): PresenceSnapshot => ({
   username,
   status: "idle",
   activity: { projectAlias: "dozing", tool: "cursor", model: null, startedAt: at(9 * H).toISOString() },
   tools: [],
+  lastSeenAt,
+});
+// Offline does not mean "never seen" — self can go offline after being seen earlier.
+const offlineSeenAt = (username: string, lastSeenAt: string | null): PresenceSnapshot => ({
+  username,
+  status: "offline",
+  activity: null,
+  tools: [],
+  lastSeenAt,
 });
 
 const base: TrackerMeInput = {
@@ -67,6 +83,8 @@ eq("presence.activity", full.presence.activity, {
   model: "claude-opus-5",
   since: at(10 * H).toISOString(),
 });
+eq("presence.lastSeenAt", full.presence.lastSeenAt, at(11 * H).toISOString());
+eq("presence keys", Object.keys(full.presence), ["status", "activity", "lastSeenAt"]);
 eq("today", full.today, {
   activeSeconds: 8_040,
   tokens: 125_000,
@@ -90,6 +108,16 @@ eq(
 const off = buildTrackerMePayload({ ...base, presence: offline });
 eq("connected(offline)", off.tracker.connected, false);
 eq("activity(offline) is null", off.presence.activity, null);
+eq("presence.lastSeenAt(never seen)", off.presence.lastSeenAt, null);
+
+// Offline is not the same as "never seen": self can be offline yet still report when
+// they were last online, exactly like an offline friend would if this route showed them.
+const staleOffline = buildTrackerMePayload({ ...base, presence: offlineSeenAt("emil", at(2 * H).toISOString()) });
+eq("presence.lastSeenAt survives while offline", staleOffline.presence, {
+  status: "offline",
+  activity: null,
+  lastSeenAt: at(2 * H).toISOString(),
+});
 
 // A presence-only tool reports no model: the segment degrades to null, and the tool is
 // never dropped (the tracker detection contract).
@@ -128,7 +156,7 @@ eq(
   }),
   {
     user: { id: "u_new", username: "newbie", displayName: null, avatarUrl: null, level: 1 },
-    presence: { status: "offline", activity: null },
+    presence: { status: "offline", activity: null, lastSeenAt: null },
     today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null },
     tracker: { connected: false, lastSeenAt: null, devices: [] },
     friendsOnline: { count: 0, sample: [] },
@@ -161,6 +189,7 @@ eq("friendsOnline.sample order + shape", mixed.friendsOnline.sample, [
     avatarUrl: null,
     status: "active",
     activity: { project: "atlas", tool: "codex", model: "gpt-5-codex", since: at(10 * H).toISOString() },
+    lastSeenAt: at(11 * H).toISOString(),
   },
   {
     username: "cy",
@@ -168,6 +197,7 @@ eq("friendsOnline.sample order + shape", mixed.friendsOnline.sample, [
     avatarUrl: null,
     status: "idle",
     activity: { project: "dozing", tool: "cursor", model: null, since: at(9 * H).toISOString() },
+    lastSeenAt: at(11 * H).toISOString(),
   },
 ]);
 

@@ -78,8 +78,19 @@ export interface TrackerStatus {
   tokenLastUsedAt: string | null;
   /** How often the tracker is expected to report; the UI can size its own polling on it. */
   heartbeatIntervalMs: number;
-  /** The viewer's own presence, same shape PresenceBlock takes. */
-  presence: { status: PresenceStatus; activity: Activity | null; tools?: PresenceTool[] };
+  /**
+   * The viewer's own presence, same shape PresenceBlock takes. `lastSeenAt` is
+   * optional (like `tools?`) rather than required: `GET /users/me/tracker`'s
+   * `presence` block does carry it server-side (see
+   * `[#plans.vibehub-presence-last-seen]`), and `usersApi.trackerStatus()` normalizes
+   * a missing key to `null` for a live response — but keeping it optional here means
+   * a narrower object literal (e.g. `lib/__checks__/trackerPing.check.ts`'s
+   * `TrackerStatus` test fixtures, which predate this field) stays valid without
+   * edits. Not currently read by any UI in this codebase (the self tracker panel,
+   * TrackingStatus.tsx, is out of scope for the friend-surface/profile "last online"
+   * line); present for contract completeness and future use.
+   */
+  presence: { status: PresenceStatus; activity: Activity | null; tools?: PresenceTool[]; lastSeenAt?: string | null };
   /** Every (tool, model) pair seen in the last 7 days, most recently seen first. */
   sources: TrackerSource[];
   devices: TrackerDevice[];
@@ -276,6 +287,17 @@ export interface Presence {
    * primary activity.
    */
   tools?: PresenceTool[];
+  /**
+   * "Last online" — server-computed max(heartbeat incl. ENDED, connect receipt),
+   * ISO-8601, never verification time (see `[#plans.vibehub-presence-last-seen]`).
+   * Always present (never `undefined`) on the app-level `Presence` a component
+   * reads: normalized to `null` at every ingest point — `presenceApi.friends()`
+   * fills a missing/omitted key from an older server, and `RealtimeContext`'s WS
+   * merge keeps the previously known value when a `presence:update` event omits
+   * the key, only ever defaulting to `null` when there was no prior value either.
+   * Read via `lastOnlineLabel()` (lib/lastOnline.ts), not directly.
+   */
+  lastSeenAt: string | null;
 }
 
 export interface StatByModel {
@@ -330,6 +352,13 @@ export type WsServerEvent =
       activity: Activity | null;
       /** Round 6; absent from servers that predate it — see `toolsOf` in lib/api.ts. */
       tools?: PresenceTool[];
+      /**
+       * Optional on the wire only: absent when the server predates it. Missing here
+       * means "unchanged", not "unknown" — `RealtimeContext`'s merge keeps whatever
+       * `lastSeenAt` it already had for this username rather than overwriting with
+       * `null`. See `Presence.lastSeenAt` for the always-present app-level contract.
+       */
+      lastSeenAt?: string | null;
     }
   | {
       type: "wall:new-comment";

@@ -4,6 +4,7 @@
 // node-only imports so it also type-checks under web/tsconfig.json (DOM lib only).
 
 import {
+  daysSince,
   elapsedShort,
   humanizeModel,
   modelFamily,
@@ -199,6 +200,16 @@ eq("presenceLine(synthetic model, snake tool)", presenceLine(synthetic, NOW), "v
 
 const modelless = { projectAlias: "vibehub", tool: "quadcode", startedAt: ago(60_000) };
 eq("presenceLine(model field absent)", presenceLine(modelless, NOW), "vibehub · Quadcode AI · 1m");
+
+// ---- daysSince with an injected `now` (added for lib/lastOnline.ts to reuse
+// directly; the no-arg, Date.now()-based call sites elsewhere are unaffected) ----
+eq("daysSince(now, injected)", daysSince(ago(0), NOW), 0);
+eq("daysSince(23h59m, injected)", daysSince(ago(23 * 60 * 60_000 + 59 * 60_000), NOW), 0);
+eq("daysSince(exactly 1d, injected)", daysSince(ago(24 * 60 * 60_000), NOW), 1);
+eq("daysSince(3d, injected)", daysSince(ago(3 * 24 * 60 * 60_000), NOW), 3);
+eq("daysSince(7d, injected)", daysSince(ago(7 * 24 * 60 * 60_000), NOW), 7);
+eq("daysSince(8d, injected)", daysSince(ago(8 * 24 * 60 * 60_000), NOW), 8);
+eq("daysSince(future, injected, clamps to 0)", daysSince(new Date(NOW + 60_000).toISOString(), NOW), 0);
 
 // ---- presenceStatusLabel ----
 eq("presenceStatusLabel(active)", presenceStatusLabel("active"), "Online");

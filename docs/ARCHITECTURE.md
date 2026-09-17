@@ -726,7 +726,7 @@ impossible case of a bucket with no contributing row.
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/api/v1/presence/friends` | initial snapshot → `{ presences: [{ username, status, activity, tools }] }` — `tools` is the round 6 multi-tool list (§4.3), primary first, `[activity]` for sessions from an older tracker and `[]` when offline |
+| GET | `/api/v1/presence/friends` | initial snapshot → `{ presences: [{ username, status, activity, tools, lastSeenAt }] }` — `tools` is the round 6 multi-tool list (§4.3), primary first, `[activity]` for sessions from an older tracker and `[]` when offline; `lastSeenAt` is ISO-8601 or null, max(every `Session.lastHeartbeatAt` ever incl. ENDED, retained connection-v1 receipt), never auth/verify time — same rule as §5.8's self-only `tracker.lastSeenAt`, scoped to accepted friends + self like the rest of this response |
 
 ### 5.8 Tracker ingestion
 
@@ -825,12 +825,16 @@ Server → client events:
   "activity": { "projectAlias": "neon-app", "tool": "claude-code",
                 "model": "claude-sonnet-5", "startedAt": "2026-09-03T13:40:00.000Z" },
   "tools": [ { "tool": "claude-code", "model": "claude-sonnet-5", "projectAlias": "neon-app" },
-             { "tool": "cursor", "model": null, "projectAlias": "neon-app" } ] }
+             { "tool": "cursor", "model": null, "projectAlias": "neon-app" } ],
+  "lastSeenAt": "2026-09-03T13:40:00.000Z" }
 
 { "type": "wall:new-comment", "wallOwner": "ada", "comment": { "...": "WallComment shape" } }
 
 { "type": "friend-request:incoming", "request": { "...": "FriendRequest shape" } }
 ```
+
+`presence:update`'s `lastSeenAt` is ISO-8601 or null, heartbeat/receipt-derived exactly
+like §5.7's `/presence/friends` field, never verification time.
 
 Client subscribes to `wall:{username}` implicitly while viewing that profile by sending
 `{ "type": "subscribe", "channels": ["wall:ada"] }`; server unsubscribes on disconnect.

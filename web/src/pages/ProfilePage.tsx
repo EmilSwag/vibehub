@@ -208,7 +208,7 @@ export function ProfilePage() {
                   status rather than a misleading "Offline". */}
               {presence && (
                 <div className={styles.presenceRow}>
-                  <PresenceBlock presence={presence} variant="hero" className={styles.presence} />
+                  <PresenceBlock presence={presence} variant="hero" showLastSeen className={styles.presence} />
                   {/* Round 8C: your own profile saying "Offline" is the most likely
                       place to notice it, so it is the place that offers the fix. Idle
                       says nothing — the tracker is still talking. */}

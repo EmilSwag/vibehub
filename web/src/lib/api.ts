@@ -127,7 +127,7 @@ export const usersApi = {
     const raw = await request<Partial<TrackerStatus> & Pick<TrackerStatus, "connected">>(
       "/api/v1/users/me/tracker"
     );
-    return {
+    const status: TrackerStatus = {
       connected: raw.connected ?? false,
       lastSeenAt: raw.lastSeenAt ?? null,
       activeTokens: raw.activeTokens ?? 0,
@@ -140,6 +140,12 @@ export const usersApi = {
       // Absent key and explicit null mean the same thing to every reader: nothing stale.
       staleTracker: raw.staleTracker ?? null,
     };
+    // `status.presence` can itself predate `lastSeenAt` — normalize a missing key to
+    // null here too, same "missing key -> null" rule as presenceApi.friends() below.
+    // Kept as a separate step (not folded into the literal above) so the source still
+    // reads `presence: raw.presence ?? {...}` verbatim, unchanged from before this
+    // field existed (pinned by connectUx.check.ts's source-text check).
+    return { ...status, presence: { ...status.presence, lastSeenAt: status.presence.lastSeenAt ?? null } };
   },
   updateMe: (body: { username?: string; displayName?: string; bio?: string; roles?: UserRole[] }) =>
     request<{ user: User }>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
@@ -270,7 +276,14 @@ export const statsApi = {
 // ---- Presence (§5.7) ----
 
 export const presenceApi = {
-  friends: () => request<{ presences: Presence[] }>("/api/v1/presence/friends"),
+  /** Normalizes a missing/omitted `lastSeenAt` (server older than this field) to
+   * `null` so every reader sees the always-present `Presence.lastSeenAt` contract. */
+  friends: async (): Promise<{ presences: Presence[] }> => {
+    const { presences } = await request<{ presences: (Omit<Presence, "lastSeenAt"> & { lastSeenAt?: string | null })[] }>(
+      "/api/v1/presence/friends"
+    );
+    return { presences: presences.map((p) => ({ ...p, lastSeenAt: p.lastSeenAt ?? null })) };
+  },
 };
 
 /**

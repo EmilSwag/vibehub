@@ -89,7 +89,7 @@
   width: 100%;
 }
 
-/* ---- All friends: one line each — avatar · name @nick · presence ---- */
+/* ---- All friends: avatar · name @nick (+ faint last-online line) · presence ---- */
 .friendRow {
   display: flex;
   align-items: center;
@@ -107,8 +107,16 @@
 .friendRow:hover {
   background: var(--vh-surface-2);
 }
-.friendName {
+/* Column: name on top, faint "Last online …" underneath when there's data for it —
+ * matches the FriendListItem row's name-then-presence rhythm at a denser scale. */
+.friendInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   flex: 0 1 auto;
+  min-width: 0;
+}
+.friendName {
   min-width: 0;
   font-size: 13.5px;
   font-weight: 500;
@@ -120,6 +128,15 @@
 .friendHandle {
   color: var(--vh-text-faint);
   font-weight: 400;
+}
+.friendLastSeen {
+  font-size: 12px;
+  line-height: 14px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Takes what the name leaves, never less than a legible "Online · k…". */
 .friendPresence {

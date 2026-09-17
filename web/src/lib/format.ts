@@ -8,8 +8,12 @@
 // anything below: `npx tsx web/src/lib/__checks__/format.check.ts`.
 const LOCALE = "en-US";
 
-export function daysSince(iso: string): number {
-  const ms = Date.now() - new Date(iso).getTime();
+/** `now` is injectable (default `Date.now()`, so every existing call site is
+ * unaffected) for the same reason `elapsedShort` takes one: deterministic tests and
+ * ticking UIs. Added for lib/lastOnline.ts's `lastOnlineLabel` to reuse directly
+ * rather than re-deriving day counts itself. */
+export function daysSince(iso: string, now: number = Date.now()): number {
+  const ms = now - new Date(iso).getTime();
   return Math.max(0, Math.floor(ms / 86_400_000));
 }
 

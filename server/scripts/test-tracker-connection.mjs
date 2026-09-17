@@ -427,7 +427,7 @@ test("verify, status reads, token mint/list and copying a fixture string never c
     ok(menu.body.tracker.devices.every((item) => item.lastSeenAt === null));
     eq(browser.body.connected, false);
     eq(browser.body.lastSeenAt, null);
-    eq(browser.body.presence, { status: "offline", activity: null, tools: [] });
+    eq(browser.body.presence, { status: "offline", activity: null, tools: [], lastSeenAt: null });
   }
   eq(h.store.size.devices, 0);
   eq(h.events, []);
@@ -443,18 +443,21 @@ test("idle transport has no AI details, sources, elapsed time or tokens on eithe
   const menu = (await h.menu()).body;
   eq(browser.connected, true);
   eq(browser.lastSeenAt, date(BASE).toISOString());
-  eq(browser.presence, { status: "idle", activity: null, tools: [] });
+  eq(browser.presence, { status: "idle", activity: null, tools: [], lastSeenAt: date(BASE).toISOString() });
   eq(browser.tools, []);
   eq(browser.sources, []);
   eq(menu.tracker.connected, true);
   eq(menu.tracker.lastSeenAt, date(BASE).toISOString());
-  eq(menu.presence, { status: "idle", activity: null });
+  eq(menu.presence, { status: "idle", activity: null, lastSeenAt: date(BASE).toISOString() });
   eq(menu.today, { tokens: 0, activeSeconds: 0, sessionStartedAt: null });
   eq(browser.devices.find((item) => item.id === D1).lastSeenAt, date(BASE).toISOString());
   eq(browser.devices.find((item) => item.id === D2).lastSeenAt, null);
   eq(menu.tracker.devices.find((item) => item.name === D1).lastSeenAt, date(BASE).toISOString());
   eq(menu.tracker.devices.find((item) => item.name === D2).lastSeenAt, null);
-  eq(h.events[0], { userId: A, presence: { username: "fixture-alice", status: "idle", activity: null, tools: [] } });
+  eq(h.events[0], {
+    userId: A,
+    presence: { username: "fixture-alice", status: "idle", activity: null, tools: [], lastSeenAt: date(BASE).toISOString() },
+  });
   withoutUsageWrites(h);
 });
 
@@ -474,7 +477,9 @@ test("TTL is exactly 90 seconds; repeated HTTP reads neither renew nor consume e
   await h.browser();
   eq(h.store.notifications().map((item) => item.userId), [A]);
   eq(await h.job.sweepSessions(), { idled: 0, ended: 0 });
-  eq(h.events.at(-1).presence, { username: "fixture-alice", status: "offline", activity: null, tools: [] });
+  eq(h.events.at(-1).presence, {
+    username: "fixture-alice", status: "offline", activity: null, tools: [], lastSeenAt: date(BASE).toISOString(),
+  });
   eq(h.events.length, 2);
   await h.job.sweepSessions();
   eq(h.events.length, 2);
@@ -540,7 +545,9 @@ test("genuine Session active/idle history survives transport ticks, stop and rev
   eq(row, original);
   h.clock = BASE + 600_001;
   await h.post(RAW_A2);
-  eq((await h.browser()).body.presence, { status: "idle", activity: null, tools: [] });
+  eq((await h.browser()).body.presence, {
+    status: "idle", activity: null, tools: [], lastSeenAt: date(BASE + 600_001).toISOString(),
+  });
   eq((await h.menu(RAW_A2)).body.today.activeSeconds, 20);
   eq(row, original);
   withoutUsageWrites(h);
@@ -565,7 +572,9 @@ test("ended AI history stays intact while transport alone is idle", async () => 
   const original = clone(row);
   h.clock += 5000;
   await h.post();
-  eq((await h.browser()).body.presence, { status: "idle", activity: null, tools: [] });
+  eq((await h.browser()).body.presence, {
+    status: "idle", activity: null, tools: [], lastSeenAt: date(BASE + 5000).toISOString(),
+  });
   await h.stop();
   eq((await h.browser()).body.connected, false);
   eq(row, original);
@@ -741,7 +750,9 @@ test("legitimate rollup credits only actual AI heartbeat elapsed, never connecti
   eq(h.tables.userStreak.length, 1);
   eq(h.tables.activityEvent, []);
   eq(h.tables.githubCommitDay, []);
-  eq((await h.browser()).body.presence, { status: "idle", activity: null, tools: [] });
+  eq((await h.browser()).body.presence, {
+    status: "idle", activity: null, tools: [], lastSeenAt: date(BASE + 600_001).toISOString(),
+  });
   const finished = clone(h.tables.dailyStat);
   await h.job.sweepSessions();
   eq(h.tables.dailyStat, finished);
@@ -812,17 +823,60 @@ test("invalid Session timestamps cannot manufacture active presence or AI detail
   const invalid = [undefined, null, "not-a-date", date(NaN), date(BASE + 1)];
   for (const value of invalid) {
     row.lastHeartbeatAt = value;
-    eq(await h.presence(A, "fixture-alice"), { username: "fixture-alice", status: "offline", activity: null, tools: [] });
+    eq(await h.presence(A, "fixture-alice"), {
+      username: "fixture-alice", status: "offline", activity: null, tools: [], lastSeenAt: null,
+    });
   }
   await h.post();
   row.lastHeartbeatAt = date(BASE);
   for (const value of invalid) {
     row.startedAt = value;
-    eq(await h.presence(A, "fixture-alice"), { username: "fixture-alice", status: "idle", activity: null, tools: [] });
+    eq(await h.presence(A, "fixture-alice"), {
+      username: "fixture-alice", status: "idle", activity: null, tools: [], lastSeenAt: date(BASE).toISOString(),
+    });
   }
   row.startedAt = date(BASE - 1000);
   row.lastHeartbeatAt = date(BASE - 2000);
   eq((await h.presence(A, "fixture-alice")).activity, null);
+  withoutUsageWrites(h);
+});
+
+test("presenceFor().lastSeenAt is max(heartbeat incl. ENDED, receipt), null when neither exist, rejects future timestamps, and ignores verify", async () => {
+  const h = harness();
+  eq((await h.presence(A, "fixture-alice")).lastSeenAt, null);
+
+  // An ENDED session's heartbeat still counts toward "last online", even though it
+  // contributes no activity/status (that query has no status filter, unlike presence).
+  const ended = seedSession(h, {
+    status: "ENDED", startedAt: date(BASE - 70_000), lastHeartbeatAt: date(BASE - 60_000), endedAt: date(BASE - 50_000),
+  });
+  eq(await h.presence(A, "fixture-alice"), {
+    username: "fixture-alice", status: "offline", activity: null, tools: [], lastSeenAt: date(BASE - 60_000).toISOString(),
+  });
+
+  // Receipt (BASE) outranks the older ended heartbeat (BASE-60000).
+  await h.post();
+  eq((await h.presence(A, "fixture-alice")).lastSeenAt, date(BASE).toISOString());
+
+  // Advance the clock so a heartbeat between the receipt and "now" can outrank it.
+  h.clock += 20_000;
+  ended.lastHeartbeatAt = date(BASE + 10_000);
+  eq((await h.presence(A, "fixture-alice")).lastSeenAt, date(BASE + 10_000).toISOString());
+
+  // A fresher receipt outranks the heartbeat again.
+  await h.post();
+  eq((await h.presence(A, "fixture-alice")).lastSeenAt, date(h.clock).toISOString());
+
+  // A future-dated heartbeat is rejected outright, never adopted as "last online".
+  ended.lastHeartbeatAt = date(h.clock + 5000);
+  eq((await h.presence(A, "fixture-alice")).lastSeenAt, date(h.clock).toISOString());
+  ended.lastHeartbeatAt = date(BASE - 60_000);
+
+  // /tracker/verify only bumps TrackerToken.lastUsedAt — never presence lastSeenAt.
+  const before = (await h.presence(A, "fixture-alice")).lastSeenAt;
+  await h.verify();
+  eq((await h.presence(A, "fixture-alice")).lastSeenAt, before);
+
   withoutUsageWrites(h);
 });
 
@@ -831,7 +885,7 @@ test("menu-bar serializer tolerates missing/invalid dates and ignores legacy ver
   const build = h.load("src/lib/tracker-me.ts").buildTrackerMePayload;
   for (const value of [undefined, null, date(NaN), "not-a-date"]) {
     const payload = build({ user: h.tables.user[0], level: 1,
-      presence: { username: "fixture-alice", status: "offline", activity: null, tools: [] },
+      presence: { username: "fixture-alice", status: "offline", activity: null, tools: [], lastSeenAt: null },
       today: { tokens: 0, activeSeconds: 0, sessionStartedAt: value }, lastSeenAt: value,
       devices: [{ label: "fixture", lastSeenAt: value, lastUsedAt: date(BASE) }], friends: [] });
     eq(payload.tracker, { connected: false, lastSeenAt: null, devices: [{ name: "fixture", lastSeenAt: null }] });
@@ -1001,7 +1055,9 @@ test("new API VM loses transient liveness, preserves actual AI history and needs
   eq((await after.menu()).body.tracker.lastSeenAt, date(BASE - 1000).toISOString());
   eq(after.tables.session, saved.session);
   eq((await after.post()).body, receipt(true, BASE));
-  eq((await after.browser()).body.presence, { status: "idle", activity: null, tools: [] });
+  eq((await after.browser()).body.presence, {
+    status: "idle", activity: null, tools: [], lastSeenAt: date(BASE).toISOString(),
+  });
   eq(after.tables.session, saved.session);
   withoutUsageWrites(before);
   withoutUsageWrites(after);
@@ -1073,7 +1129,9 @@ test("authenticated owner binding cannot borrow another account's device, AI Ses
   eq(result.body, receipt(true, BASE));
   eq(h.store.snapshot(A, D1).connected, true);
   eq(h.store.snapshot(B, DB), snapshot(false));
-  eq((await h.browser()).body.presence, { status: "idle", activity: null, tools: [] });
+  eq((await h.browser()).body.presence, {
+    status: "idle", activity: null, tools: [], lastSeenAt: date(BASE).toISOString(),
+  });
   eq((await h.menu()).body.today.tokens, 0);
   eq((await h.menu()).body.today.activeSeconds, 0);
   eq((await h.browser("cookie-b")).body.presence.status, "active");

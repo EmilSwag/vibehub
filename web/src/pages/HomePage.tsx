@@ -7,8 +7,9 @@ import { stagger } from "../lib/motion";
 import type { Friend } from "../types";
 import { Card } from "../components/ui/Card";
 import { Avatar } from "../components/ui/Avatar";
-import { PresenceBlock } from "../components/ui/PresenceBlock";
+import { PresenceBlock, useNow } from "../components/ui/PresenceBlock";
 import { StatusDot } from "../components/ui/StatusDot";
+import { lastOnlineLabel } from "../lib/lastOnline";
 import buttonStyles from "../components/ui/Button.module.css";
 import { ConnectTools } from "../components/ConnectTools";
 import { ConnectSheet } from "../components/connect/ConnectSheet";
@@ -52,6 +53,13 @@ export function HomePage() {
   }, []);
 
   const activeFriends = friends.filter((f) => presences.get(f.user.username)?.status === "active");
+  // Only ticks once a friend is both non-live and has a known lastSeenAt to render —
+  // otherwise this aside never shows a relative time and the interval is dead weight.
+  const anyLastSeen = friends.some((f) => {
+    const p = presences.get(f.user.username);
+    return p !== undefined && p.status !== "active" && p.lastSeenAt !== null;
+  });
+  const now = useNow(anyLastSeen, 60_000);
 
   return (
     <div>
@@ -153,12 +161,21 @@ export function HomePage() {
                   {friends.slice(0, ALL_FRIENDS_MAX).map((f) => {
                     const presence = presences.get(f.user.username);
                     const live = presence !== undefined && presence.status !== "offline";
+                    // Unlike FriendListItem's row/hero PresenceBlock, this aside's dot
+                    // has no visible status word next to it — so unlike PresenceBlock's
+                    // own showLastSeen (which skips "Offline" as redundant with its
+                    // word), the never-seen case is simply not shown here either,
+                    // consistent with every other surface: no extra line without data.
+                    const lastSeen = !live && presence ? lastOnlineLabel(presence, now) : null;
                     return (
                       <Link key={f.user.id} to={`/u/${f.user.username}`} className={styles.friendRow}>
                         <Avatar src={f.user.avatarUrl} name={f.user.displayName} size={32} />
-                        <span className={styles.friendName}>
-                          {f.user.displayName}
-                          <span className={styles.friendHandle}> @{f.user.username}</span>
+                        <span className={styles.friendInfo}>
+                          <span className={styles.friendName}>
+                            {f.user.displayName}
+                            <span className={styles.friendHandle}> @{f.user.username}</span>
+                          </span>
+                          {lastSeen && <span className={styles.friendLastSeen}>{lastSeen}</span>}
                         </span>
                         {live ? (
                           <PresenceBlock
@@ -168,7 +185,7 @@ export function HomePage() {
                             className={styles.friendPresence}
                           />
                         ) : (
-                          <StatusDot status="offline" className={styles.friendDot} />
+                          <StatusDot status={presence?.status ?? "offline"} className={styles.friendDot} />
                         )}
                       </Link>
                     );

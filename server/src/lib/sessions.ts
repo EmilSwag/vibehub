@@ -2,7 +2,7 @@ import type { Session } from "@prisma/client";
 import { prisma } from "../db";
 import { env } from "../env";
 import { fromJsonArrayValue } from "./json-field";
-import { trackerConnections, trackerTimestamp } from "./trackerConnection";
+import { latestTrackerLastSeenAt, trackerConnections, trackerTimestamp } from "./trackerConnection";
 
 // Round 5: presence must decay from `lastHeartbeatAt` at *read* time, not trust
 // the stored `Session.status` column. That column is only advanced by the ~30s
@@ -84,6 +84,14 @@ export interface PresenceSnapshot {
    * and is `[]` when offline — so a reader can always use it without a null check.
    */
   tools: PresenceTool[];
+  /**
+   * Account-level "last online", independent of `status`/`activity` above: max of every
+   * `Session.lastHeartbeatAt` ever (including ENDED sessions) and the retained
+   * connection-v1 receipt — same rule `latestTrackerLastSeenAt()` already applies for
+   * the self-only `tracker.lastSeenAt` field (routes/tracker.ts, routes/users.ts).
+   * Never `TrackerToken.lastUsedAt`/verify time. ISO string, or null when neither exists.
+   */
+  lastSeenAt: string | null;
 }
 
 /** Largest `tools[]` we will echo back, mirroring the heartbeat schema's cap. */
@@ -274,16 +282,28 @@ export function sessionToActivity(session: Session): PresenceActivity {
  * This read does not extend, close, create or credit any Session.
  */
 export async function presenceFor(userId: string, username: string): Promise<PresenceSnapshot> {
-  const session = await prisma.session.findFirst({
-    where: { userId, status: { not: "ENDED" } },
-    orderBy: { lastHeartbeatAt: "desc" },
-  });
   const now = Date.now();
+  const [session, latestAny] = await Promise.all([
+    prisma.session.findFirst({
+      where: { userId, status: { not: "ENDED" } },
+      orderBy: { lastHeartbeatAt: "desc" },
+    }),
+    // "Last online" across every session ever, ENDED included — same freshest-row
+    // query routes/tracker.ts and routes/users.ts already run for the self-only
+    // `tracker.lastSeenAt` field, merged below via the same helper they use.
+    prisma.session.findFirst({
+      where: { userId },
+      orderBy: { lastHeartbeatAt: "desc" },
+      select: { lastHeartbeatAt: true },
+    }),
+  ]);
+  const lastSeenAt = latestTrackerLastSeenAt(userId, latestAny?.lastHeartbeatAt, now)?.toISOString() ?? null;
   const withoutActivity = (): PresenceSnapshot => ({
     username,
     status: trackerConnections.forUser(userId, now).connected ? "idle" : "offline",
     activity: null,
     tools: [],
+    lastSeenAt,
   });
   if (!session || session.status === "ENDED") return withoutActivity();
 
@@ -301,5 +321,6 @@ export async function presenceFor(userId: string, username: string): Promise<Pre
     status,
     activity,
     tools: presenceTools((session as { coTools?: unknown }).coTools, activity),
+    lastSeenAt,
   };
 }

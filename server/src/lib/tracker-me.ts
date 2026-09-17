@@ -29,6 +29,8 @@ export interface TrackerMeFriend {
   avatarUrl: string | null;
   status: PresenceStatus;
   activity: TrackerMeActivity | null;
+  /** Same account-level "last online" self gets, unchanged — see PresenceSnapshot. */
+  lastSeenAt: string | null;
 }
 
 export interface TrackerMePayload {
@@ -42,6 +44,8 @@ export interface TrackerMePayload {
   presence: {
     status: PresenceStatus;
     activity: TrackerMeActivity | null;
+    /** PresenceSnapshot.lastSeenAt, unchanged — see ARCHITECTURE.md §5.7/§5.9. */
+    lastSeenAt: string | null;
   };
   today: {
     activeSeconds: number;
@@ -118,6 +122,7 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
     presence: {
       status: input.presence.status,
       activity: toActivity(input.presence.activity),
+      lastSeenAt: input.presence.lastSeenAt,
     },
     today: {
       activeSeconds: input.today.activeSeconds,
@@ -139,6 +144,7 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
         avatarUrl: friend.user.avatarUrl,
         status: friend.presence.status,
         activity: toActivity(friend.presence.activity),
+        lastSeenAt: friend.presence.lastSeenAt,
       })),
     },
   };

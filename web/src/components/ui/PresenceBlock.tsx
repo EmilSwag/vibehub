@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Activity, PresenceStatus, PresenceTool } from "../../types";
 import { toolsOf } from "../../lib/api";
 import { humanizeModel, modelFamily, presenceParts, presenceStatusLabel, toolFamily, toolLabel } from "../../lib/format";
+import { lastOnlineLabel } from "../../lib/lastOnline";
 import { ModelGlyph } from "./ModelGlyph";
 import { StatusDot } from "./StatusDot";
 import { ToolGlyph } from "./ToolGlyph";
@@ -19,6 +20,12 @@ export interface PresenceLike {
   /** Round 6: everything else the person has open. Never read directly — the
    * block calls `toolsOf()`, which falls back to `activity` on an older server. */
   tools?: PresenceTool[];
+  /**
+   * Feeds `showLastSeen`'s line via `lastOnlineLabel()`. Optional because
+   * `TrackerStatus.presence` (the self tracker panel) doesn't carry it at all —
+   * `showLastSeen` is a deliberate no-op there. Always present on `Presence`.
+   */
+  lastSeenAt?: string | null;
 }
 
 /** "Quadcode AI · Claude Fable 5.1" — tool first here, unlike `modelWithTool`:
@@ -63,7 +70,15 @@ export interface PresenceBlockProps {
   variant?: PresenceVariant;
   /** Line 4 "for 1h 42m" — active only. Default true. */
   showElapsed?: boolean;
-  /** Fixed instant for elapsed (tests, snapshots). Omit to tick every 30s. */
+  /**
+   * Understated "Last online 2h ago" / "idle · last active 2h ago" line —
+   * offline/idle only, and only when `presence.lastSeenAt` is known. Opt-in like
+   * `showElapsed`: only friend surfaces and the profile hero pass it, so every
+   * other existing call site (e.g. the self tracker panel) is unaffected by
+   * default. Default false.
+   */
+  showLastSeen?: boolean;
+  /** Fixed instant for elapsed/last-seen (tests, snapshots). Omit to tick every 30s. */
   now?: number;
   className?: string;
 }
@@ -99,12 +114,24 @@ export function useNow(enabled: boolean, intervalMs = 30_000): number {
  * Idle keeps lines 1–3 in gray; offline is the word alone. Status changes cross-fade
  * (opacity/color only, 200ms, off under prefers-reduced-motion).
  */
-export function PresenceBlock({ presence, variant = "row", showElapsed = true, now, className }: PresenceBlockProps) {
+export function PresenceBlock({
+  presence,
+  variant = "row",
+  showElapsed = true,
+  showLastSeen = false,
+  now,
+  className,
+}: PresenceBlockProps) {
   const status: PresenceStatus = presence?.status ?? "offline";
   const activity = status === "offline" ? null : presence?.activity ?? null;
   const showFor = status === "active" && showElapsed && activity !== null;
-  const tick = useNow(showFor && now === undefined);
-  const parts = activity ? presenceParts(activity, now ?? tick) : null;
+  // Offline has no `activity` at all, and idle may not either — the last-seen line
+  // reads straight off `presence.lastSeenAt`, not off whatever `activity` computed.
+  const showSeen = showLastSeen && status !== "active" && (presence?.lastSeenAt ?? null) !== null;
+  const tick = useNow((showFor || showSeen) && now === undefined);
+  const effectiveNow = now ?? tick;
+  const parts = activity ? presenceParts(activity, effectiveNow) : null;
+  const lastSeen = showSeen && presence ? lastOnlineLabel({ status, lastSeenAt: presence.lastSeenAt ?? null }, effectiveNow) : null;
   const word = presenceStatusLabel(status);
   const pulse = status === "active";
   // Round 6 multi-tool presence. `toolsOf` returns the whole stack primary-first,
@@ -164,6 +191,10 @@ export function PresenceBlock({ presence, variant = "row", showElapsed = true, n
           )}
         </span>
       )}
+
+      {/* Offline has no `.details` block above (no activity); idle may not either —
+          this line stands on its own in both cases rather than living inside it. */}
+      {lastSeen && <span className={styles.elapsed}>{lastSeen}</span>}
     </div>
   );
 }
