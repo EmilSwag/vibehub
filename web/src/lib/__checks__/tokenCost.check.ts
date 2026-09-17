@@ -31,6 +31,9 @@ const verified: [string, number, number][] = [
   ["claude-opus-4-8", 5, 25], ["claude-opus-4-7", 5, 25], ["claude-opus-4-6", 5, 25],
   ["claude-opus-4-5-20251101", 5, 25], ["claude-sonnet-5", 2, 10], ["claude-sonnet-4-6", 3, 15],
   ["claude-sonnet-4-5-20250929", 3, 15], ["claude-haiku-4-5-20251001", 1, 5],
+  // Retired, still priced on the official page (pricing "Model pricing" table, 2026-09-17).
+  ["claude-opus-4-1-20250805", 15, 75], ["claude-opus-4-20250514", 15, 75],
+  ["claude-sonnet-4-20250514", 3, 15], ["claude-3-5-haiku-20241022", 0.80, 4],
 ];
 eq("all and only researched tariff entries", TOKEN_PRICES.length, verified.length);
 eq("source snapshot date", TOKEN_PRICING_CHECKED_AT, "2026-09-16");
@@ -51,6 +54,8 @@ const aliases: [string, string][] = [
   ["gpt-5-2025-08-07", "gpt-5"], ["gpt-4.1-2025-04-14", "gpt-4.1"], ["gpt-4o-2024-08-06", "gpt-4o"],
   ["claude-opus-4-5", "claude-opus-4-5-20251101"], ["claude-sonnet-4-5", "claude-sonnet-4-5-20250929"],
   ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
+  ["claude-opus-4-1", "claude-opus-4-1-20250805"], ["claude-opus-4-0", "claude-opus-4-20250514"],
+  ["claude-sonnet-4-0", "claude-sonnet-4-20250514"], ["claude-3-5-haiku-latest", "claude-3-5-haiku-20241022"],
 ];
 eq("only explicit researched aliases", TOKEN_PRICES.flatMap((p) => p.aliases).length, aliases.length);
 for (const [alias, canonical] of aliases) {

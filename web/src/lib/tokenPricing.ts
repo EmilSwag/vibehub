@@ -41,6 +41,7 @@ function price(
 const openaiModel = "https://developers.openai.com/api/docs/models/";
 const claudeModels = "https://platform.claude.com/docs/en/models/overview";
 const claudeVersions = "https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions";
+const claudeDeprecations = "https://platform.claude.com/docs/en/about-claude/model-deprecations";
 
 export const TOKEN_PRICES: readonly TokenPrice[] = Object.freeze([
   // Official Standard pricing data: short-context baseline wherever tiered.
@@ -97,6 +98,14 @@ export const TOKEN_PRICES: readonly TokenPrice[] = Object.freeze([
   price("anthropic", "claude-sonnet-4-6", 3, 15, [], claudeVersions),
   price("anthropic", "claude-sonnet-4-5-20250929", 3, 15, ["claude-sonnet-4-5"], "https://platform.claude.com/docs/en/models/sonnet-4-5/overview"),
   price("anthropic", "claude-haiku-4-5-20251001", 1, 5, ["claude-haiku-4-5"], claudeModels),
+  // Retired on the Claude API but still listed with a price on the official pricing
+  // page, and still present in older Claude Code session logs. Exact IDs and aliases
+  // from the model-deprecations / model-ids docs; models the pricing page no longer
+  // lists (Sonnet 3.7, Sonnet 3.5, Opus 3, Haiku 3) deliberately stay unknown.
+  price("anthropic", "claude-opus-4-1-20250805", 15, 75, ["claude-opus-4-1"], claudeDeprecations),
+  price("anthropic", "claude-opus-4-20250514", 15, 75, ["claude-opus-4-0"], claudeDeprecations),
+  price("anthropic", "claude-sonnet-4-20250514", 3, 15, ["claude-sonnet-4-0"], claudeDeprecations),
+  price("anthropic", "claude-3-5-haiku-20241022", 0.80, 4, ["claude-3-5-haiku-latest"], claudeDeprecations),
 ]);
 
 // A private Map avoids prototype-key lookups and exposes no mutable registry API.
