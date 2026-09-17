@@ -358,6 +358,22 @@
   color: var(--vh-text-faint);
 }
 
+/* Both model and tool counts retain a nowrap number, not a nowrap whole row. */
+.tokenPair {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.tokenNumber {
+  white-space: nowrap;
+}
+
 /* ---- disclosure ---- */
 
 .toggle {

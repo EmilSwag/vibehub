@@ -8,14 +8,16 @@ import { prefersReducedMotion, stagger } from "../lib/motion";
 import {
   collapseWouldDropFocus,
   formatHoursOnRecord,
-  groupStatsByModel,
+  groupStatsByModelWithCosts,
   modelRowAria,
   modelRowLabel,
   NO_MODEL_SELECTION,
   requestSelection,
   selectionTickFor,
 } from "../lib/recentModels";
-import type { ModelSelection, RecentModelRow } from "../lib/recentModels";
+import type { ModelSelection, PricedRecentModelRow } from "../lib/recentModels";
+import { isValidTokenCount } from "../lib/tokenCost";
+import { TokenCost, TokenCostDetails } from "./ui/TokenCost";
 import type { UserStats } from "../types";
 import type { PresenceLike } from "./ui/PresenceBlock";
 import { Button } from "./ui/Button";
@@ -55,12 +57,12 @@ function liveLabels(presence: PresenceLike | null | undefined): Set<string> {
 }
 
 const tokenCount = (tokens: number, estimated: boolean) =>
-  `${estimated ? "~" : ""}${formatTokens(tokens)} tokens`;
+  isValidTokenCount(tokens) ? `${estimated ? "~" : ""}${formatTokens(tokens)} tokens` : "— tokens";
 
 const TOKENS_TITLE = "Tokens — estimated (Quadcode AI logs carry no token counts)";
 
 interface RowProps {
-  row: RecentModelRow;
+  row: PricedRecentModelRow;
   live: boolean;
   /** The server dates its buckets (round 7). Without dates the hours are a 30-day
    *  total, not a lifetime one, so they drop the "on record" claim. */
@@ -147,6 +149,7 @@ function Row({
           aria-controls={aria.controls}
           aria-current={selected || undefined}
           aria-label={action}
+          aria-describedby={`${detailId}-cost`}
         />
 
         <span className={cx(styles.capsule, compact && styles.capsuleCompact)} aria-hidden="true">
@@ -186,8 +189,11 @@ function Row({
                   </button>
                 );
               })}
-            <span className={styles.tokens} title={row.estimated ? TOKENS_TITLE : "Tokens"}>
-              {tokenCount(row.tokens, row.estimated)}
+            <span className={cx(styles.tokens, styles.tokenPair)}>
+              <span className={styles.tokenNumber} title={row.estimated ? TOKENS_TITLE : "Tokens"}>
+                {tokenCount(row.tokens, row.estimated)}
+              </span>
+              <TokenCost id={`${detailId}-cost`} estimate={row.cost} />
             </span>
           </span>
         </span>
@@ -228,8 +234,11 @@ function Row({
                   {toolLabel(bucket.tool)}
                 </span>
                 <span className={styles.toolLineHours}>{formatHoursOnRecord(bucket.activeSeconds)}</span>
-                <span className={styles.toolLineTokens} title={bucket.estimated ? TOKENS_TITLE : "Tokens"}>
-                  {tokenCount(bucket.tokens, bucket.estimated)}
+                <span className={cx(styles.toolLineTokens, styles.tokenPair)}>
+                  <span className={styles.tokenNumber} title={bucket.estimated ? TOKENS_TITLE : "Tokens"}>
+                    {tokenCount(bucket.tokens, bucket.estimated)}
+                  </span>
+                  <TokenCost estimate={bucket.cost} />
                 </span>
                 <span className={styles.toolLineLast}>
                   {dated && bucket.lastActiveAt ? `last used ${formatShortDate(bucket.lastActiveAt)}` : ""}
@@ -254,7 +263,13 @@ function RecentModelsSkeleton() {
             <Skeleton variant="block" className={styles.capsule} />
             <span className={styles.main}>
               <Skeleton width={148} height={15} />
-              <Skeleton width={190} height={12} />
+              <span className={styles.sub}>
+                <Skeleton width={82} height={12} />
+                <span className={styles.tokenPair}>
+                  <Skeleton width={64} height={12} />
+                  <Skeleton width={72} height={12} />
+                </span>
+              </span>
             </span>
             <span className={styles.right}>
               <Skeleton width={104} height={13} />
@@ -347,7 +362,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
     };
   }, [username, attempt]);
 
-  const rows = useMemo(() => (lifetime ? groupStatsByModel(lifetime.byModel) : []), [lifetime]);
+  const rows = useMemo(() => (lifetime ? groupStatsByModelWithCosts(lifetime.byModel) : []), [lifetime]);
   const live = useMemo(() => liveLabels(presence), [presence]);
   // A server older than round 7 dates nothing and silently answers `range=all` with
   // its 30-day default, so the dates go away and the hours stop claiming to be a
@@ -429,7 +444,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
     if (canExpand) setExpanded(true);
   }, [focus, rows, canExpand, pick]);
 
-  const usesFilteredTool = (row: RecentModelRow) =>
+  const usesFilteredTool = (row: PricedRecentModelRow) =>
     toolFilter === null || row.tools.some((tool) => toolFamily(tool) === toolFilter);
 
   /** Escape peels one layer at a time — filter, then the open detail, then the
@@ -519,6 +534,7 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
             )}
           </>
         )}
+        {(state === "loading" || (state === "ready" && rows.length > 0)) && <TokenCostDetails />}
       </Card>
     </section>
   );

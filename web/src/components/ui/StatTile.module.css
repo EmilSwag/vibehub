@@ -40,6 +40,23 @@
   white-space: nowrap;
 }
 
+/* A cost is secondary text beside the count; it can move to the next line. */
+.withCompanion {
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: 2px;
+}
+
+.companion {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--vh-font-sans);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+}
+
 /* Names wrap; numbers never do. */
 .text {
   font-family: var(--vh-font-sans);

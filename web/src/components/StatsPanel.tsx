@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { statsApi } from "../lib/api";
 import { formatActiveTime, formatTokens, humanizeModel, modelFamily } from "../lib/format";
+import { estimateTokenCost, isValidTokenCount } from "../lib/tokenCost";
 import type { UserStats } from "../types";
 import { Button } from "./ui/Button";
 import { ModelGlyph } from "./ui/ModelGlyph";
 import { StatTile } from "./ui/StatTile";
+import { TokenCost, TokenCostDetails } from "./ui/TokenCost";
 import styles from "./StatsPanel.module.css";
 
 interface TilesProps {
@@ -21,29 +23,40 @@ function Tiles({ stats, onTopModel }: TilesProps) {
   // no translation is needed between the two blocks — but a model the server cannot
   // name has no row to jump to, and the tile goes back to being a number.
   const topModel = stats ? humanizeModel(stats.topModel) : null;
+  // This response's own range and original input/output rows, not lifetime/presence.
+  const cost = estimateTokenCost(stats?.byModel, stats?.totalTokens);
 
   return (
-    <div className={styles.tiles}>
-      <StatTile label="Active time" loading={loading} value={stats ? formatActiveTime(stats.totalActiveSeconds) : undefined} />
-      <StatTile
-        label="Top model"
-        kind="text"
-        loading={loading}
-        value={stats ? topModel ?? "—" : undefined}
-        mark={topModel && <ModelGlyph family={modelFamily(stats?.topModel)} size={18} />}
-        onClick={topModel && onTopModel ? () => onTopModel(topModel) : undefined}
-        actionLabel={topModel ? `${topModel} — show it in Models` : undefined}
-      />
-      <StatTile label="Streak" loading={loading} value={stats ? `${stats.streak.currentStreak}d` : undefined} />
-      <StatTile label="Tokens · fuel" quiet loading={loading} value={stats ? formatTokens(stats.totalTokens) : undefined} />
-    </div>
+    <>
+      <div className={styles.tiles}>
+        <StatTile label="Active time" loading={loading} value={stats ? formatActiveTime(stats.totalActiveSeconds) : undefined} />
+        <StatTile
+          label="Top model"
+          kind="text"
+          loading={loading}
+          value={stats ? topModel ?? "—" : undefined}
+          mark={topModel && <ModelGlyph family={modelFamily(stats?.topModel)} size={18} />}
+          onClick={topModel && onTopModel ? () => onTopModel(topModel) : undefined}
+          actionLabel={topModel ? `${topModel} — show it in Models` : undefined}
+        />
+        <StatTile label="Streak" loading={loading} value={stats ? `${stats.streak.currentStreak}d` : undefined} />
+        <StatTile
+          label="Tokens · fuel"
+          quiet
+          loading={loading}
+          value={stats ? (isValidTokenCount(stats.totalTokens) ? formatTokens(stats.totalTokens) : "—") : undefined}
+          companion={<TokenCost estimate={cost} />}
+        />
+      </div>
+      <TokenCostDetails />
+    </>
   );
 }
 
 /**
- * The profile's overall numbers — four tiles, nothing else. The per-model breakdown
- * is its own block now (`RecentModels`, round 7): one card answers "how much", the
- * next answers "with what", and neither has to carry both.
+ * The profile's overall numbers — four tiles and their API estimate disclosure.
+ * The per-model breakdown is its own block (`RecentModels`, round 7): one card
+ * answers "how much", the next answers "with what".
  */
 export function StatsPanel({ username, onTopModel }: { username: string; onTopModel?: (label: string) => void }) {
   const [stats, setStats] = useState<UserStats | null>(null);

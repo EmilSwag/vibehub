@@ -17,6 +17,8 @@ interface Props {
   /** Drops the value to secondary ink. For the gauge that must not read as a
    * score — tokens are fuel, not rank (DESIGN.md). */
   quiet?: boolean;
+  /** Quiet inline text only, never a nested control when the tile is a button. */
+  companion?: ReactNode;
   /** A mark set before the value — the model's own, on the Top model tile. Sized to
    * the value's cap height by the caller; it inherits the value's colour. */
   mark?: ReactNode;
@@ -35,6 +37,7 @@ export function StatTile({
   kind = "number",
   loading = false,
   quiet = false,
+  companion,
   mark,
   onClick,
   actionLabel,
@@ -42,21 +45,23 @@ export function StatTile({
   const body = (
     <>
       {loading ? (
-        <span className={cx(styles.value, kind === "text" && styles.text)}>
+        <span className={cx(styles.value, kind === "text" && styles.text, !!companion && styles.withCompanion)}>
           <Skeleton
             className={styles.valueSkeleton}
             width={kind === "text" ? "72%" : "48%"}
             height={kind === "text" ? 14 : 20}
           />
+          {companion && <span className={styles.companion}><Skeleton width={76} height={12} /></span>}
         </span>
       ) : (
-        <span className={cx(styles.value, kind === "text" && styles.text, quiet && styles.quiet)}>
+        <span className={cx(styles.value, kind === "text" && styles.text, quiet && styles.quiet, !!companion && styles.withCompanion)}>
           {mark && (
             <span className={styles.mark} aria-hidden="true">
               {mark}
             </span>
           )}
-          {value}
+          {companion ? <span>{value}</span> : value}
+          {companion && <span className={styles.companion}>{companion}</span>}
         </span>
       )}
       <span className={styles.label}>{label}</span>

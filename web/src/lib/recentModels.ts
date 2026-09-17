@@ -9,6 +9,8 @@
 // file: `npx tsx web/src/lib/__checks__/recentModels.check.ts`.
 
 import { humanizeModel, toolFamily, toolLabel } from "./format";
+import { estimateTokenCost } from "./tokenCost";
+import type { TokenCostEstimate } from "./tokenCost";
 import type { StatByModel } from "../types";
 
 /**
@@ -160,6 +162,45 @@ export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
     const bt = b.lastActiveAt ?? "";
     if (at !== bt) return at < bt ? 1 : -1;
     return byHours(a, b);
+  });
+}
+
+/** Opt-in cost attachment keeps the existing grouping/count contract unchanged. */
+export interface PricedRecentModelRow extends RecentModelRow {
+  cost: TokenCostEstimate;
+  byTool: (RecentModelToolBucket & { cost: TokenCostEstimate })[];
+}
+
+/**
+ * A display label can fold DIFFERENT exact IDs (and even unverified aliases).
+ * Index the original input/output records by the same label + raw tool key, then
+ * estimate each displayed subtotal from only its own records. The representative
+ * `group.model`, humanized title, tool family and current presence never set a rate.
+ */
+export function groupStatsByModelWithCosts(rows: StatByModel[]): PricedRecentModelRow[] {
+  const sources = new Map<string, Map<string, StatByModel[]>>();
+  for (const row of rows) {
+    const label = modelRowLabel(row.tool, row.model);
+    let tools = sources.get(label);
+    if (!tools) {
+      tools = new Map();
+      sources.set(label, tools);
+    }
+    const usage = tools.get(row.tool);
+    if (usage) usage.push(row);
+    else tools.set(row.tool, [row]);
+  }
+
+  return groupStatsByModel(rows).map((group) => {
+    const tools = sources.get(group.label)!;
+    return {
+      ...group,
+      cost: estimateTokenCost([...tools.values()].flat(), group.tokens),
+      byTool: group.byTool.map((bucket) => ({
+        ...bucket,
+        cost: estimateTokenCost(tools.get(bucket.tool), bucket.tokens),
+      })),
+    };
   });
 }
 

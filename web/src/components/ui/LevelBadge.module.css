@@ -181,6 +181,19 @@
   font-variant-numeric: tabular-nums;
 }
 
+.tokenValue {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.tokenValue > span:first-child {
+  white-space: nowrap;
+}
+
 /* ---- phone: a real bottom sheet ----
  * Applied by class, not by media query, because the sheet is portalled to <body>
  * (see the component) and its scrim has to come with it. */

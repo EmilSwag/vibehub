@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { LevelBreakdown } from "../../types";
 import { formatTokens } from "../../lib/format";
+import { estimateTokenCost, isValidTokenCount } from "../../lib/tokenCost";
+import { TokenCost, TokenCostDetails } from "./TokenCost";
 import styles from "./LevelBadge.module.css";
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
@@ -120,7 +122,7 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
     ? [
         ["XP", String(breakdown.xp)],
         ["Active", `${breakdown.activeHours}h`],
-        ["Tokens", formatTokens(breakdown.totalTokens)],
+        ["Tokens", isValidTokenCount(breakdown.totalTokens) ? formatTokens(breakdown.totalTokens) : "—"],
         ["Projects", String(breakdown.projects)],
         ["Friends", String(breakdown.friends)],
         ["Commits", String(breakdown.commits)],
@@ -199,9 +201,18 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
       {rows.map(([label, value]) => (
         <div className={styles.row} key={label}>
           <span className={styles.rowLabel}>{label}</span>
-          <span className={styles.rowValue}>{value}</span>
+          <span className={cx(styles.rowValue, label === "Tokens" && styles.tokenValue)}>
+            {label === "Tokens" ? (
+              <>
+                <span>{value}</span>
+                {/* Lifetime total only: do not borrow another surface's model range. */}
+                <TokenCost estimate={estimateTokenCost(undefined, breakdown?.totalTokens)} />
+              </>
+            ) : value}
+          </span>
         </div>
       ))}
+      <TokenCostDetails />
     </div>
   );
 
