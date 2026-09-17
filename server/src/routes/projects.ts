@@ -8,6 +8,7 @@ import { env } from "../env";
 import {
   fetchReadmeExcerpt,
   fetchRepoActivity,
+  fetchRepoDigest,
   fetchRepoLanguages,
   fetchRepoTree,
   getFreshGithubToken,
@@ -134,6 +135,8 @@ router.post(
     const project = await prisma.project.create({
       data: {
         ...data,
+        repoUrl: data.repoUrl ?? null,
+        liveUrl: data.liveUrl ?? null,
         // First screenshot doubles as the cover unless one was given explicitly.
         coverImageUrl: data.coverImageUrl ?? imageUrls?.[0] ?? null,
         imageUrls: imageUrls ? imageUrlsToJson(imageUrls) : null,
@@ -274,7 +277,7 @@ router.get(
   })
 );
 
-/** The five owner columns getFreshGithubToken needs — shared by /commits and /repo. */
+/** The five owner columns getFreshGithubToken needs — shared by /repo and /digest. */
 const GITHUB_CREDENTIAL_SELECT = {
   id: true,
   githubAccessToken: true,
@@ -366,6 +369,38 @@ router.get(
       });
     } catch (err) {
       if (err instanceof GithubNotFoundError) throw new HttpError(404, "Repository path not found");
+      throw new HttpError(503, "github_unavailable");
+    }
+  })
+);
+
+/** Repository digest for rich cards, with the same project visibility gate as /repo. */
+router.get(
+  "/projects/:id/digest",
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const project = await prisma.project.findUnique({
+      where: { id: req.params.id },
+      include: { owner: { select: GITHUB_CREDENTIAL_SELECT } },
+    });
+    if (!project || (!project.isPublic && project.ownerId !== req.user?.id)) {
+      throw new HttpError(404, "Project not found");
+    }
+    const ref = parseGithubRepoUrl(project.repoUrl);
+    if (!ref) throw new HttpError(404, "not_github");
+
+    let token: string | null = null;
+    try {
+      token = await getFreshGithubToken(project.owner);
+    } catch {
+      // A failed owner-token refresh must not block server-token/anonymous access.
+      token = null;
+    }
+
+    try {
+      res.json(await fetchRepoDigest(ref, token, project.id));
+    } catch (err) {
+      if (err instanceof GithubNotFoundError) throw new HttpError(404, "repo_unavailable");
       throw new HttpError(503, "github_unavailable");
     }
   })

@@ -292,7 +292,11 @@ ActivityEventType   = HEARTBEAT | SESSION_START | SESSION_END | GIT_COMMIT
 - `projectAlias` defaults to the folder's basename but is user-remappable/hideable per
   project in `~/.vibehub/config.json` (e.g. map `client-acme-app` → `"a client project"`
   or mark it `"hidden"` to exclude it from presence entirely).
-- Live presence (§4.3) is only pushed to accepted friends, never public.
+- Live presence (§4.3) — what someone is doing right now (project, tool, model, open
+  tools) — is only pushed to accepted friends, never public. The *coarse* part is public
+  since round 20 (PO decision): `GET /users/:username` carries `presence: { status,
+  lastSeenAt }`, so any signed-in visitor sees "Online" / "Last online 2h ago" on a
+  profile, but never the project name or the stack.
 - Stats are public per-user by default (Steam-like), but a user can set
   `statsVisibility: "friends" | "private"` (profile setting, not modeled as a separate
   table — a column on `User` added when the settings surface is built; out of scope for
@@ -553,7 +557,7 @@ for browser clients, or `Authorization: Bearer` for tracker device tokens on the
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/api/v1/users/:username` | → `{ user, links[], archetype, friendCount }` |
+| GET | `/api/v1/users/:username` | → `{ user, links[], archetype, friendCount, level, levelBreakdown, presence: { status, lastSeenAt } }` — `presence` (round 20) is the coarse public snapshot, no activity/tools (§3) |
 | PATCH | `/api/v1/users/me` | `{ displayName?, bio? }` → `{ user }` |
 | POST | `/api/v1/users/me/avatar` | multipart file → `{ avatarUrl }` |
 | PUT | `/api/v1/users/me/links` | `{ links: [{ url, label? }] }` (replace-all, server assigns `order`/`icon`) → `{ links[] }` |
@@ -647,13 +651,24 @@ every ~5s, so it is a fixed six queries regardless of history size.
 |---|---|---|
 | GET | `/api/v1/users/:username/projects` | → `{ projects[] }` |
 | GET | `/api/v1/projects/:id` | → `{ project, owner, liked }` — public, or the owner's own private card |
-| POST | `/api/v1/projects` | `{ name, description?, repoUrl?, liveUrl? }` → `{ project }` |
-| PATCH | `/api/v1/projects/:id` | partial → `{ project }` |
+| POST | `/api/v1/projects` | `{ name, description?, repoUrl?, liveUrl? }` → `{ project }` — URLs are lenient (round 20): `owner/repo`, `github.com/owner/repo` and any scheme-less `host/path` are normalized to `https://…`; `""` means "none"; only http(s) survive |
+| PATCH | `/api/v1/projects/:id` | partial → `{ project }` — same URL leniency; `""`/`null` clears a URL |
 | DELETE | `/api/v1/projects/:id` | → `204` |
 | POST | `/api/v1/projects/:id/like` | → `{ likeCount }` |
 | DELETE | `/api/v1/projects/:id/like` | → `{ likeCount }` |
 | GET | `/api/v1/projects/:id/commits` | → `{ repo, commits[], lastPushAt, build, latestRelease }` — degrades to empty when GitHub is unreachable |
 | GET | `/api/v1/projects/:id/repo?path=` | repo file browser, below |
+| GET | `/api/v1/projects/:id/digest` | → `{ repo, url, description, homepage, stars, forks, openIssues, language, languages[], topics[], license, defaultBranch, createdAt, pushedAt, readme, socialImageUrl, fetchedAt }` — repo digest for the card (round 20), below |
+
+**`GET /projects/:id/digest` (round 20)** — what the project card shows when the owner
+pasted only a repo URL: GitHub's own description, stars/forks, primary language plus
+the languages split, topics, licence, and the README excerpt, in one request. Same
+visibility gate, token order (owner OAuth → `GITHUB_TOKEN` → anonymous), 8 s timeout
+and 10-minute cache as `/repo`; `languages`/`readme` degrade to `null` on their own,
+the repo itself missing is a `404 repo_unavailable`, GitHub down is a `503
+github_unavailable`, a non-GitHub `repoUrl` is a `404 not_github`. `socialImageUrl` is
+`https://opengraph.githubassets.com/<projectId>/<owner>/<repo>` — GitHub's generated
+social card, which the web uses as the cover when no screenshot was uploaded.
 
 **`GET /projects/:id/repo?path=<subpath>` (round 7)** — the project page's file browser:
 one directory level of the linked GitHub repo's default branch, so a project with no
@@ -700,7 +715,7 @@ repo works for its owner), then `GITHUB_TOKEN`, then anonymous; 8 s per GitHub c
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/api/v1/users/:username/stats?range=30d` | → `{ byModel[], topModel, totalTokens, totalActiveSeconds, streak, githubCommits[], rangeDays }` |
+| GET | `/api/v1/users/:username/stats?range=30d` | → `{ byModel[], topModel, byTool[], topTool, totalTokens, totalActiveSeconds, streak, githubCommits[], rangeDays }` — `byTool` (round 20) is `byModel` folded per tool `{ tool, tokensInput, tokensOutput, activeSeconds, lastActiveAt }`, ranked by active time, tokens second; `topTool = byTool[0].tool ?? null` |
 | GET | `/api/v1/users/:username/stats/compare?with=otherUsername&range=30d` | → `{ a: {...}, b: {...} }` (same shape as above, twice) |
 
 `range` is `<n>d` (1–365, default `30d`) or **`all`** (round 7) — no lower bound at all,

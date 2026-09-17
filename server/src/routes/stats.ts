@@ -3,6 +3,7 @@ import { Router } from "express";
 import { prisma } from "../db";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { LEGACY_UNKNOWN_MODEL, normalizeModel, utcDay } from "../lib/sessions";
+import { foldByTool, topToolOf } from "../lib/stats-tools";
 
 // Per-user stats rollup + friend compare — ARCHITECTURE.md §5.6. Closed sessions live
 // in DailyStat (§2.10); sessions still open are added on top so the numbers move while
@@ -125,9 +126,15 @@ export async function computeStats(user: User, rangeDays: number | null) {
     (a, b) => b.tokensInput + b.tokensOutput - (a.tokensInput + a.tokensOutput) || b.activeSeconds - a.activeSeconds
   );
 
+  // Round 20: the same buckets folded by tool alone — "which tool/IDE does this person
+  // use the most". Ranked by active time (hours are the measure), tokens break ties.
+  const byTool = foldByTool(byModel);
+
   return {
     byModel,
     topModel: byModel[0]?.model ?? null,
+    byTool,
+    topTool: topToolOf(byTool),
     totalTokens: byModel.reduce((sum, b) => sum + b.tokensInput + b.tokensOutput, 0),
     totalActiveSeconds: byModel.reduce((sum, b) => sum + b.activeSeconds, 0),
     streak: {

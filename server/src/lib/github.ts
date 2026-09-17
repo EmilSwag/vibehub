@@ -106,6 +106,28 @@ export interface RepoReadme {
   url: string;
 }
 
+/** Cached repo metadata for a rich project card, even when only a repo URL was supplied. */
+export interface RepoDigest {
+  repo: RepoRef;
+  url: string;
+  description: string | null;
+  homepage: string | null;
+  stars: number;
+  forks: number;
+  openIssues: number;
+  language: string | null;
+  languages: RepoLanguage[] | null;
+  /** At most six topics, in GitHub's order. */
+  topics: string[];
+  license: string | null;
+  defaultBranch: string;
+  createdAt: string | null;
+  pushedAt: string | null;
+  readme: RepoReadme | null;
+  socialImageUrl: string;
+  fetchedAt: string;
+}
+
 const COMMITS_CACHE_TTL_MS = 10 * 60 * 1000;
 const REPO_BROWSE_CACHE_TTL_MS = 10 * 60 * 1000;
 const REPOS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -120,6 +142,7 @@ const reposCache = new Map<string, { at: number; value: GithubRepoSummary[] }>()
 const treeCache = new Map<string, { at: number; value: RepoTree }>();
 const languagesCache = new Map<string, { at: number; value: RepoLanguage[] | null }>();
 const readmeCache = new Map<string, { at: number; value: RepoReadme | null }>();
+const digestCache = new Map<string, { at: number; value: Omit<RepoDigest, "socialImageUrl"> }>();
 
 /** Decrypts `User.githubAccessToken`; null/empty/corrupt all resolve to null (never throws). */
 export function decryptGithubToken(encrypted: string | null | undefined): string | null {
@@ -532,6 +555,64 @@ async function fetchRepoMeta(
   const value = { defaultBranch: json.default_branch || "main" };
   repoMetaCache.set(key, { at: Date.now(), value });
   return value;
+}
+
+interface GithubRepoDigestJson extends GithubRepoJson {
+  homepage?: string | null;
+  forks_count?: number;
+  open_issues_count?: number;
+  topics?: string[];
+  license?: { spdx_id?: string | null; name?: string | null } | null;
+  created_at?: string | null;
+}
+
+/**
+ * Rich card metadata, cached by repo and auth/anon for ten minutes like the browser.
+ * Only repository metadata is required: languages/README failures degrade to null.
+ */
+export async function fetchRepoDigest(
+  ref: RepoRef,
+  accessToken: string | null | undefined,
+  projectId: string
+): Promise<RepoDigest> {
+  const key = browseCacheKey(ref, accessToken, "digest");
+  // This belongs to the card, not the repo: recompute it even on a shared cache hit.
+  const socialImageUrl = `https://opengraph.githubassets.com/${projectId}/${ref.owner}/${ref.repo}`;
+  const hit = digestCache.get(key);
+  if (hit && Date.now() - hit.at < REPO_BROWSE_CACHE_TTL_MS) return { ...hit.value, socialImageUrl };
+
+  const [repoRes, languages, readme] = await Promise.all([
+    githubFetch(`https://api.github.com/repos/${ref.owner}/${ref.repo}`, authHeaders(accessToken)),
+    fetchRepoLanguages(ref, accessToken).catch(() => null),
+    fetchReadmeExcerpt(ref, accessToken).catch(() => null),
+  ]);
+  if (!repoRes.ok) throw githubFailure(repoRes.status);
+
+  const json = (await repoRes.json().catch(() => null)) as GithubRepoDigestJson | null;
+  if (!json || typeof json.html_url !== "string" || !json.html_url) {
+    throw new GithubUnavailableError("Invalid GitHub repository response");
+  }
+  const license = json.license?.spdx_id ?? json.license?.name ?? null;
+  const value: Omit<RepoDigest, "socialImageUrl"> = {
+    repo: ref,
+    url: json.html_url,
+    description: json.description ?? null,
+    homepage: json.homepage || null,
+    stars: json.stargazers_count ?? 0,
+    forks: json.forks_count ?? 0,
+    openIssues: json.open_issues_count ?? 0,
+    language: json.language ?? null,
+    languages,
+    topics: Array.isArray(json.topics) ? json.topics.filter((topic) => typeof topic === "string").slice(0, 6) : [],
+    license: license === "NOASSERTION" ? null : license,
+    defaultBranch: json.default_branch || "main",
+    createdAt: json.created_at ?? null,
+    pushedAt: json.pushed_at ?? null,
+    readme,
+    fetchedAt: new Date().toISOString(),
+  };
+  digestCache.set(key, { at: Date.now(), value });
+  return { ...value, socialImageUrl };
 }
 
 interface GithubContentJson {

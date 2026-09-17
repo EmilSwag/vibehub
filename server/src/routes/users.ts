@@ -134,11 +134,12 @@ router.get(
     });
     if (!user) throw new HttpError(404, "User not found");
 
-    const [friendCount, level] = await Promise.all([
+    const [friendCount, level, presence] = await Promise.all([
       prisma.friendship.count({
         where: { OR: [{ userAId: user.id }, { userBId: user.id }] },
       }),
       computeLevel(user.id, { withModels: true }),
+      presenceFor(user.id, user.username),
     ]);
 
     res.json({
@@ -148,6 +149,11 @@ router.get(
       friendCount,
       level: level.level,
       levelBreakdown: level,
+      // Round 20 (PO decision): "last online" is public. This is the coarse snapshot
+      // only — status + account-level lastSeenAt. What the person is doing right now
+      // (activity, open tools) stays friends-only over the WebSocket (ARCHITECTURE §3),
+      // so a stranger sees "Online" or "Last online 2h ago", never the project name.
+      presence: { status: presence.status, lastSeenAt: presence.lastSeenAt },
     });
   })
 );

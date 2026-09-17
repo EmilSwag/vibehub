@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeProjectUrl } from "./project-url";
 
 // Enums are validated here as plain strings on purpose — the SQLite dev schema has
 // no native enum type, so the app layer is the single source of truth for both
@@ -74,11 +75,20 @@ const imageUrlSchema = z
   .refine((s) => /^https?:\/\//.test(s) || s.startsWith("/uploads/"), "must be an http(s) URL or an /uploads path");
 const imageUrlsSchema = z.array(imageUrlSchema).max(MAX_PROJECT_IMAGES);
 
+const projectUrlSchema = z.preprocess(
+  normalizeProjectUrl,
+  z.string().url().max(2048)
+    .refine((url) => /^https?:\/\//i.test(url), "must be an http(s) URL")
+    .nullable().optional()
+);
+// CREATE has no prior URL to clear; PATCH must preserve null as an explicit clear.
+const createProjectUrlSchema = projectUrlSchema.transform((url) => url ?? undefined);
+
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(500).optional(),
-  repoUrl: z.string().url().max(2048).optional(),
-  liveUrl: z.string().url().max(2048).optional(),
+  repoUrl: createProjectUrlSchema,
+  liveUrl: createProjectUrlSchema,
   coverImageUrl: imageUrlSchema.optional(),
   imageUrls: imageUrlsSchema.optional(),
   isPublic: z.boolean().optional(),
@@ -86,8 +96,8 @@ export const createProjectSchema = z.object({
 export const patchProjectSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   description: z.string().max(500).nullable().optional(),
-  repoUrl: z.string().url().max(2048).nullable().optional(),
-  liveUrl: z.string().url().max(2048).nullable().optional(),
+  repoUrl: projectUrlSchema,
+  liveUrl: projectUrlSchema,
   coverImageUrl: imageUrlSchema.nullable().optional(),
   imageUrls: imageUrlsSchema.optional(),
   isPublic: z.boolean().optional(),
