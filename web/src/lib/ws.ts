@@ -1,7 +1,8 @@
 // WebSocket client per docs/ARCHITECTURE.md §5.9.
 // Auth is the vh_session cookie read during the HTTP upgrade — browser only.
-
 import type { WsServerEvent } from "../types";
+import { authApi } from "./api";
+import { authGeneration, expireAuthSession, isCurrentAuth, onAuthBoundary } from "./authSession";
 
 type Listener = (event: WsServerEvent) => void;
 
@@ -11,25 +12,48 @@ export class VibeHubSocket {
   private listeners = new Set<Listener>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
-  private closedByCaller = false;
+  private closedByCaller = true;
+  private lifecycle = 0;
+  private generation = authGeneration();
+  private probe: AbortController | null = null;
+  private offAuth: (() => void) | null = null;
+
+  constructor(private readonly userId: string) {}
 
   connect() {
+    if (!this.closedByCaller) return;
     this.closedByCaller = false;
+    this.generation = authGeneration();
+    this.lifecycle += 1;
+    this.reconnectAttempt = 0;
+    this.offAuth = onAuthBoundary(() => this.close());
     this.open();
   }
 
+  private active(lifecycle = this.lifecycle): boolean {
+    return !this.closedByCaller && lifecycle === this.lifecycle && isCurrentAuth(this.generation);
+  }
+
   private open() {
-    const socket = new WebSocket(import.meta.env.VITE_WS_URL);
+    if (!this.active()) return;
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(import.meta.env.VITE_WS_URL);
+    } catch {
+      this.scheduleReconnect();
+      return;
+    }
     this.socket = socket;
+    const lifecycle = this.lifecycle;
+    const current = () => this.active(lifecycle) && this.socket === socket;
 
     socket.addEventListener("open", () => {
+      if (!current()) return;
       this.reconnectAttempt = 0;
-      if (this.subscribed.size > 0) {
-        this.send([...this.subscribed]);
-      }
+      if (this.subscribed.size > 0) this.send([...this.subscribed]);
     });
-
     socket.addEventListener("message", (event) => {
+      if (!current()) return;
       try {
         const data = JSON.parse(event.data) as WsServerEvent;
         this.listeners.forEach((listener) => listener(data));
@@ -37,17 +61,51 @@ export class VibeHubSocket {
         // ignore malformed frames
       }
     });
-
     socket.addEventListener("close", () => {
-      if (this.closedByCaller) return;
-      const delay = Math.min(1000 * 2 ** this.reconnectAttempt, 15000);
-      this.reconnectAttempt += 1;
-      this.reconnectTimer = setTimeout(() => this.open(), delay);
+      if (!current()) return;
+      this.socket = null;
+      this.scheduleReconnect();
     });
   }
 
+  private scheduleReconnect() {
+    if (!this.active() || this.reconnectTimer !== null || this.probe) return;
+    const lifecycle = this.lifecycle;
+    const delay = Math.min(1000 * 2 ** Math.min(this.reconnectAttempt++, 4), 15000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.active(lifecycle)) void this.revalidate(lifecycle);
+    }, delay);
+  }
+
+  private async revalidate(lifecycle: number) {
+    const controller = new AbortController();
+    this.probe = controller;
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let authenticated = false;
+    try {
+      // Browsers do NOT expose handshake HTTP401 as CloseEvent.code (usually 1006).
+      // Ask an authenticated HTTP endpoint instead; network/5xx/403 are inconclusive.
+      const { user } = await authApi.me(controller.signal);
+      if (!this.active(lifecycle)) return;
+      if (!user || user.id !== this.userId) {
+        expireAuthSession(this.generation);
+        return;
+      }
+      authenticated = true;
+    } catch {
+      // The API client handles real HTTP401. Other failures retry with capped backoff.
+    } finally {
+      clearTimeout(timeout);
+      if (this.probe === controller) this.probe = null;
+    }
+    if (!this.active(lifecycle)) return;
+    if (authenticated) this.open();
+    else this.scheduleReconnect();
+  }
+
   private send(channels: string[]) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (this.active() && this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type: "subscribe", channels }));
     }
   }
@@ -67,9 +125,18 @@ export class VibeHubSocket {
 
   close() {
     this.closedByCaller = true;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.socket?.close();
+    this.lifecycle += 1;
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.probe?.abort();
+    this.probe = null;
+    this.offAuth?.();
+    this.offAuth = null;
+    // Clear identity before close: even a synchronous/late close cannot schedule work.
+    const socket = this.socket;
     this.socket = null;
+    socket?.close();
     this.subscribed.clear();
+    this.listeners.clear();
   }
 }

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { friendsApi, presenceApi, usersApi } from "../lib/api";
+import { friendsApi, presenceApi } from "../lib/api";
+import { isCurrentAuth } from "../lib/authSession";
 import { VibeHubSocket } from "../lib/ws";
 import { ToastStack } from "../components/ui/Toast";
 import { useAuth } from "./AuthContext";
@@ -34,7 +35,7 @@ const TOAST_TTL_MS = 6000;
 const LIVE_TOAST_COOLDOWN_MS = 10 * 60 * 1000;
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, generation } = useAuth();
   const socketRef = useRef<VibeHubSocket | null>(null);
   const [presences, setPresences] = useState<Map<string, Presence>>(new Map());
   const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
@@ -44,31 +45,57 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   // Mirror of `presences` for the socket handler (avoids side effects in updaters).
   const presencesRef = useRef<Map<string, Presence>>(new Map());
 
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const alive = useRef(false);
+  const requestSequence = useRef(0);
+  const toastTimers = useRef(new Set<number>());
+  const current = useCallback(() => alive.current && !!user?.id && isCurrentAuth(generation), [user?.id, generation]);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      requestSequence.current += 1;
+      toastTimers.current.forEach((id) => window.clearTimeout(id));
+      toastTimers.current.clear();
+      wallListenersRef.current.clear();
+      liveToastAtRef.current.clear();
+    };
   }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    if (current()) setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, [current]);
 
   const pushToast = useCallback(
     (toast: Omit<Toast, "id">) => {
+      if (!current()) return;
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setToasts((prev) => [...prev.slice(-3), { ...toast, id }]);
-      window.setTimeout(() => dismissToast(id), TOAST_TTL_MS);
+      const timer = window.setTimeout(() => {
+        toastTimers.current.delete(timer);
+        dismissToast(id);
+      }, TOAST_TTL_MS);
+      toastTimers.current.add(timer);
     },
-    [dismissToast]
+    [current, dismissToast]
   );
 
   const refreshRequests = useCallback(async () => {
+    if (!current()) return;
+    const sequence = ++requestSequence.current;
     try {
       const { incoming } = await friendsApi.requests();
-      setIncomingRequests(incoming);
+      if (current() && sequence === requestSequence.current) setIncomingRequests(incoming);
     } catch {
-      /* keep what we have */
+      /* transient — keep this account's current list */
     }
-  }, []);
+  }, [current]);
 
   const removeRequest = useCallback((id: string) => {
+    if (!current()) return;
+    requestSequence.current += 1;
     setIncomingRequests((prev) => prev.filter((r) => r.id !== id));
-  }, []);
+  }, [current]);
 
   useEffect(() => {
     if (!user) {
@@ -98,7 +125,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     presenceApi
       .friends()
       .then(({ presences: list }) => {
-        if (cancelled) return;
+        if (cancelled || !current()) return;
         // Merge: live pushes may already have arrived while the snapshot was in flight.
         const merged = new Map(list.map((p) => [p.username, p] as const));
         presencesRef.current.forEach((p, k) => merged.set(k, p));
@@ -108,12 +135,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       .catch(() => undefined);
     void refreshRequests();
 
-    const socket = new VibeHubSocket();
+    const socket = new VibeHubSocket(user.id);
     socketRef.current = socket;
     socket.connect();
     socket.subscribe(["presence", "friend-requests"]);
 
     const unsubscribe = socket.on((event) => {
+      if (cancelled || !current() || socketRef.current !== socket) return;
       if (event.type === "presence:update") {
         const before = presencesRef.current.get(event.username);
         const next = new Map(presencesRef.current);
@@ -172,7 +200,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     // tore the socket down and refetched presence on every such edit — the
     // other half of the round-5 presence bug (see the reset comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, pushToast, refreshRequests]);
+  }, [user?.id, generation, current, pushToast, refreshRequests]);
 
   const watchWall = useMemo(
     () => (username: string, onComment: (comment: WallComment) => void) => {

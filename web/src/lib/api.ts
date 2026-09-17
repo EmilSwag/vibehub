@@ -22,6 +22,8 @@ import type {
   WallComment,
 } from "../types";
 
+import { assertAuthGeneration, authGeneration, expireAuthSession } from "./authSession";
+
 const BASE_URL = import.meta.env.VITE_API_URL;
 /** Absolute API origin for user-facing snippets (curl prompts, install one-liners). */
 export const API_BASE: string = BASE_URL ?? "";
@@ -34,22 +36,30 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, sessionAuth = true): Promise<T> {
+  const generation = authGeneration();
+  if (sessionAuth) assertAuthGeneration(generation);
   const res = await fetch(`${BASE_URL}${path}`, {
     credentials: "include",
+    ...init,
     headers:
       init?.body && !(init.body instanceof FormData)
         ? { "Content-Type": "application/json", ...init.headers }
         : init?.headers,
-    ...init,
   });
 
-  if (res.status === 204) {
-    return undefined as T;
+  if (sessionAuth) assertAuthGeneration(generation);
+  // Upgrade failures and proxies can return HTML, empty or malformed JSON bodies.
+  // The HTTP status, not body parsing, is the evidence that this session expired.
+  if (sessionAuth && res.status === 401) {
+    expireAuthSession(generation);
+    throw new ApiError(401, "Your session expired. Sign in again.");
   }
+  if (res.status === 204) return undefined as T;
 
   const isJson = res.headers.get("content-type")?.includes("application/json");
   const data = isJson ? await res.json() : undefined;
+  if (sessionAuth) assertAuthGeneration(generation);
 
   if (!res.ok) {
     // Server error middleware (server/src/lib/http-error.ts) responds with `{ error }`;
@@ -78,15 +88,15 @@ export type AuthCapabilities = { github: boolean; devLogin: boolean };
 export const authApi = {
   /** Which sign-in methods this server instance actually has configured. */
   capabilities: async (): Promise<AuthCapabilities> => {
-    const health = await request<{ auth?: Partial<AuthCapabilities> }>("/api/v1/health");
+    const health = await request<{ auth?: Partial<AuthCapabilities> }>("/api/v1/health", undefined, false);
     return { github: health.auth?.github ?? true, devLogin: health.auth?.devLogin ?? false };
   },
-  me: () => request<{ user: User | null }>("/api/v1/auth/me"),
-  /** Exchange the one-time GitHub ticket for the session cookie (same origin hop as dev-login). */
-  claim: (ticket: string) => request<{ user: User }>("/api/v1/auth/claim", json({ ticket })),
+  me: (signal?: AbortSignal) => request<{ user: User | null }>("/api/v1/auth/me", { signal }),
+  /** A rejected one-time ticket is NOT evidence that the existing cookie is invalid. */
+  claim: (ticket: string) => request<{ user: User }>("/api/v1/auth/claim", { ...json({ ticket }), signal: AbortSignal.timeout(8000) }, false),
   devLogin: (username: string) =>
-    request<{ user: User }>("/api/v1/auth/dev-login", json({ username })),
-  logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
+    request<{ user: User }>("/api/v1/auth/dev-login", { ...json({ username }), signal: AbortSignal.timeout(8000) }, false),
+  logout: () => request<void>("/api/v1/auth/logout", { method: "POST", signal: AbortSignal.timeout(8000) }, false),
 };
 
 // ---- Users & profile (§5.2) ----

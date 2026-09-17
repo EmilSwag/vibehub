@@ -46,7 +46,7 @@ export function LoginPage() {
 
   useEffect(() => {
     const ticket = new URLSearchParams(window.location.search).get("oauth");
-    if (!ticket) return;
+    if (!ticket || user) return;
     let cancelled = false;
     completeOAuth(ticket)
       .then(() => {
