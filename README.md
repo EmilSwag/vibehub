@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/profile.png" alt="Profile stats: active time, top model, top tool, streak, tokens with a USD estimate, and per-model cost" width="900">
+  <img src="assets/screenshots/profile.png" alt="A public VibeHub profile: presence and last online, level, stats with a USD estimate, top model, top tool, streak, and per-model cost" width="900">
 </p>
 
 ## What you get
@@ -35,7 +35,7 @@
 - **Strictly monochrome.** One colour: green means *coding right now*.
 
 <p align="center">
-  <img src="assets/screenshots/project.png" alt="A project page: languages, README, file browser, recent pushes" width="900">
+  <img src="assets/screenshots/project.png" alt="A full project page built from a GitHub link: title and links, languages, README, file browser, CI status, release tag, recent pushes" width="900">
 </p>
 
 ## Connect your machine — one command
