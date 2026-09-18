@@ -82,12 +82,16 @@ const advance = async ms => {
 
 try {
   const compiled = await build({
-    stdin: { contents: 'export * as auth from "./src/lib/authSession"; export { authApi, ApiError } from "./src/lib/api"; export * as connect from "./src/lib/connectToken"; export { VibeHubSocket } from "./src/lib/ws";', resolveDir: root, sourcefile: 'synthetic-session-entry.ts', loader: 'ts' },
+    stdin: { contents: 'export * as auth from "./src/lib/authSession"; export { authApi, usersApi, ApiError } from "./src/lib/api"; export * as connect from "./src/lib/connectToken"; export { VibeHubSocket } from "./src/lib/ws";', resolveDir: root, sourcefile: 'synthetic-session-entry.ts', loader: 'ts' },
     bundle: true, write: false, format: 'esm', platform: 'node', target: 'es2022', logLevel: 'silent',
     define: { 'import.meta.env.VITE_API_URL': JSON.stringify(API), 'import.meta.env.VITE_WS_URL': JSON.stringify('wss://session-fixture.invalid') },
   });
-  const { auth, authApi, connect, VibeHubSocket } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+  const { auth, authApi, usersApi, connect, VibeHubSocket } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
   const fresh = () => { calls = []; return auth.beginAuthenticatedSession(); };
+  // A representative sessionAuth-guarded call. `authApi.me()` is deliberately NOT
+  // guarded (its 401 / `{ user: null }` is the normal guest answer), so the guarded
+  // contract is exercised through a profile read instead.
+  const guarded = () => usersApi.get('fixture-user');
 
   await test('new login retires old work and clears only private cached instructions', async () => {
     local.setItem('vh-connect-token:old', 'synthetic-old-key'); local.setItem('theme', 'dark');
@@ -129,24 +133,32 @@ try {
   });
   await test('HTTP401 expires the session even with an HTML body', async () => {
     const current = fresh(); respond = () => new Response('<html>no</html>', { status: 401 });
-    await rejects(authApi.me(), e => e.status === 401); eq(auth.isCurrentAuth(current), false);
+    await rejects(guarded(), e => e.status === 401); eq(auth.isCurrentAuth(current), false);
   });
   await test('expired protected calls are rejected before any request is sent', async () => {
-    calls = []; await rejects(authApi.me(), auth.AuthSessionChangedError); eq(calls.length, 0);
+    calls = []; await rejects(guarded(), auth.AuthSessionChangedError); eq(calls.length, 0);
+  });
+  await test('guest /auth/me answers (401 or user:null) never expire the session', async () => {
+    const current = fresh(); respond = () => new Response('', { status: 401 });
+    await rejects(authApi.me(), e => e.status === 401); eq(auth.isCurrentAuth(current), true);
+    respond = () => json({ user: null }); eq(await authApi.me(), { user: null }); eq(auth.isCurrentAuth(current), true);
+    // The provider only treats `user: null` as expiry when someone *was* signed in.
+    const source = readFileSync(join(root, 'src/context/AuthContext.tsx'), 'utf8');
+    eq(source.includes('else if (userRef.current) expireAuthSession(generation);'), true);
   });
   await test('network, HTTP403/500 and malformed JSON do not prove sign-out', async () => {
     for (const response of [() => { throw new TypeError('fixture network failure'); }, () => json({ error: 'denied' }, 403), () => json({ error: 'retry' }, 500), () => new Response('{', { headers: { 'content-type': 'application/json' } })]) {
-      const current = fresh(); respond = response; await rejects(authApi.me(), Error); eq(auth.isCurrentAuth(current), true);
+      const current = fresh(); respond = response; await rejects(guarded(), Error); eq(auth.isCurrentAuth(current), true);
     }
   });
   await test('old HTTP401 cannot expire a newly authenticated session', async () => {
-    fresh(); const gate = deferred(); respond = () => gate.promise; const old = authApi.me();
+    fresh(); const gate = deferred(); respond = () => gate.promise; const old = guarded();
     const current = fresh(); gate.resolve(new Response('', { status: 401 }));
     await rejects(old, auth.AuthSessionChangedError); eq(auth.isCurrentAuth(current), true);
   });
   await test('old JSON completion cannot populate the new account', async () => {
     fresh(); const body = deferred(); respond = () => ({ status: 200, ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: () => body.promise });
-    const old = authApi.me(); await flush(); const current = fresh(); body.resolve({ user: { id: 'old-fixture' } });
+    const old = guarded(); await flush(); const current = fresh(); body.resolve({ user: { id: 'old-fixture' } });
     await rejects(old, auth.AuthSessionChangedError); eq(auth.isCurrentAuth(current), true);
   });
   await test('rejected OAuth ticket does not expire a valid cookie session', async () => {

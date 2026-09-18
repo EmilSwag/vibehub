@@ -65,7 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user: next } = await authApi.me(AbortSignal.timeout(8000));
       if (!current()) return;
       if (next) commitUser(next);
-      else expireAuthSession(generation);
+      // A 200 `{ user: null }` only means "expired" if someone *was* signed in. For a
+      // guest on a public page (/u/:username, /p/:id) it is the normal answer —
+      // expiring here would set the module-level `expired` flag and make every
+      // sessionAuth-guarded request on the page reject before reaching the network
+      // (`usersApi.get` → "No profile at @x"). `user` simply stays null.
+      else if (userRef.current) expireAuthSession(generation);
     } catch {
       // authApi.me() is sessionAuth:false (see api.ts) — a guest's plain 401
       // lands here and is exactly what "not signed in" looks like, not a fault.
