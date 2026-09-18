@@ -1,217 +1,83 @@
 <p align="center">
-  <img src="assets/branding/banner.png" alt="VibeHub" width="640">
+  <img src="assets/branding/banner.png" alt="VibeHub" width="560">
 </p>
 
-# VibeHub
+<h3 align="center">Steam, for people who ship with an AI pair.</h3>
 
-**Steam, for people who ship with an AI pair.** VibeHub is an open-source social
-platform for AI-assisted developers: a profile, friends, a privacy-safe live status
-("in project neon-app · Claude Code · 1h 42m"), stats on tokens/time per model and
-GitHub activity, and project cards friends can browse and like. Strictly monochrome UI.
+<p align="center">
+  A profile, friends, a live "coding right now" status, and honest stats on the tokens
+  and dollars you burn per model — collected from your AI tools, nothing else.
+</p>
 
-No code, diffs, or prompts ever leave your machine — the local tracker only ever sends
-a project name, a tool/model name, token counts, and timestamps. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §3 for the full privacy model.
+<p align="center">
+  <a href="https://web-production-da778.up.railway.app"><b>Open VibeHub</b></a>
+  &nbsp;·&nbsp;
+  <a href="docs/INSTALL.md">Install the tracker</a>
+  &nbsp;·&nbsp;
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+  &nbsp;·&nbsp;
+  <a href="docs/DEVELOPMENT.md">Development</a>
+</p>
 
-## Live
+<p align="center">
+  <img src="assets/screenshots/profile.png" alt="Profile stats: active time, top model, top tool, streak, tokens with a USD estimate, and per-model cost" width="900">
+</p>
 
-| | |
-|---|---|
-| Web app | **https://web-production-da778.up.railway.app** |
-| API / WebSocket | `https://server-production-cc06.up.railway.app` (`/api/v1`, `/ws`) |
-| Health | `GET /api/v1/health` |
+## What you get
 
-Sign in, add your friends by username, connect your device with one command and your
-live status shows up on their home screen.
+- **Live status** — friends see *in project neon-app · Claude Code · 1h 42m* the moment
+  you start. Last online is on your profile for everyone.
+- **Stats that cost money** — active time, tokens and an estimated **$** per model,
+  your streak, and the tool you use most.
+- **Projects** — paste a GitHub link and you get a real card: cover, description,
+  language, stars, README, file browser, recent pushes.
+- **Friends & feed** — add by username, like projects, see who is online.
+- **Strictly monochrome.** One colour: green means *coding right now*.
 
-> **Auth.** Sign in with GitHub (OAuth App `Vibemunity`). Username login
-> (`DEV_LOGIN_ENABLED`) is off on the hosted instance.
+<p align="center">
+  <img src="assets/screenshots/project.png" alt="A project page: languages, README, file browser, recent pushes" width="900">
+</p>
 
-## Connect your device (one command)
+## Connect your machine — one command
 
-Get a device token in VibeHub → **Settings → Tracker → New token**, then run the
-command for your OS. The app also generates a ready-to-paste, hardened version of the
-same command (Home → **Connect**).
+Sign in with GitHub, go to **Settings → Tracker → New token**, then:
 
-**macOS / Linux** (Terminal)
+**macOS / Linux**
 
 ```bash
 curl -fsSL https://web-production-da778.up.railway.app/tracker/connect.sh | VIBEHUB_TOKEN='<device token>' bash -s -- --start
 ```
 
-**Windows** (PowerShell)
+**Windows**
 
 ```powershell
 $env:VIBEHUB_TOKEN='<device token>'; & ([scriptblock]::Create((irm https://web-production-da778.up.railway.app/tracker/connect.ps1))) -Start; Remove-Item Env:VIBEHUB_TOKEN
 ```
 
-What the installer does, in order:
-
 ```
-VibeHub
-Connecting this device
-✓ [1/5] Node.js ready (v24.21.0, private runtime)   ← downloaded from nodejs.org only if you have no Node ≥ 18; SHA-256 verified
-✓ [2/5] Tracker downloaded                          ← ~/.vibehub/app/vibehub-tracker.cjs, syntax-checked before use
+✓ [1/5] Node.js ready
+✓ [2/5] Tracker downloaded
 ✓ [3/5] Device token verified as @you
-✓ [4/5] Configuration saved                         ← ~/.vibehub/config.json (0600)
-✓ [5/5] Start running (pid 4242)                    ← only with --start / -Start; omit for setup only
-─── Installed in ~/.vibehub ─────────────────────────
-  start:  … vibehub-tracker.cjs start
-  status: … vibehub-tracker.cjs status
-  stop:   … vibehub-tracker.cjs stop
+✓ [4/5] Configuration saved
+✓ [5/5] Start running
 Open VibeHub — it turns green after the first ping.
 ```
 
-**What it reads.** Only Claude Code (`~/.claude/projects`) and Codex (`~/.codex/sessions`)
-session logs. No other apps, processes, window titles, browsing, keyboard, idle or Git.
-Parsing may temporarily read records containing prompts, code and tool output; those
-contents are never saved or sent. **What it sends:** tool, model, timing, token counts
-and a bounded project alias. Profiles and stats are public.
+Nothing is added to autostart; `stop` and delete `~/.vibehub` to remove it.
+Details, manage commands and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 
-**Manage / uninstall.** `~/.vibehub/runtime/bin/node ~/.vibehub/app/vibehub-tracker.cjs start|status|stop`
-(Windows: `%USERPROFILE%\.vibehub\runtime\node.exe %USERPROFILE%\.vibehub\app\vibehub-tracker.cjs …`).
-Nothing is added to OS autostart. To uninstall: `stop`, then delete `~/.vibehub`.
+## Privacy
 
-Requirements: macOS 13.5+ or Linux (glibc 2.28+, x64/arm64) with `curl` and `tar`;
-Windows 10+ x64/arm64 with PowerShell 5.1+. Full details and troubleshooting:
-[`docs/INSTALL.md`](docs/INSTALL.md).
+The tracker reads **only** Claude Code and Codex session logs on your machine. It sends
+tool, model, timestamps, token counts and a project alias — never code, prompts, diffs,
+window titles or anything about other apps. Profiles and stats are public; live
+presence is for friends. Full model: [Architecture §3](docs/ARCHITECTURE.md).
 
-## Status
+## Built with
 
-Server, web and tracker are feature-complete against
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and deployed. `scripts/smoke.js` runs 123
-end-to-end assertions (53 invariant checks + 70 status checks) over the whole REST
-surface, including heartbeat v2 `usage[]`, null→known model refinement and the
-minted-once tracker-token flow. The macOS menu-bar companion (`macos/`) is scaffolded
-but not yet built.
-
-## Monorepo layout
-
-```
-vibehub/
-├── docs/           ARCHITECTURE.md, BUILD_PLAN.md — read these first
-├── server/         Express + Prisma API + WebSocket (Postgres, SQLite in dev)
-├── web/            React + Vite SPA, monochrome design system
-├── tracker/        vibehub-tracker — local CLI, Discord-Rich-Presence-style heartbeats
-├── macos/          Swift menu-bar companion app (reads the tracker's local status.json)
-├── menubar-mac/    SwiftUI menu-bar app (reads the server — see "macOS menu bar" below)
-└── assets/branding/
-```
-
-## Quickstart (dev)
-
-Requires Node 20+, Docker (for local Postgres) or nothing extra if you use the SQLite
-dev fallback, and Xcode command line tools / Swift toolchain only if you're working on
-`macos/`.
-
-```bash
-npm install                                   # installs server + web + tracker workspaces
-
-# server — Option A: SQLite (zero setup)
-cp server/.env.example server/.env            # defaults already point at SQLite + dev-login
-npm run db:generate --workspace server        # Prisma clients (postgres + sqlite)
-npm run db:dev      --workspace server        # creates server/prisma/dev.db
-npm run db:seed     --workspace server        # 3 demo users: ada, grace, linus (friends, stats, wall)
-npm run dev:server                            # http://localhost:4000
-
-# server — Option B: Postgres
-#   set DATABASE_PROVIDER=postgresql + DATABASE_URL in server/.env, then
-#   npm run db:migrate --workspace server && npm run dev:server
-
-# web — in another terminal
-cp web/.env.example web/.env                  # VITE_API_URL=http://localhost:4000, VITE_WS_URL=ws://localhost:4000/ws
-npm run dev:web                               # http://localhost:5173  → "Dev sign in" as ada
-
-# end-to-end API check against a running server
-node scripts/smoke.js http://localhost:4000   # exits non-zero on failure
-node scripts/fake-heartbeat.js linus my-proj  # make a seeded friend look "coding right now"
-```
-
-> **After pulling schema changes** (anything under `server/prisma/`), re-run
-> `npm run db:generate --workspace server` **and** `npm run db:dev --workspace server`
-> before starting the server (Postgres: `npm run db:migrate --workspace server`).
-> A `dev.db` or generated client that lags the schema does not fail at boot — health
-> stays green — it fails at query time as HTTP 500s (`no such column …`).
-
-### Tracker (your machine → your friends' home screen)
-
-```bash
-npm run build --workspace tracker
-# Web → Settings → Tracker tokens → "New token", then:
-node tracker/dist/index.js login <token>                 # defaults to the hosted server
-node tracker/dist/index.js login <token> --api-url http://localhost:4000   # local server
-node tracker/dist/index.js start                         # background daemon, heartbeats every 30s
-node tracker/dist/index.js status
-node tracker/dist/index.js set ~/code/secret-thing "(hidden)"   # rename or hide a project
-```
-
-For the macOS companion (WIP):
-
-```bash
-cd macos
-swift run   # no Xcode project needed for local iteration
-```
-
-## macOS menu bar
-
-[`menubar-mac/`](menubar-mac/) is a SwiftUI menu-bar app (macOS 13+, no dependencies)
-that shows your presence, today's active time, tokens and level, and which friends are
-online — polling `GET /api/v1/tracker/me` with a tracker token from the Keychain. It
-needs no local tracker daemon, so it works from any Mac.
-
-```bash
-cd menubar-mac
-swift run              # local iteration
-./scripts/bundle.sh    # signed .app + zip in dist/
-```
-
-Prebuilt zips come from the `menubar-mac` GitHub Actions workflow. See
-[`menubar-mac/README.md`](menubar-mac/README.md) for install and first-run steps.
-
-> Not to be confused with `macos/`, the earlier companion that reads the tracker's local
-> `~/.vibehub/status.json` instead of the server.
-
-## Deploying to Railway
-
-Two services + one Postgres, all from this repo:
-
-```bash
-railway init --name vibehub
-railway add --database postgres
-railway add --service server
-railway add --service web
-railway domain --service server          # → https://<server>.up.railway.app
-railway domain --service web             # → https://<web>.up.railway.app
-railway service server                   # link, then attach persistent storage for avatars:
-railway volume add --mount-path /app/uploads
-
-railway variables --service server --skip-deploys \
-  --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' --set DATABASE_PROVIDER=postgresql \
-  --set NODE_ENV=production --set JWT_SECRET=<48 random bytes hex> \
-  --set CORS_ORIGIN=https://<web>.up.railway.app --set COOKIE_SAME_SITE=none \
-  --set DEV_LOGIN_ENABLED=false \
-  --set GITHUB_CALLBACK_URL=https://<server>.up.railway.app/api/v1/auth/github/callback
-railway variables --service web --skip-deploys \
-  --set VITE_API_URL=https://<server>.up.railway.app \
-  --set VITE_WS_URL=wss://<server>.up.railway.app/ws
-
-# each service builds from its own Dockerfile; --path-as-root makes the subfolder the build context
-railway up ./server --path-as-root --service server --detach
-railway up ./web    --path-as-root --service web    --detach
-```
-
-The server image runs `prisma migrate deploy` on boot, so schema changes ship with
-`railway up`. Persistence: application data lives in Postgres (its own Railway volume),
-avatars on the server volume mounted at `/app/uploads` (override the path with
-`UPLOAD_DIR`). Both survive redeploys; `scripts/check-avatar-persistence.js` proves it.
-Design notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8.
-
-## Contributing
-
-This is early — the four workstreams in `docs/BUILD_PLAN.md` are written so they can be
-picked up independently. Pick one, read its section, respect the frozen interface
-contracts in §2, and open a PR against just that folder.
+TypeScript end to end — Express + Prisma + WebSocket on Postgres, React + Vite, a
+single-file Node tracker, and a SwiftUI menu-bar app for macOS. Hosted on Railway.
 
 ## License
 
-MIT.
+[MIT](LICENSE)

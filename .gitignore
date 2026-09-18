@@ -23,15 +23,17 @@ vite.config.ts.timestamp-*
 .smoke-*.txt
 .rw-*.json
 
-# local-only smoke-test reports (see CLAUDE.md report convention) — never committed,
-# except the round-7 report and its screenshots, which ship with the round (PO request).
-/reports/*
-!/reports/round7/
-!/reports/round7-report.html
+# internal QA reports, agent plans, design explorations — local only
+reports/
+meta/
+assets/design-concepts/
 
 # agent/IDE local state
-**/.claude/settings.local.json
+.claude/
 .quadcodeai/
+.mcp.json
+CLAUDE.md
+ui_views/
 
 # macOS SwiftPM
 macos/.build/
