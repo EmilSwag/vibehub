@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import { authApi, githubLoginUrl } from "../lib/api";
 import type { AuthCapabilities } from "../lib/api";
+import { takeLoginReturn } from "../lib/loginReturn";
 import { useAuth } from "../context/AuthContext";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -64,7 +65,14 @@ export function LoginPage() {
   }, [completeOAuth]);
 
   if (!loading && user) {
-    return <Navigate to="/" replace />;
+    // takeLoginReturn() is safe to call here, on every render this branch takes:
+    // it resolves sessionStorage once and caches the answer at module scope, so
+    // it survives both a StrictMode double-render and AuthContext.tsx's own
+    // post-login remount (the generation-keyed <Fragment> that discards this
+    // component's own state the instant `user` becomes truthy) with the same
+    // correct destination either way, instead of a fresh remounted instance
+    // finding sessionStorage already emptied by the one that read it first.
+    return <Navigate to={takeLoginReturn() ?? "/"} replace />;
   }
 
   const showGithub = caps.github;

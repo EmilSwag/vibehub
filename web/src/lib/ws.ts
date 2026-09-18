@@ -1,7 +1,7 @@
 // WebSocket client per docs/ARCHITECTURE.md §5.9.
 // Auth is the vh_session cookie read during the HTTP upgrade — browser only.
 import type { WsServerEvent } from "../types";
-import { authApi } from "./api";
+import { ApiError, authApi } from "./api";
 import { authGeneration, expireAuthSession, isCurrentAuth, onAuthBoundary } from "./authSession";
 
 type Listener = (event: WsServerEvent) => void;
@@ -93,8 +93,13 @@ export class VibeHubSocket {
         return;
       }
       authenticated = true;
-    } catch {
-      // The API client handles real HTTP401. Other failures retry with capped backoff.
+    } catch (err) {
+      // authApi.me() is sessionAuth:false (api.ts), so a 401 no longer expires the
+      // session automatically — but this probe only ever runs for an already
+      // signed-in socket (RealtimeContext never connects one for a guest), so a
+      // real 401 here is exactly the same signal as the explicit `!user` branch
+      // above. Anything else (network/5xx/403) stays inconclusive and just retries.
+      if (err instanceof ApiError && err.status === 401) expireAuthSession(this.generation);
     } finally {
       clearTimeout(timeout);
       if (this.probe === controller) this.probe = null;

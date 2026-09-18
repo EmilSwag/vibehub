@@ -93,7 +93,20 @@ export const authApi = {
     const health = await request<{ auth?: Partial<AuthCapabilities> }>("/api/v1/health", undefined, false);
     return { github: health.auth?.github ?? true, devLogin: health.auth?.devLogin ?? false };
   },
-  me: (signal?: AbortSignal) => request<{ user: User | null }>("/api/v1/auth/me", { signal }),
+  /**
+   * `sessionAuth: false` deliberately — this call's whole job is to answer "am I
+   * signed in", so a 401 from it is a normal guest answer, not proof an existing
+   * session expired. With the default `sessionAuth: true` it was calling
+   * `expireAuthSession()` on that 401, permanently poisoning every other
+   * `sessionAuth`-guarded request for the rest of the page load (the guarded
+   * requests are gated on the same module-level `expired` flag) — which broke
+   * every signed-out visit to a public page (`/u/:username`, `/p/:id`), since
+   * their own already-in-flight/later `usersApi.get()` etc. would then reject
+   * before ever reaching the network. A *real* mid-session expiry is still
+   * caught normally: the next privileged request 401s and `request()`'s own
+   * `sessionAuth: true` handling (below) still calls `expireAuthSession()`.
+   */
+  me: (signal?: AbortSignal) => request<{ user: User | null }>("/api/v1/auth/me", { signal }, false),
   /** A rejected one-time ticket is NOT evidence that the existing cookie is invalid. */
   claim: (ticket: string) => request<{ user: User }>("/api/v1/auth/claim", { ...json({ ticket }), signal: AbortSignal.timeout(8000) }, false),
   devLogin: (username: string) =>

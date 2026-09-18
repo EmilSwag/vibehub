@@ -3,7 +3,10 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../context/RealtimeContext";
+import { githubLoginUrl } from "../../lib/api";
+import { rememberLoginReturn } from "../../lib/loginReturn";
 import { Avatar } from "../ui/Avatar";
+import buttonStyles from "../ui/Button.module.css";
 import { Logo } from "../ui/Logo";
 import { NavIcon } from "../ui/NavIcon";
 import type { NavIconName } from "../ui/NavIcon";
@@ -190,7 +193,7 @@ export function TopBar() {
         <div className={styles.right}>
           <ThemeToggle />
 
-          {user && (
+          {user ? (
             <>
               <button
                 ref={avatarButtonRef}
@@ -249,6 +252,19 @@ export function TopBar() {
                 </div>
               )}
             </>
+          ) : (
+            // The one guest action on a public page (/u/:username, /p/:id — the
+            // only routes TopBar ever renders without a user): straight to GitHub,
+            // the product's real sign-in path, not a link into a picker screen.
+            // The return trip is a full page reload, so the destination is
+            // remembered in sessionStorage, not component state.
+            <a
+              href={githubLoginUrl()}
+              className={[buttonStyles.btn, buttonStyles.primary, buttonStyles.sm].join(" ")}
+              onClick={() => rememberLoginReturn(`${location.pathname}${location.search}`)}
+            >
+              Continue with GitHub
+            </a>
           )}
         </div>
       </div>

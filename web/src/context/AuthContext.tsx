@@ -67,7 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (next) commitUser(next);
       else expireAuthSession(generation);
     } catch {
-      // Network/5xx/403 cannot prove sign-out. HTTP401 is handled by the client.
+      // authApi.me() is sessionAuth:false (see api.ts) — a guest's plain 401
+      // lands here and is exactly what "not signed in" looks like, not a fault.
+      // Network/5xx/403 cannot prove sign-out either. `user` simply stays null.
     } finally {
       if (current()) setLoading(false);
     }

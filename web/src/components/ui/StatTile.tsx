@@ -10,8 +10,12 @@ interface Props {
   value?: string;
   /** `number` (default): mono, tabular digits, one line. `text`: a name that must
    * read whole — "Claude Sonnet 4.5", never "Claude Son…" — so it is set in the
-   * UI sans one size down and wraps instead of truncating. */
-  kind?: "number" | "text";
+   * UI sans one size down and wraps instead of truncating. `tool`: same sans
+   * sizing, but the icon+name are one unbreakable inline group — the name
+   * ellipsizes instead of wrapping, because this is the one tile that also
+   * carries a companion ("NN% of time") that must be free to wrap onto its own
+   * line without the name fighting it for space. */
+  kind?: "number" | "text" | "tool";
   /** Same box, same label, a value-shaped bar — nothing moves when data lands. */
   loading?: boolean;
   /** Drops the value to secondary ink. For the gauge that must not read as a
@@ -42,16 +46,35 @@ export function StatTile({
   onClick,
   actionLabel,
 }: Props) {
+  // "Top model" and "Top tool" share the same sans sizing (`.text`); only their
+  // wrap behaviour differs below, so the skeleton's own sizing is shared too.
+  const textLike = kind !== "number";
+
   const body = (
     <>
       {loading ? (
-        <span className={cx(styles.value, kind === "text" && styles.text, !!companion && styles.withCompanion)}>
+        <span className={cx(styles.value, textLike && styles.text, !!companion && styles.withCompanion)}>
           <Skeleton
             className={styles.valueSkeleton}
-            width={kind === "text" ? "72%" : "48%"}
-            height={kind === "text" ? 14 : 20}
+            width={textLike ? "72%" : "48%"}
+            height={textLike ? 14 : 20}
           />
           {companion && <span className={styles.companion}><Skeleton width={76} height={12} /></span>}
+        </span>
+      ) : kind === "tool" ? (
+        <span className={cx(styles.value, styles.text, quiet && styles.quiet, !!companion && styles.withCompanion)}>
+          {/* One unbreakable unit: the glyph never shrinks (`.mark`, unchanged)
+              and the name ellipsizes instead of wrapping — only the companion
+              below is free to wrap, never the icon+name pair itself. */}
+          <span className={styles.toolGroup}>
+            {mark && (
+              <span className={styles.mark} aria-hidden="true">
+                {mark}
+              </span>
+            )}
+            <span className={styles.toolName}>{value}</span>
+          </span>
+          {companion && <span className={cx(styles.companion, styles.toolCompanion)}>{companion}</span>}
         </span>
       ) : (
         <span className={cx(styles.value, kind === "text" && styles.text, quiet && styles.quiet, !!companion && styles.withCompanion)}>

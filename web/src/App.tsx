@@ -67,12 +67,17 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        {/* Public: a signed-out visitor can open a profile page (round 9), same
+            shape as /p/:id below — the server gates private/friends-only detail,
+            not the route. Not behind ProtectedRoute. */}
         <Route
           path="/u/:username"
           element={
-            <ProtectedRoute>
-              <ProfilePage />
-            </ProtectedRoute>
+            <AppLayout>
+              <PageTransition>
+                <ProfilePage />
+              </PageTransition>
+            </AppLayout>
           }
         />
 

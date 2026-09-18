@@ -47,7 +47,7 @@ function Tiles({ stats, onTopModel }: TilesProps) {
         />
         <StatTile
           label="Top tool"
-          kind="text"
+          kind="tool"
           loading={loading}
           value={stats ? (topTool ? toolLabel(topTool) : "—") : undefined}
           mark={topTool && <ToolGlyph family={toolFamily(topTool)} size={18} />}

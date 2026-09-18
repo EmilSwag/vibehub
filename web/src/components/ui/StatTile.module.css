@@ -68,6 +68,36 @@
   overflow-wrap: anywhere;
 }
 
+/* Top tool only. `.text` above is Top model's contract (a name must read whole,
+ * so it wraps) — this tile's name never wraps, because the wrapping job here
+ * belongs to the companion ("NN% of time") below it. The glyph (`.mark`,
+ * already flex:none) and the name are one inline unit that shrinks as one; the
+ * name ellipsizes instead of breaking, so the icon can never end up alone on
+ * its own line and the two can never fight the companion for the same row. */
+.toolGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vh-space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.toolName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Forces the "NN% of time" companion onto its own row unconditionally — not
+ * merely "wraps if it doesn't fit" (`.withCompanion`'s plain `flex-wrap: wrap`,
+ * still used as-is by Tokens · fuel). A `flex-basis: 100%` item can never share
+ * a line with what came before it, so this holds at any tile width, not just
+ * the narrow ones the original bug showed up in. */
+.toolCompanion {
+  flex-basis: 100%;
+}
+
 /* Sits on the value's baseline block, never shrinking below its own size. */
 .mark {
   display: inline-flex;
