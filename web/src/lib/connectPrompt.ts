@@ -15,13 +15,13 @@ export const NODE_SETUP_NOTICE = "Node.js is installed automatically if needed."
 export const INSTALL_START_MEANS = "Running this command installs VibeHub and starts background tracking.";
 export const BACKGROUND_START_MEANS = "Runs in the background until you stop it. No OS autostart.";
 export const TRACKER_LOCAL_READS =
-  "Reads only Claude Code and Codex session logs. Parsing may temporarily read records containing prompts, code and tool output. These contents are not saved or sent.";
+  "Reads only Claude Code, Codex and Quadcode AI session logs. Parsing may temporarily read records containing prompts, code and tool output. These contents are not saved or sent.";
 export const TRACKER_UPLOADS =
-  "Sends only tool/model, timing, usage counts (including tokens) and a bounded project alias to VibeHub.";
+  "Sends only tool/model, timing, measured usage counts (tokens where the tool reports them) and a bounded project alias to VibeHub.";
 export const TRACKER_VISIBILITY =
   "Profiles and statistics, including recent activity, are public. Live presence cards are shared with accepted friends.";
 export const TRACKER_SUPPORT_NOTICE =
-  "Claude Code and Codex only. Quadcode, Cursor and ChatGPT/browser tracking are unavailable.";
+  "Tracks Claude Code, Codex (GPT models) and Quadcode AI. Quadcode AI counts activity and model only: it reports no tokens, so none are shown or estimated. Cursor, Windsurf and ChatGPT/browser tracking are unavailable.";
 export const TRACKER_SUPPORT_DETAILS =
   "No monitoring of other apps, processes, windows, browsing, keyboard activity, computer idle or Git. Unknown models stay unknown. Unsupported activity is not estimated. Setup does not install AI apps or connect provider accounts.";
 export const TRACKER_STATE_NOTICE =
@@ -73,8 +73,10 @@ function checkToken(token: string): void {
   }
 }
 
-/** Deployment origins only. HTTP is restricted to explicit loopback previews. */
-function origin(value: string): string {
+/** Deployment origins only. HTTP is restricted to explicit loopback previews.
+ *  Exported so the Mac install line (`lib/macInstall.ts`) validates origins with these
+ *  exact rules rather than a second, drifting copy of them. */
+export function assertOrigin(value: string): string {
   try {
     if (!/^https?:\/\//i.test(value) || value.length > 2048 || /[\x00-\x20\x7f-\x9f\s\\'"`$;&|<>?#]/.test(value)) throw new Error();
     const url = new URL(value);
@@ -100,8 +102,8 @@ function scriptCommand(
 ): string {
   checkOs(os);
   checkToken(token);
-  const api = origin(apiUrl);
-  const web = origin(webUrl);
+  const api = assertOrigin(apiUrl);
+  const web = assertOrigin(webUrl);
   if (os === "windows") {
     // Scope preferences to this invocation, restore deployment settings, and erase
     // the copied key even if the initial script download fails before it can clean up.

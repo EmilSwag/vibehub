@@ -2,8 +2,48 @@ import type { HeartbeatPayload, HeartbeatUsage } from "./types";
 
 /** Always on. No config flag can re-enable host observation or legacy replay. */
 export const COLLECTION_POLICY = "ai-session-metadata-v1";
-export const SUPPORTED_TOOLS = ["claude-code", "codex"] as const;
+/**
+ * Protocol name of the explicitly opt-in metadata receiver (`adapters/attested.ts`).
+ * The receiver is OFF unless `config.json` turns it on. While it is off the
+ * `ai-session-metadata-v1` guarantee above is bit-for-bit unchanged, which is why
+ * the policy marker itself does not move; `StatusFile.attestedReceiver` reports the
+ * switch instead. Turning it on adds exactly one evidence class — records a separate,
+ * user-installed producer wrote — and no new observation of the host.
+ */
+export const ATTESTED_PROTOCOL = "attested-metadata-v1";
+
+/**
+ * Tools a first-party log adapter in this repository may emit.
+ *
+ * Round 4: `quadcode` joined this list. Its chat log cannot *date* a reply from the
+ * record itself — the `timestamp` is local ISO with no zone and, on an LLM record,
+ * marks the turn *start* (one measured record spanned 3h47m). The native adapter
+ * therefore never treats that stamp as an instant: it dates activity by **observing
+ * the append** of a completed LLM record while the daemon is running, and uses the
+ * record's own stamp only to discard turns older than a day. See §4.5/§4.7.
+ */
+export const NATIVE_TOOLS = ["claude-code", "codex", "quadcode"] as const;
+/**
+ * Tools the explicitly opt-in receiver may accept records for. This is NOT the
+ * complement of `NATIVE_TOOLS`: `quadcode` is in both, because a user who installs a
+ * producer that genuinely measured a turn may still report it, while the native
+ * adapter covers activity and model on its own. Claude Code and Codex are absent
+ * deliberately — a file another process writes must never assert their activity.
+ */
+export const ATTESTED_TOOLS = ["quadcode"] as const;
+/**
+ * Tools for which NO measured token count exists in any source this repo reads.
+ * Their usage is not "zero" — it is unknown, and unknown never becomes a number.
+ * Any usage entry naming one of these is rejected outright rather than zeroed.
+ */
+export const TOKENLESS_TOOLS = ["quadcode"] as const;
+export const SUPPORTED_TOOLS = NATIVE_TOOLS;
 export type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
+export type NativeTool = (typeof NATIVE_TOOLS)[number];
+export type AttestedTool = (typeof ATTESTED_TOOLS)[number];
+export type TokenlessTool = (typeof TOKENLESS_TOOLS)[number];
+/** Turns older than this are historical, never live activity, whatever appended them. */
+export const MAX_RECORD_AGE_MS = 24 * 60 * 60_000;
 export const MAX_EVENT_AGE_MS = 5 * 60_000;
 export const MAX_FUTURE_SKEW_MS = 5_000;
 export const MAX_TOKEN_COUNT = 1_000_000_000;
@@ -35,13 +75,32 @@ export function objectRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function isSupportedTool(tool: unknown): tool is SupportedTool {
-  return tool === "claude-code" || tool === "codex";
+  return tool === "claude-code" || tool === "codex" || tool === "quadcode";
+}
+
+/** A tool a log adapter in this repo is allowed to produce. */
+export function isNativeTool(tool: unknown): tool is NativeTool {
+  return tool === "claude-code" || tool === "codex" || tool === "quadcode";
+}
+
+/** A tool the opt-in receiver may accept records for. Never Claude Code or Codex. */
+export function isAttestedTool(tool: unknown): tool is AttestedTool {
+  return tool === "quadcode";
+}
+
+/** A tool with no measured token count in any source. Usage stays unknown, never 0. */
+export function isTokenlessTool(tool: unknown): tool is TokenlessTool {
+  return tool === "quadcode";
 }
 
 export function safeModel(value: unknown, tool?: SupportedTool): string | null {
   if (typeof value !== "string") return null;
   const accepted = tool === "claude-code" ? CLAUDE_MODELS.has(value)
     : tool === "codex" ? CODEX_MODELS.has(value)
+    // Multi-model hosts (Quadcode, and the receiver) can drive any reviewed model, so
+    // the union of the existing allowlists applies. Deliberately NO id is added on
+    // their behalf — an observed-but-unreviewed id stays null rather than becoming a
+    // new entry with no pricing evidence behind it.
     : CLAUDE_MODELS.has(value) || CODEX_MODELS.has(value);
   return accepted ? value : null;
 }
@@ -98,7 +157,10 @@ export function safeDeviceToken(value: unknown): value is string {
 
 export function projectUsage(value: unknown): HeartbeatUsage | null {
   const u = objectRecord(value);
-  if (!u || !isSupportedTool(u.tool) || u.estimated === true ||
+  // A tokenless tool has no measured counter anywhere, so an entry claiming one is
+  // wrong by construction. Rejecting beats zeroing: a zero would read as "measured
+  // nothing", which is a different, false claim.
+  if (!u || !isSupportedTool(u.tool) || u.estimated === true || isTokenlessTool(u.tool) ||
       !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta)) return null;
   return {
     tool: u.tool, model: safeModel(u.model, u.tool),
@@ -129,8 +191,15 @@ export function projectHeartbeat(value: unknown, now = Date.now()): HeartbeatPay
   const output = usage.reduce((sum, u) => sum + u.tokensOutputDelta, 0);
   if (!isCount(input) || !isCount(output)) return null;
   result.usage = usage;
-  result.tokensInputDelta = input;
-  result.tokensOutputDelta = output;
+  // Unknown usage is ABSENT on the wire, not zero. A tokenless primary with nothing
+  // measured anywhere omits the legacy sums entirely, so an older server reading only
+  // those fields records no tokens rather than booking a measured zero. When another
+  // tool in the same tick did measure something, the sums are still sent — they are
+  // that tool's, and dropping them would lose real counts.
+  if (!isTokenlessTool(result.tool) || usage.length) {
+    result.tokensInputDelta = input;
+    result.tokensOutputDelta = output;
+  }
   if (p.tools !== undefined) {
     if (!Array.isArray(p.tools) || p.tools.length > SUPPORTED_TOOLS.length) return null;
     result.tools = [];

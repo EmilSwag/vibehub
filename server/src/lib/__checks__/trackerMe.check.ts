@@ -38,18 +38,20 @@ const activeAt = (
   project: string,
   tool: string,
   model: string | null,
-  lastSeenAt: string | null = at(11 * H).toISOString()
+  lastSeenAt: string | null = at(11 * H).toISOString(),
+  // null = this tool has no token counter anywhere (Quadcode); never 0-as-unknown.
+  tokens: number | null = 0
 ): PresenceSnapshot => ({
   username,
   status: "active",
-  activity: { projectAlias: project, tool, model, startedAt: at(10 * H).toISOString() },
+  activity: { projectAlias: project, tool, model, tokens, startedAt: at(10 * H).toISOString() },
   tools: [],
   lastSeenAt,
 });
 const idleAt = (username: string, lastSeenAt: string | null = at(11 * H).toISOString()): PresenceSnapshot => ({
   username,
   status: "idle",
-  activity: { projectAlias: "dozing", tool: "cursor", model: null, startedAt: at(9 * H).toISOString() },
+  activity: { projectAlias: "dozing", tool: "cursor", model: null, tokens: 0, startedAt: at(9 * H).toISOString() },
   tools: [],
   lastSeenAt,
 });
@@ -66,7 +68,7 @@ const base: TrackerMeInput = {
   user: ME,
   level: 7,
   presence: activeAt("emil", "vibehub", "claude-code", "claude-opus-5"),
-  today: { activeSeconds: 8_040, tokens: 125_000, sessionStartedAt: at(10 * H) },
+  today: { activeSeconds: 8_040, tokens: 125_000, sessionStartedAt: at(10 * H), estimatedUsd: 1.25, byModel: { "claude-opus-5": 1.25 } },
   lastSeenAt: at(11 * H),
   devices: [{ label: "MacBook Pro", lastSeenAt: at(11 * H) }],
   friends: [],
@@ -81,6 +83,7 @@ eq("presence.activity", full.presence.activity, {
   project: "vibehub",
   tool: "claude-code",
   model: "claude-opus-5",
+  tokens: 0,
   since: at(10 * H).toISOString(),
 });
 eq("presence.lastSeenAt", full.presence.lastSeenAt, at(11 * H).toISOString());
@@ -89,7 +92,11 @@ eq("today", full.today, {
   activeSeconds: 8_040,
   tokens: 125_000,
   sessionStartedAt: at(10 * H).toISOString(),
+  // Lane B (mac app): ≈$ for the Island pill, passed through from foldToday untouched.
+  estimatedUsd: 1.25,
+  byModel: { "claude-opus-5": 1.25 },
 });
+eq("today keys", Object.keys(full.today), ["activeSeconds", "tokens", "sessionStartedAt", "estimatedUsd", "byModel"]);
 eq("tracker.connected(active)", full.tracker.connected, true);
 eq("tracker.lastSeenAt is ISO", full.tracker.lastSeenAt, at(11 * H).toISOString());
 eq("tracker.devices", full.tracker.devices, [{ name: "MacBook Pro", lastSeenAt: at(11 * H).toISOString() }]);
@@ -124,7 +131,15 @@ eq("presence.lastSeenAt survives while offline", staleOffline.presence, {
 eq(
   "model:null survives, tool does not",
   buildTrackerMePayload({ ...base, presence: activeAt("emil", "neon", "cursor", null) }).presence.activity,
-  { project: "neon", tool: "cursor", model: null, since: at(10 * H).toISOString() }
+  { project: "neon", tool: "cursor", model: null, tokens: 0, since: at(10 * H).toISOString() }
+);
+
+// Round 4: a tokenless tool reports unknown as null all the way to the wire. A 0 here
+// would tell the app a measurement was taken and came back empty, which is false.
+eq(
+  "tokenless tool reports null tokens, never 0",
+  buildTrackerMePayload({ ...base, presence: activeAt("emil", "vibehub", "quadcode", "claude-fable-5-1", at(11 * H).toISOString(), null) }).presence.activity,
+  { project: "vibehub", tool: "quadcode", model: "claude-fable-5-1", tokens: null, since: at(10 * H).toISOString() }
 );
 
 // ---- the Round 5 trap: connected must not come from token lastUsedAt ----
@@ -150,14 +165,14 @@ eq(
     user: { id: "u_new", username: "newbie", displayName: null, avatarUrl: null },
     level: 1,
     presence: offline,
-    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null },
+    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} },
     lastSeenAt: null,
     devices: [],
   }),
   {
     user: { id: "u_new", username: "newbie", displayName: null, avatarUrl: null, level: 1 },
     presence: { status: "offline", activity: null, lastSeenAt: null },
-    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null },
+    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} },
     tracker: { connected: false, lastSeenAt: null, devices: [] },
     friendsOnline: { count: 0, sample: [] },
   }
@@ -188,7 +203,7 @@ eq("friendsOnline.sample order + shape", mixed.friendsOnline.sample, [
     displayName: "ANN",
     avatarUrl: null,
     status: "active",
-    activity: { project: "atlas", tool: "codex", model: "gpt-5-codex", since: at(10 * H).toISOString() },
+    activity: { project: "atlas", tool: "codex", model: "gpt-5-codex", tokens: 0, since: at(10 * H).toISOString() },
     lastSeenAt: at(11 * H).toISOString(),
   },
   {
@@ -196,7 +211,7 @@ eq("friendsOnline.sample order + shape", mixed.friendsOnline.sample, [
     displayName: "CY",
     avatarUrl: null,
     status: "idle",
-    activity: { project: "dozing", tool: "cursor", model: null, since: at(9 * H).toISOString() },
+    activity: { project: "dozing", tool: "cursor", model: null, tokens: 0, since: at(9 * H).toISOString() },
     lastSeenAt: at(11 * H).toISOString(),
   },
 ]);
@@ -211,30 +226,37 @@ eq("friendsOnline.sample is capped", many.friendsOnline.sample.length, FRIENDS_S
 eq("FRIENDS_SAMPLE_LIMIT matches the popover", FRIENDS_SAMPLE_LIMIT, 4);
 
 // ---- foldToday ----
-const stat = (date: Date, activeSeconds: number, tokensInput: number, tokensOutput: number) => ({
+// Rows default to claude-opus-5 ($5 / $25 per million input / output, lib/token-pricing.ts),
+// so the ≈$ pins below are: input tokens × 5e-6 + output tokens × 25e-6.
+const stat = (date: Date, activeSeconds: number, tokensInput: number, tokensOutput: number, model = "claude-opus-5") => ({
   date,
+  model,
   activeSeconds,
   tokensInput,
   tokensOutput,
 });
-const session = (startedAt: Date, lastHeartbeatAt: Date, tokensInput = 0, tokensOutput = 0) => ({
+const session = (startedAt: Date, lastHeartbeatAt: Date, tokensInput = 0, tokensOutput = 0, model: string | null = "claude-opus-5", tool = "claude-code") => ({
+  tool,
   startedAt,
   lastHeartbeatAt,
+  model,
   tokensInput,
   tokensOutput,
 });
 const yesterday = new Date(DAY - 86_400_000);
 
-eq("foldToday(nothing)", foldToday([], [], today), { activeSeconds: 0, tokens: 0, sessionStartedAt: null });
+eq("foldToday(nothing)", foldToday([], [], today), { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} });
 eq("foldToday(closed work only)", foldToday([stat(today, 3_600, 10, 20)], [], today), {
   activeSeconds: 3_600,
   tokens: 30,
   sessionStartedAt: null,
+  estimatedUsd: 0.00055,
+  byModel: { "claude-opus-5": 0.00055 },
 });
 eq(
   "foldToday drops DailyStat rows from other days",
   foldToday([stat(yesterday, 9_999, 999, 999), stat(today, 60, 1, 1)], [], today),
-  { activeSeconds: 60, tokens: 2, sessionStartedAt: null }
+  { activeSeconds: 60, tokens: 2, sessionStartedAt: null, estimatedUsd: 0.00003, byModel: { "claude-opus-5": 0.00003 } }
 );
 // Open session elapsed is measured to lastHeartbeatAt, never to now — a tracker that
 // died mid-session must stop accruing.
@@ -244,6 +266,23 @@ const folded = foldToday([stat(today, 3_600, 10, 20)], [session(at(10 * H), at(1
 eq("foldToday.activeSeconds", folded.activeSeconds, 7_200);
 eq("foldToday.tokens", folded.tokens, 40);
 eq("foldToday.sessionStartedAt", folded.sessionStartedAt?.toISOString() ?? null, at(10 * H).toISOString());
+// The open session's live tokens are priced too (5 in + 5 out at opus-5 = $0.00015 on top of $0.00055).
+eq("foldToday.estimatedUsd prices closed rows and the open session", folded.estimatedUsd, 0.0007);
+eq("foldToday.byModel merges rows of one model", folded.byModel, { "claude-opus-5": 0.0007 });
+
+// ---- ≈$ rules the Island must be able to rely on ----
+// A presence-only tool has no model: its tokens count, but nothing can be priced.
+const unpriced = foldToday([], [session(at(10 * H), at(11 * H), 5, 5, null)], today);
+eq("foldToday: null-model tokens are counted", unpriced.tokens, 10);
+eq("foldToday: null-model tokens are not priced", [unpriced.estimatedUsd, unpriced.byModel], [null, {}]);
+// The DailyStat "unknown" bucket (LEGACY_UNKNOWN_MODEL) is unpriced the same way.
+eq("foldToday: the unknown bucket is not priced", foldToday([stat(today, 60, 100, 100, "unknown")], [], today).estimatedUsd, null);
+// Mixed: priced models report their part; the unpriced remainder is simply absent.
+const partial = foldToday([stat(today, 0, 1_000_000, 0, "gpt-4.1"), stat(today, 0, 7, 0, "unknown")], [], today);
+eq("foldToday: mixed day prices what it can", [partial.tokens, partial.estimatedUsd], [1_000_007, 2]);
+eq("foldToday: byModel lists priced models only", partial.byModel, { "gpt-4.1": 2 });
+// Yesterday's still-open session is excluded from today's ≈$ exactly as from its time.
+eq("foldToday: overnight session is not priced into today", foldToday([], [session(at(-2 * H), at(1 * H), 1_000_000, 0)], today).estimatedUsd, 0);
 
 // A session that began yesterday and is still open belongs to yesterday's bucket — the
 // same day foldIntoDailyStat will use when it closes.
@@ -259,6 +298,53 @@ eq("foldToday sums every open session today", multi.activeSeconds, H / 1000 + (3
 // Clock skew: a heartbeat older than the start must never produce negative time.
 eq("foldToday clamps negative elapsed", foldToday([], [session(at(5 * H), at(4 * H))], today).activeSeconds, 0);
 
+// ---- Round 4: a tokenless tool measures nothing, so cost is unknown, not zero ----
+// Quadcode reports activity and model but no counts anywhere in its format. A priced
+// zero-token row would make the day read as $0.00 spent, which is a claim; unknown is
+// the truth, so the fold must return null.
+const tokenless = foldToday([], [session(at(10 * H), at(11 * H), 0, 0, "claude-fable-5-1", "quadcode")], today);
+eq("foldToday: a tokenless-only day reports estimatedUsd null, never 0", tokenless.estimatedUsd, null);
+// Superseded by the payload rule below: the count is UNKNOWN, not a measured zero.
+eq("foldToday: a tokenless-only day reports tokens null, never 0", tokenless.tokens, null);
+eq("foldToday: a tokenless-only day prices no model", tokenless.byModel, {});
+eq("foldToday: a tokenless session still accrues its elapsed time", tokenless.activeSeconds, 3_600);
+
+// An empty day is still a real zero - the null above must not leak into it.
+eq("foldToday: an empty day still reports estimatedUsd 0", foldToday([], [], today).estimatedUsd, 0);
+
+// A mixed day still reports the priced part: the tokenless row must not void it.
+const mixedTokenless = foldToday(
+  [stat(today, 0, 1_000_000, 0, "gpt-4.1")],
+  [session(at(10 * H), at(11 * H), 0, 0, "claude-fable-5-1", "quadcode")],
+  today
+);
+eq("foldToday: a mixed day still prices the measured part", (mixedTokenless.estimatedUsd ?? 0) > 0, true);
+eq("foldToday: the mixed day counts only measured tokens", mixedTokenless.tokens, 1_000_000);
+// ---- the wire contract the app decodes: unknown reaches the PAYLOAD as null ----
+// foldToday is where the rule lives, but the app reads buildTrackerMePayload. Pin the
+// whole path, not just the fold, or a passthrough regression would go unnoticed.
+const quadcodeDay = foldToday([], [session(at(10 * H), at(11 * H), 0, 0, "claude-fable-5-1", "quadcode")], today);
+const quadcodePayload = buildTrackerMePayload({ ...base, today: quadcodeDay });
+eq("payload today.tokens is null for a Quadcode-only day", quadcodePayload.today.tokens, null);
+eq("payload today.estimatedUsd is null for a Quadcode-only day", quadcodePayload.today.estimatedUsd, null);
+eq("payload today.byModel stays empty for a Quadcode-only day", quadcodePayload.today.byModel, {});
+eq("payload today keys are unchanged by the nullable tokens", Object.keys(quadcodePayload.today),
+  ["activeSeconds", "tokens", "sessionStartedAt", "estimatedUsd", "byModel"]);
+
+// A genuine measured zero must survive: a measuring tool that really used nothing
+// reports 0, and that 0 must NOT be rewritten to null by the rule above.
+const measuredZero = foldToday([], [session(at(10 * H), at(11 * H), 0, 0, "claude-opus-5", "claude-code")], today);
+const measuredZeroPayload = buildTrackerMePayload({ ...base, today: measuredZero });
+eq("a measuring tool that used nothing reports 0, not null", measuredZeroPayload.today.tokens, 0);
+eq("...and its day is priced at 0, not unknown", measuredZeroPayload.today.estimatedUsd, 0);
+
+// An empty day has nothing to be unknown about.
+eq("an empty day still reports tokens 0 on the payload",
+  buildTrackerMePayload({ ...base, today: foldToday([], [], today) }).today.tokens, 0);
+
+// A mixed day reports its measured count, unreduced by the tokenless session.
+eq("a mixed day reports only the measured tokens on the payload",
+  buildTrackerMePayload({ ...base, today: mixedTokenless }).today.tokens, 1_000_000);
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

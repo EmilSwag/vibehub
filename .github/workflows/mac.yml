@@ -1,0 +1,210 @@
+name: mac
+
+# Path filter is repo-relative: this repo's root IS `vibehub`, so the folder is
+# `mac/`, not `vibehub/mac/`.
+#
+# Tag note: a `mac-v*` tag only starts this workflow when the tagged commit also
+# touches one of the paths below. Cutting a release normally does (the version lives
+# in mac/Resources/Info.plist); if you ever tag an untouched commit, run the workflow
+# by hand with workflow_dispatch.
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'mac-v*'
+    paths:
+      - 'mac/**'
+      - 'web/public/tracker/mac.sh'
+      - '.github/workflows/mac.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mac
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      # The one-command installer is plain bash and only ever runs on a Mac, so this
+      # runner is the one place its syntax gets checked before it is served.
+      - name: Lint one-command installer
+        working-directory: .
+        run: |
+          for f in web/public/tracker/mac.sh mac/scripts/bundle.sh mac/scripts/embed-tracker.sh mac/scripts/make-pkg.sh mac/pkg/scripts/postinstall; do
+            bash -n "$f"
+            head -c 3 "$f" | grep -q '#!/'
+          done
+
+      # Keyed on the pin, not on a file hash: the pin only changes when
+      # scripts/embed-tracker.sh is edited to bump it, and re-downloading ~200MB
+      # (both architectures) on every push otherwise makes this the slowest step by far.
+      - name: Cache embedded Node runtime
+        uses: actions/cache@v4
+        with:
+          path: mac/.cache/node
+          key: mac-embedded-node-v24.21.0
+
+      # Signing/notarisation are entirely optional — every step below degrades to
+      # ad-hoc signing (bundle.sh's existing behaviour) when these secrets aren't set,
+      # which is the case until Developer ID credentials are added to this repo.
+      #
+      # GitHub Actions docs: secrets can't be referenced directly in `if:` conditions
+      # (they're masked, and doing so can leak whether a secret is set via the job's
+      # skipped/run status) — so this step always runs, and the script itself exits
+      # early when there's no certificate to import.
+      - name: Import Developer ID certificates
+        working-directory: .
+        env:
+          APP_CERT_P12: ${{ secrets.MACOS_APP_CERTIFICATE_P12 }}
+          APP_CERT_PASSWORD: ${{ secrets.MACOS_APP_CERTIFICATE_PASSWORD }}
+          INSTALLER_CERT_P12: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_P12 }}
+          INSTALLER_CERT_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_CERT_P12" ]; then
+            echo "no MACOS_APP_CERTIFICATE_P12 secret — building ad-hoc signed, as usual"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/vibehub-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo "$APP_CERT_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
+          security import "$RUNNER_TEMP/app.p12" -k "$KEYCHAIN" -P "$APP_CERT_PASSWORD" -T /usr/bin/codesign
+
+          if [ -n "$INSTALLER_CERT_P12" ]; then
+            echo "$INSTALLER_CERT_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+            security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$INSTALLER_CERT_PASSWORD" -T /usr/bin/productbuild
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productbuild: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          EXISTING_KEYCHAINS="$(security list-keychains -d user | sed 's/"//g')"
+          security list-keychains -d user -s "$KEYCHAIN" $EXISTING_KEYCHAINS
+          rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
+
+      - name: "Build and bundle (universal: arm64 + x86_64)"
+        env:
+          VIBEHUB_SIGN_IDENTITY: ${{ secrets.MACOS_APP_SIGN_IDENTITY }}
+        run: |
+          chmod +x scripts/bundle.sh scripts/embed-tracker.sh scripts/make-pkg.sh pkg/scripts/postinstall
+          ./scripts/bundle.sh
+
+      - name: Verify the bundle
+        run: |
+          APP="dist/VibeHub.app"
+          test -x "$APP/Contents/MacOS/VibeHub"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          test -x "$APP/Contents/Resources/tracker/node/bin/node"
+          test -f "$APP/Contents/Resources/tracker/vibehub-tracker.cjs"
+          plutil -lint "$APP/Contents/Info.plist"
+          # LSUIElement is what keeps it out of the Dock — assert it survived bundling.
+          test "$(plutil -extract LSUIElement raw -o - "$APP/Contents/Info.plist")" = "true"
+          codesign --verify --deep --strict "$APP"
+          lipo -archs "$APP/Contents/MacOS/VibeHub" | grep -q x86_64
+          lipo -archs "$APP/Contents/MacOS/VibeHub" | grep -q arm64
+          lipo -archs "$APP/Contents/Resources/tracker/node/bin/node" | grep -q x86_64
+          lipo -archs "$APP/Contents/Resources/tracker/node/bin/node" | grep -q arm64
+
+      # Cross-lane contract the app depends on at runtime, checked statically here
+      # because a real Mac is the only other place it would surface. The embedded CLI
+      # must accept `login --token-stdin` (plan FC4 — the token never goes into argv,
+      # and the app has no argv fallback by design) and expose the hidden `serve`
+      # command the LaunchAgent runs (FC1). Both live in tracker/ (Cody's lane); the app
+      # is bundled against whatever web/public/tracker/vibehub-tracker.cjs contains at
+      # build time, so a bundle from a tracker that predates either builds fine and then
+      # cannot sign in, or cannot start, on the user's machine. Fail here, by name.
+      #
+      # Also FC4 "no token in logs": nothing in the app may print. Source-level, so it
+      # holds for the exact commit being built rather than for a grep someone ran once.
+      - name: Verify embedded tracker contract
+        run: |
+          CJS="dist/VibeHub.app/Contents/Resources/tracker/vibehub-tracker.cjs"
+          if ! grep -q -- '--token-stdin' "$CJS"; then
+            echo "::error::embedded tracker has no 'login --token-stdin' (plan FC4). Land the tracker flag and rebuild the bundle (npm run bundle in tracker/) before this app can sign in."
+            exit 1
+          fi
+          if ! grep -qE "command\(['\"]serve['\"]" "$CJS"; then
+            echo "::error::embedded tracker has no hidden 'serve' command (plan FC1) — the LaunchAgent would have nothing to run."
+            exit 1
+          fi
+          if grep -rnE '(^|[^A-Za-z_.])(print|NSLog|debugPrint)\(' Sources/VibeHub/; then
+            echo "::error::print/NSLog in Sources/VibeHub — the app must never log (plan FC4, no token in logs)."
+            exit 1
+          fi
+
+      # $GITHUB_ENV, not this step's own env: a variable written there is available to
+      # every later step in the job automatically — exactly what's needed so the next
+      # step doesn't have to juggle re-declaring it. Runs unconditionally (secrets
+      # can't be used in `if:` — see the note above) and no-ops without the secret.
+      - name: Prepare notary API key
+        env:
+          NOTARY_KEY_P8: ${{ secrets.MACOS_NOTARY_KEY_P8 }}
+        run: |
+          if [ -z "$NOTARY_KEY_P8" ]; then
+            echo "no MACOS_NOTARY_KEY_P8 secret — skipping notarisation"
+            exit 0
+          fi
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+          echo "VIBEHUB_NOTARY_KEY_PATH=$RUNNER_TEMP/notary-key.p8" >> "$GITHUB_ENV"
+
+      - name: Build installer package
+        env:
+          VIBEHUB_PKG_SIGN_IDENTITY: ${{ secrets.MACOS_INSTALLER_SIGN_IDENTITY }}
+          VIBEHUB_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          VIBEHUB_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: ./scripts/make-pkg.sh
+
+      - name: Verify the pkg
+        run: |
+          test -f dist/VibeHub.pkg
+          test -f dist/VibeHub.pkg.sha256
+          shasum -a 256 -c <(printf '%s  dist/VibeHub.pkg\n' "$(cat dist/VibeHub.pkg.sha256)")
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeHub-macOS
+          path: mac/dist/VibeHub-macOS.zip
+          if-no-files-found: error
+
+      - name: Upload pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeHub-pkg
+          path: |
+            mac/dist/VibeHub.pkg
+            mac/dist/VibeHub.pkg.sha256
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/VibeHub.pkg" \
+            "dist/VibeHub.pkg.sha256" \
+            "dist/VibeHub-macOS.zip" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "VibeHub for macOS 13+.
+
+          **Installer (recommended):** download VibeHub.pkg, open it, follow the prompts.
+          VibeHub launches on its own once install finishes.
+
+          **Manual:** unzip VibeHub-macOS.zip, drag VibeHub.app to /Applications, then
+          right-click -> Open the first time if this build isn't notarised (Gatekeeper
+          otherwise refuses a plain double-click on an unnotarised app)."

@@ -29,6 +29,10 @@ for (const method of ["readFile", "writeFile", "readDirectory", "getDirectories"
 const EXECUTABLE = new Set([
   "src/lib/trackerConnection.ts", "src/lib/http-error.ts", "src/lib/json-field.ts",
   "src/lib/sessions.ts", "src/lib/tracker-me.ts", "src/lib/__checks__/trackerMe.check.ts",
+  // tracker-me.ts prices the day through token-pricing.ts, and both it and sessions.ts
+  // read tool identity from tools.ts. Both are pure and Prisma-free, so they execute
+  // under fixtures exactly as the rest do.
+  "src/lib/token-pricing.ts", "src/lib/tools.ts",
   "src/services/trackerConnection.ts", "src/middleware/auth.ts", "src/routes/tracker.ts",
   "src/routes/users.ts", "src/jobs/session-rollup.ts",
 ]);
@@ -449,7 +453,9 @@ test("idle transport has no AI details, sources, elapsed time or tokens on eithe
   eq(menu.tracker.connected, true);
   eq(menu.tracker.lastSeenAt, date(BASE).toISOString());
   eq(menu.presence, { status: "idle", activity: null, lastSeenAt: date(BASE).toISOString() });
-  eq(menu.today, { tokens: 0, activeSeconds: 0, sessionStartedAt: null });
+  // An idle transport is an EMPTY day: nothing was measured and nothing was priced,
+  // so the cost is a real 0, not the null an unmeasured tokenless day reports.
+  eq(menu.today, { tokens: 0, activeSeconds: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} });
   eq(browser.devices.find((item) => item.id === D1).lastSeenAt, date(BASE).toISOString());
   eq(browser.devices.find((item) => item.id === D2).lastSeenAt, null);
   eq(menu.tracker.devices.find((item) => item.name === D1).lastSeenAt, date(BASE).toISOString());

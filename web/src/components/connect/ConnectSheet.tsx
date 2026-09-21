@@ -27,6 +27,8 @@ import {
 import type { InstallOs } from "../../lib/connectPrompt";
 import { claimConnectCelebration, deviceLabel, detectOs, ensureConnectToken } from "../../lib/connectToken";
 import type { StoredConnectToken } from "../../lib/connectToken";
+import { detectInstallChoice, scriptOs } from "../../lib/macInstall";
+import type { InstallChoice } from "../../lib/macInstall";
 import { useExitTransition } from "../../lib/motion";
 import { formatElapsed, useTrackerPing } from "../../lib/useTrackerPing";
 import { installedNote, shouldCelebrate, staleSinceWaiting, staleTrackerHint } from "../../lib/trackerPing";
@@ -39,12 +41,17 @@ import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import { ConnectCelebration } from "../ui/ConnectCelebration";
+import { MacInstall } from "../MacInstall";
 import styles from "./ConnectSheet.module.css";
 
 const WEB_URL = window.location.origin;
 const EXIT_MS = 200;
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
-const OSES: { id: InstallOs; label: string }[] = [
+// Three install surfaces, one chooser. "macOS app" is the native VibeHub.app lane (its
+// own panel, its own disclosures); the other two are the unchanged shell-script flows —
+// same ids, same commands, same copy as before.
+const OSES: { id: InstallChoice; label: string }[] = [
+  { id: "mac-app", label: "macOS app" },
   { id: "mac", label: "macOS / Linux" },
   { id: "windows", label: "Windows" },
 ];
@@ -57,7 +64,7 @@ const firstStep = (copied: AttemptCopy | null) => copied === "connect"
   : copied === "start" ? "Start command copied" : "Copy or select the command above";
 
 // These are buttons choosing a command format, not provider tabs or incomplete tabs.
-function OsPicker({ value, onChange }: { value: InstallOs; onChange: (os: InstallOs) => void }) {
+function OsPicker({ value, onChange }: { value: InstallChoice; onChange: (os: InstallChoice) => void }) {
   return (
     <div className={styles.seg} role="group" aria-label="Operating system">
       {OSES.map((os) => (
@@ -72,6 +79,49 @@ function OsPicker({ value, onChange }: { value: InstallOs; onChange: (os: Instal
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * Everything the shell-script tabs must say before their command — and nothing the
+ * macOS app tab may borrow.
+ *
+ * `INSTALL_START_MEANS`, `BACKGROUND_START_MEANS` and `PRIVATE_COMMAND_NOTICE` describe
+ * the connector exactly: it installs *and* starts tracking, never touches OS autostart,
+ * and carries a device key. All three are false of VibeHub.app, which installs without
+ * tracking anything, does resume at login once started, and is tokenless — so the app
+ * tab renders `MacInstall`'s own disclosures instead of these.
+ *
+ * Extracted from the sheet body so the disclosure travels with the command it explains:
+ * wherever a script command renders, this renders above it, unconditionally. Its
+ * disclosure state is local, which is also how it resets — the sheet unmounts on close.
+ */
+function ScriptConsent({ os }: { os: InstallOs }) {
+  const id = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  return (
+    <>
+      <p className={styles.explain}>{os === "windows" ? "Paste in PowerShell." : "Paste in Terminal."} {NODE_SETUP_NOTICE}</p>
+
+      {/* Load-bearing consent is visible before the command and Copy. */}
+      <div className={styles.consent} aria-label="Before you start">
+        <p>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
+        <p>{TRACKER_LOCAL_READS}</p>
+        <p>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
+      </div>
+      <button type="button" className={styles.helpToggle} aria-expanded={detailsOpen} aria-controls={`${id}-data`} onClick={() => setDetailsOpen((v) => !v)}>
+        Data access and supported sources
+      </button>
+      {detailsOpen && (
+        <div id={`${id}-data`} className={styles.stepDetails}>
+          <p className={styles.explain}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
+          <p className={styles.explain}>{TRACKER_STATE_NOTICE} A needed Node.js runtime stays in VibeHub's folder. System PATH and OS startup settings stay unchanged.</p>
+          <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
+        </div>
+      )}
+      <p className={styles.note}>{PRIVATE_COMMAND_NOTICE}</p>
+      <p className={styles.explain}>{COPY_ONLY_NOTICE}</p>
+    </>
   );
 }
 
@@ -154,7 +204,10 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const id = useId();
-  const [os, setOs] = useState<InstallOs>(detectOs);
+  // `detectOs` stays the only Windows authority; `detectInstallChoice` adds the macOS
+  // vs Linux split it cannot make, so only a real Mac lands on the app tab.
+  const [choice, setChoice] = useState<InstallChoice>(() => detectInstallChoice(detectOs()));
+  const os = scriptOs(choice);
   const [minted, setMinted] = useState<{ userId: string; token: StoredConnectToken } | null>(null);
   // Render-time ownership prevents a previous account's key appearing for one frame.
   const token = minted?.userId === userId ? minted.token : null;
@@ -165,7 +218,6 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const [error, setError] = useState<{ what: Copied; message: string } | null>(null);
   const [celebrationState, setCelebrationState] = useState<{ userId: string; status: TrackerStatus | null } | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [started, setStarted] = useState(false);
@@ -184,7 +236,7 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
     setCopied(null);
     setAttemptCopy(null);
     setError(null);
-  }, [os, userId, open]);
+  }, [choice, userId, open]);
   useEffect(() => () => { generation.current += 1; }, []);
 
   useEffect(() => {
@@ -192,7 +244,6 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
     setStarted(false);
     setMintError(null);
     setNoteOpen(false);
-    setDetailsOpen(false);
     setAssistantOpen(false);
     setControlsOpen(false);
   }, [open, userId]);
@@ -367,28 +418,16 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
             )}
 
             <div className={styles.step}>
-              <h3 className={styles.stepTitle}>Install and start VibeHub</h3>
-              <OsPicker value={os} onChange={setOs} />
-              <p className={styles.explain}>{os === "windows" ? "Paste in PowerShell." : "Paste in Terminal."} {NODE_SETUP_NOTICE}</p>
-
-              {/* Load-bearing consent is visible before the command and Copy. */}
-              <div className={styles.consent} aria-label="Before you start">
-                <p>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
-                <p>{TRACKER_LOCAL_READS}</p>
-                <p>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
-              </div>
-              <button type="button" className={styles.helpToggle} aria-expanded={detailsOpen} aria-controls={`${id}-data`} onClick={() => setDetailsOpen((v) => !v)}>
-                Data access and supported sources
-              </button>
-              {detailsOpen && (
-                <div id={`${id}-data`} className={styles.stepDetails}>
-                  <p className={styles.explain}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
-                  <p className={styles.explain}>{TRACKER_STATE_NOTICE} A needed Node.js runtime stays in VibeHub's folder. System PATH and OS startup settings stay unchanged.</p>
-                  <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
-                </div>
-              )}
-              <p className={styles.note}>{PRIVATE_COMMAND_NOTICE}</p>
-              <p className={styles.explain}>{COPY_ONLY_NOTICE}</p>
+              <h3 className={styles.stepTitle}>
+                {choice === "mac-app" ? "Install VibeHub for Mac" : "Install and start VibeHub"}
+              </h3>
+              <OsPicker value={choice} onChange={setChoice} />
+              {/* No `token` here on purpose: the sheet's key comes from
+                  `ensureConnectToken`, which caches it in localStorage. FC4 keeps that
+                  entry with the Windows/Linux flow, so the Mac panel issues its own. */}
+              {choice === "mac-app" ? <MacInstall /> : (
+                <>
+              <ScriptConsent os={os} />
               {commands?.command ? (
                 <>
                   <pre className={styles.text} tabIndex={0} aria-label="Install and start command">{commands.command}</pre>
@@ -409,8 +448,14 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
                 </div>
               )}
               {copyError("connect")}
+                </>
+              )}
             </div>
 
+            {/* CLI-only helpers: an assistant prompt that carries the device key, and
+                the tracker's own start/status/stop verbs. Neither applies to the app,
+                which is driven from its menu bar, so the app tab hides both. */}
+            {choice !== "mac-app" && (<>
             <div className={styles.help}>
               <button type="button" className={styles.helpToggle} aria-expanded={assistantOpen} aria-controls={`${id}-assistant`} onClick={() => setAssistantOpen((value) => !value)}>
                 Ask your AI assistant
@@ -457,6 +502,7 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
                 </div>
               )}
             </div>
+            </>)}
 
             {showProgress && (
               <Progress

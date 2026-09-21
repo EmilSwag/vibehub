@@ -33,6 +33,8 @@ import {
   markTrackingSeen,
   readStoredConnectToken,
 } from "../lib/connectToken";
+import { detectInstallChoice, scriptOs } from "../lib/macInstall";
+import type { InstallChoice } from "../lib/macInstall";
 import { connectionAlive, newer, observePing } from "../lib/trackerPing";
 import type { PingObservation } from "../lib/trackerPing";
 import { useExitTransition } from "../lib/motion";
@@ -43,6 +45,7 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { ConnectCelebration } from "./ui/ConnectCelebration";
 import { ConnectSheet } from "./connect/ConnectSheet";
+import { MacInstall } from "./MacInstall";
 import { DeviceList, TrackingStatus, TrackingStrip } from "./TrackingStatus";
 import { useNow } from "./ui/PresenceBlock";
 import styles from "./ConnectTools.module.css";
@@ -51,7 +54,11 @@ const WEB_URL = window.location.origin;
 const POLL_WAITING_MS = 5_000;
 const POLL_CONNECTED_MS = 10_000;
 const EXIT_MS = 260;
-const OSES: { id: InstallOs; label: string }[] = [
+// Three install surfaces, one chooser. "macOS app" is the native VibeHub.app lane (its
+// own panel, its own disclosures); the other two are the unchanged shell-script flows —
+// same ids, same commands, same copy as before.
+const OSES: { id: InstallChoice; label: string }[] = [
+  { id: "mac-app", label: "macOS app" },
   { id: "mac", label: "macOS / Linux" },
   { id: "windows", label: "Windows" },
 ];
@@ -60,7 +67,7 @@ type CopyError = { what: Copyable; message: string } | null;
 type Phase = "loading" | "waiting" | "connected" | "offline";
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
-function OsPicker({ value, onChange }: { value: InstallOs; onChange: (os: InstallOs) => void }) {
+function OsPicker({ value, onChange }: { value: InstallChoice; onChange: (os: InstallChoice) => void }) {
   return (
     <div className={styles.seg} role="group" aria-label="Operating system">
       {OSES.map((os) => (
@@ -73,37 +80,24 @@ function OsPicker({ value, onChange }: { value: InstallOs; onChange: (os: Instal
   );
 }
 
-/** Settings uses the same command and foreground disclosure as the main sheet. */
-function ManualInstall({ token, os, onOs, copied, onCopy, error }: {
-  token: string;
-  os: InstallOs;
-  onOs: (os: InstallOs) => void;
-  copied: Copyable | null;
-  onCopy: (what: Copyable, text: string) => void;
-  error: CopyError;
-}) {
+/**
+ * Everything the shell-script tabs must say before their command — and nothing the
+ * macOS app tab may borrow.
+ *
+ * `INSTALL_START_MEANS`, `BACKGROUND_START_MEANS` and `PRIVATE_COMMAND_NOTICE` describe
+ * the connector exactly: it installs *and* starts tracking, never touches OS autostart,
+ * and carries a device key. All three are false of VibeHub.app, which installs without
+ * tracking anything, does resume at login once started, and is tokenless — so the app
+ * tab renders `MacInstall`'s own disclosures instead of these.
+ *
+ * Extracted from ManualInstall so the disclosure travels with the command it explains:
+ * wherever a script command renders, this renders above it, unconditionally.
+ */
+function ScriptConsent({ os }: { os: InstallOs }) {
   const id = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [controlsOpen, setControlsOpen] = useState(false);
-  const commands = useMemo(() => {
-    try {
-      return {
-        command: buildOneCommandConnect(os, token, API_BASE, WEB_URL),
-        prompt: buildConnectPrompt("assistant", token, API_BASE, WEB_URL, os),
-        error: null,
-      };
-    } catch {
-      return { command: null, prompt: null, error: CONNECT_COMMAND_ERROR };
-    }
-  }, [os, token]);
-  const copyError = (what: Copyable) => error?.what === what
-    ? <p className={styles.error} role="alert">{error.message}</p> : null;
   return (
-    <div className={cx(styles.manual, "fade-in")}>
-      <h3 className={styles.manualLabel}>Install and start on the device you're adding</h3>
-      <p className={styles.sub}>{DEVICE_CONNECT_SCOPE}</p>
-      <OsPicker value={os} onChange={onOs} />
+    <>
       <p className={styles.sub}>{os === "windows" ? "Paste in PowerShell." : "Paste in Terminal."} {NODE_SETUP_NOTICE}</p>
       <div className={styles.consent} aria-label="Before you start">
         <p>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
@@ -122,6 +116,50 @@ function ManualInstall({ token, os, onOs, copied, onCopy, error }: {
       )}
       <p className={styles.sub}>{PRIVATE_COMMAND_NOTICE}</p>
       <p className={styles.sub}>{COPY_ONLY_NOTICE}</p>
+    </>
+  );
+}
+
+/** Settings uses the same command and foreground disclosure as the main sheet. */
+function ManualInstall({ token, choice, onChoice, copied, onCopy, error }: {
+  token: string;
+  choice: InstallChoice;
+  onChoice: (choice: InstallChoice) => void;
+  copied: Copyable | null;
+  onCopy: (what: Copyable, text: string) => void;
+  error: CopyError;
+}) {
+  const id = useId();
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  // The app tab has no script. It still resolves to a real InstallOs so the builders
+  // below stay total; nothing built from it is rendered while that tab is open.
+  const os = scriptOs(choice);
+  const commands = useMemo(() => {
+    try {
+      return {
+        command: buildOneCommandConnect(os, token, API_BASE, WEB_URL),
+        prompt: buildConnectPrompt("assistant", token, API_BASE, WEB_URL, os),
+        error: null,
+      };
+    } catch {
+      return { command: null, prompt: null, error: CONNECT_COMMAND_ERROR };
+    }
+  }, [os, token]);
+  const copyError = (what: Copyable) => error?.what === what
+    ? <p className={styles.error} role="alert">{error.message}</p> : null;
+  return (
+    <div className={cx(styles.manual, "fade-in")}>
+      <h3 className={styles.manualLabel}>
+        {choice === "mac-app" ? "Install VibeHub on the Mac you're adding" : "Install and start on the device you're adding"}
+      </h3>
+      <p className={styles.sub}>{DEVICE_CONNECT_SCOPE}</p>
+      <OsPicker value={choice} onChange={onChoice} />
+      {/* Add device already minted this key on an explicit click and never cached it,
+          so the Mac panel shows that one instead of issuing a second. */}
+      {choice === "mac-app" ? <MacInstall token={token} /> : (
+        <>
+      <ScriptConsent os={os} />
       {commands.command ? (
         <div className={styles.cmdRow}>
           <pre className={styles.cmd} tabIndex={0} aria-label="Install and start command">{commands.command}</pre>
@@ -174,6 +212,8 @@ function ManualInstall({ token, os, onOs, copied, onCopy, error }: {
           ))}
         </div>
       )}
+        </>
+      )}
     </div>
   );
 }
@@ -200,7 +240,10 @@ function ConnectToolsForUser({ variant = "compact", onConnected, onCelebrated }:
   const status = observation?.tracker ?? null;
   const [deviceToken, setDeviceToken] = useState<{ token: string; tokenId: string; baselineAt: string | null } | null>(null);
   const [addingDevice, setAddingDevice] = useState(false);
-  const [os, setOs] = useState<InstallOs>(detectOs);
+  // `detectOs` stays the only Windows authority; `detectInstallChoice` adds the macOS
+  // vs Linux split it cannot make, so only a real Mac lands on the app tab.
+  const [choice, setChoice] = useState<InstallChoice>(() => detectInstallChoice(detectOs()));
+  const os = scriptOs(choice);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [copied, setCopied] = useState<Copyable | null>(null);
   const [copyError, setCopyError] = useState<CopyError>(null);
@@ -315,7 +358,7 @@ function ConnectToolsForUser({ variant = "compact", onConnected, onCelebrated }:
     copyGeneration.current += 1;
     setCopied(null);
     setCopyError(null);
-  }, [os, deviceToken?.tokenId]);
+  }, [choice, deviceToken?.tokenId]);
 
   const copy = async (what: Copyable, text: string) => {
     const mine = ++copyGeneration.current;
@@ -423,7 +466,7 @@ function ConnectToolsForUser({ variant = "compact", onConnected, onCelebrated }:
           onRevoke={revoke}
           onAddDevice={variant === "full" ? addDevice : undefined}
           addingDevice={addingDevice}
-          addDeviceBlock={deviceToken ? <ManualInstall key={deviceToken.tokenId} token={deviceToken.token} os={os} onOs={setOs} copied={copied} onCopy={copy} error={copyError} /> : undefined}
+          addDeviceBlock={deviceToken ? <ManualInstall key={deviceToken.tokenId} token={deviceToken.token} choice={choice} onChoice={setChoice} copied={copied} onCopy={copy} error={copyError} /> : undefined}
           error={error}
         />
       )}

@@ -1,6 +1,7 @@
 import { configFingerprint, readConfig } from "./config";
 import { readJson, STATUS_PATH, writeJsonAtomic } from "./paths";
 import { COLLECTION_POLICY, eventTime, isSupportedTool, MAX_EVENT_AGE_MS, MAX_USAGE_ENTRIES, objectRecord, safeAlias, safeModel } from "./privacy";
+import type { SupportedTool } from "./privacy";
 import type { StatusFile, StatusSource } from "./types";
 
 export const OFFLINE_STATUS: StatusFile = { collectionPolicy: COLLECTION_POLICY, connected: false,
@@ -27,6 +28,8 @@ function projectStatus(value: unknown): StatusFile {
   return { collectionPolicy: COLLECTION_POLICY,
     ...(typeof s.configFingerprint === "string" && /^[a-f0-9]{64}$/.test(s.configFingerprint)
       ? { configFingerprint: s.configFingerprint } : {}),
+    // Constructed, never spread: a stale file cannot claim the receiver is on.
+    ...(typeof s.attestedReceiver === "boolean" ? { attestedReceiver: s.attestedReceiver } : {}),
     connected: s.connected === true && iso(s.lastConnectionSeenAt) !== null &&
       eventTime(s.lastConnectionSeenAt, Date.now(), 90000) !== null,
     ...(iso(s.lastConnectionCheckAt) ? { lastConnectionCheckAt: iso(s.lastConnectionCheckAt)! } : {}),
@@ -34,7 +37,7 @@ function projectStatus(value: unknown): StatusFile {
     status: active ? "active" : s.status === "offline" ? "offline" : "idle",
     projectAlias: active ? safeAlias(s.projectAlias) : null,
     tool: active ? s.tool as string : null,
-    model: active ? safeModel(s.model, s.tool as "claude-code" | "codex") : null,
+    model: active ? safeModel(s.model, s.tool as SupportedTool) : null,
     sessionStartedAt: active ? iso(s.sessionStartedAt) : null,
     updatedAt: iso(s.updatedAt) ?? new Date(0).toISOString(),
     ...(typeof s.authRejected === "boolean" ? { authRejected: s.authRejected } : {}), sources };

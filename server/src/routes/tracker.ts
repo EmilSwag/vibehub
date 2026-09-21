@@ -62,8 +62,8 @@ router.get(
 );
 
 /**
- * Everything the macOS menu-bar companion (`menubar-mac/`) needs, in one request
- * (ARCHITECTURE.md §5.9). Same Bearer device-token auth as the heartbeat — the app has
+ * Everything the macOS companion (`mac/`, VibeHub.app) needs, in one request
+ * (ARCHITECTURE.md §5.8). Same Bearer device-token auth as the heartbeat — the app has
  * a tracker token in its Keychain and no browser cookie, so `requireTrackerToken` is
  * the only auth it can present, and a revoked token 401s here exactly as it does there.
  *
@@ -90,13 +90,15 @@ router.get(
     const [level, presence, dailyStats, openSessions, latestHeartbeat, devices, friendIds] = await Promise.all([
       computeLevel(userId),
       presenceFor(userId, user.username),
+      // `model` on both: foldToday prices each row at lib/token-pricing.ts rates for
+      // `today.estimatedUsd` / `today.byModel` (lane B, mac app).
       prisma.dailyStat.findMany({
         where: { userId, date: today },
-        select: { date: true, tokensInput: true, tokensOutput: true, activeSeconds: true },
+        select: { date: true, model: true, tokensInput: true, tokensOutput: true, activeSeconds: true },
       }),
       prisma.session.findMany({
         where: { userId, status: { not: "ENDED" } },
-        select: { startedAt: true, lastHeartbeatAt: true, tokensInput: true, tokensOutput: true },
+        select: { startedAt: true, lastHeartbeatAt: true, tool: true, model: true, tokensInput: true, tokensOutput: true },
       }),
       // Heartbeat-derived "last seen", across every session ever — NOT
       // `TrackerToken.lastUsedAt`, which this route's own middleware just bumped.

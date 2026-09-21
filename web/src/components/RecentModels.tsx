@@ -9,6 +9,7 @@ import {
   collapseWouldDropFocus,
   formatHoursOnRecord,
   groupStatsByModelWithCosts,
+  isEstimatedTool,
   modelRowAria,
   modelRowLabel,
   NO_MODEL_SELECTION,
@@ -56,10 +57,26 @@ function liveLabels(presence: PresenceLike | null | undefined): Set<string> {
   return new Set(toolsOf(presence).map((t) => modelRowLabel(t.tool, t.model)));
 }
 
-const tokenCount = (tokens: number, estimated: boolean) =>
-  isValidTokenCount(tokens) ? `${estimated ? "~" : ""}${formatTokens(tokens)} tokens` : "— tokens";
+/**
+ * A tokenless tool (Quadcode AI) reports no token counts at all, so a figure made of
+ * nothing but such tools says so instead of printing a measured-looking "0 tokens".
+ * A non-zero figure from a tokenless tool can only be history from the retired
+ * chars/4 estimate, and keeps its "~"; a measured count from another tool on the same
+ * row stays unmarked — Quadcode contributed activity to it, not tokens.
+ */
+const tokenCount = (tokens: number, tokenless: boolean, legacyEstimate: boolean) =>
+  isValidTokenCount(tokens) ?
+    (tokenless && tokens === 0 ? "tokens not reported" : `${legacyEstimate ? "~" : ""}${formatTokens(tokens)} tokens`)
+    : "— tokens";
 
-const TOKENS_TITLE = "Tokens — estimated (Quadcode AI logs carry no token counts)";
+const TOKENS_TITLE = "Quadcode AI reports no token counts; older figures are legacy estimates";
+
+/** Row-level view of the per-tool buckets: nothing but tokenless tools, and whether
+ *  any tokenless tool still carries a legacy estimated figure. */
+const rowTokenFlags = (row: PricedRecentModelRow) => ({
+  tokenless: row.byTool.every((bucket) => isEstimatedTool(bucket.tool)),
+  legacyEstimate: row.byTool.some((bucket) => isEstimatedTool(bucket.tool) && bucket.tokens > 0),
+});
 
 interface RowProps {
   row: PricedRecentModelRow;
@@ -107,6 +124,7 @@ function Row({
 }: RowProps) {
   const glyph = row.model ? modelFamily(row.model) : toolFamily(row.tools[0]);
   const namedAfterTool = row.model === null && row.tools.length === 1;
+  const rowFlags = rowTokenFlags(row);
   const item = useRef<HTMLLIElement>(null);
   const selected = selectedAt !== null;
   const aria = modelRowAria({ reveals, open, listId, detailId });
@@ -191,7 +209,7 @@ function Row({
               })}
             <span className={cx(styles.tokens, styles.tokenPair)}>
               <span className={styles.tokenNumber} title={row.estimated ? TOKENS_TITLE : "Tokens"}>
-                {tokenCount(row.tokens, row.estimated)}
+                {tokenCount(row.tokens, rowFlags.tokenless, rowFlags.legacyEstimate)}
               </span>
               <TokenCost id={`${detailId}-cost`} estimate={row.cost} />
             </span>
@@ -236,7 +254,7 @@ function Row({
                 <span className={styles.toolLineHours}>{formatHoursOnRecord(bucket.activeSeconds)}</span>
                 <span className={cx(styles.toolLineTokens, styles.tokenPair)}>
                   <span className={styles.tokenNumber} title={bucket.estimated ? TOKENS_TITLE : "Tokens"}>
-                    {tokenCount(bucket.tokens, bucket.estimated)}
+                    {tokenCount(bucket.tokens, bucket.estimated, bucket.estimated && bucket.tokens > 0)}
                   </span>
                   <TokenCost estimate={bucket.cost} />
                 </span>

@@ -13,6 +13,7 @@ import projectsRoutes from "./routes/projects";
 import statsRoutes from "./routes/stats";
 import presenceRoutes from "./routes/presence";
 import trackerRoutes from "./routes/tracker";
+import macRoutes from "./routes/mac";
 import { attachWebSocketServer } from "./ws";
 import { startSessionRollupJob } from "./jobs/session-rollup";
 import { startArchetypeJob } from "./jobs/archetype";
@@ -122,6 +123,7 @@ app.use("/api/v1", projectsRoutes);
 app.use("/api/v1", statsRoutes);
 app.use("/api/v1", presenceRoutes);
 app.use("/api/v1", trackerRoutes);
+app.use("/api/v1", macRoutes); // routes/mac.ts defines GET /mac/latest (§5.10) - public, no auth
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found" });

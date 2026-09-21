@@ -260,7 +260,12 @@ export async function getFreshGithubToken(user: GithubCredentialFields): Promise
   return json.access_token;
 }
 
-function authHeaders(token: string | null | undefined): Record<string, string> {
+/**
+ * GitHub request headers with the round-5 token precedence: the given (already
+ * decrypted) user token, else the server's `GITHUB_TOKEN`, else anonymous. Exported for
+ * routes/mac.ts, which has no user in the picture and just wants the server's own rate.
+ */
+export function authHeaders(token: string | null | undefined): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "vibehub",

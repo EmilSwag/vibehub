@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { LEGACY_UNKNOWN_MODEL, normalizeModel, utcDay } from "../lib/sessions";
 import { foldByTool, topToolOf } from "../lib/stats-tools";
+import { estimateUsd, foldEstimatedUsd } from "../lib/token-pricing";
 
 // Per-user stats rollup + friend compare — ARCHITECTURE.md §5.6. Closed sessions live
 // in DailyStat (§2.10); sessions still open are added on top so the numbers move while
@@ -33,6 +34,14 @@ interface ModelBucket {
    * sort models "most recently used" and print "last used 4 Sep" with no extra request.
    */
   lastActiveAt: string | null;
+  /**
+   * Lane B (mac app): this bucket's tokens at standard API prices (lib/token-pricing.ts
+   * — the same table the web keeps in tokenPricing.ts, pinned equal by a web check), or
+   * null when the model has no verified price (including the `"unknown"` bucket). An
+   * approximation of API-price equivalent, never money paid. Additive — an older web
+   * client keeps pricing `byModel` itself and ignores this.
+   */
+  estimatedUsd: number | null;
 }
 
 /**
@@ -82,6 +91,7 @@ export async function computeStats(user: User, rangeDays: number | null) {
       tokensOutput: 0,
       activeSeconds: 0,
       lastActiveAt: null,
+      estimatedUsd: null,
     };
     bucket.tokensInput += tokensInput;
     bucket.tokensOutput += tokensOutput;
@@ -125,6 +135,10 @@ export async function computeStats(user: User, rangeDays: number | null) {
   const byModel = [...buckets.values()].sort(
     (a, b) => b.tokensInput + b.tokensOutput - (a.tokensInput + a.tokensOutput) || b.activeSeconds - a.activeSeconds
   );
+  // Priced once the bucket is final (every row folded in), never per contributing row:
+  // the fold prices ORIGINAL per-model counts, so summing bucket USDs equals pricing
+  // the rows - and a bucket whose model is unpriced is simply null.
+  for (const bucket of byModel) bucket.estimatedUsd = estimateUsd(bucket.model, bucket.tokensInput, bucket.tokensOutput);
 
   // Round 20: the same buckets folded by tool alone — "which tool/IDE does this person
   // use the most". Ranked by active time (hours are the measure), tokens break ties.
@@ -137,6 +151,10 @@ export async function computeStats(user: User, rangeDays: number | null) {
     topTool: topToolOf(byTool),
     totalTokens: byModel.reduce((sum, b) => sum + b.tokensInput + b.tokensOutput, 0),
     totalActiveSeconds: byModel.reduce((sum, b) => sum + b.activeSeconds, 0),
+    // Lane B (mac app): the range's tokens at standard API prices — priced buckets only,
+    // null when tokens exist but no bucket has a verified price (same rule as the web's
+    // estimateTokenCost, so the two never disagree on the same stats).
+    totalEstimatedUsd: foldEstimatedUsd(byModel).estimatedUsd,
     streak: {
       currentStreak: streak?.currentStreak ?? 0,
       longestStreak: streak?.longestStreak ?? 0,

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  productbuild distribution descriptor for VibeHub.pkg.
+
+  __VERSION__ is substituted by scripts/make-pkg.sh from Resources/Info.plist's
+  CFBundleShortVersionString at build time, so the two never drift apart — there is
+  exactly one place (Info.plist) where a release bumps the version number.
+
+  Installer artwork is not referenced here: scripts/make-pkg.sh appends a <background>
+  element for background.png/@2x (ink mark, light window) and a <background-darkAqua>
+  element for background-dark.png/@2x (paper mark, Dark Mode) only when each file
+  exists on disk, so a build without one or both still produces a working (plainer)
+  installer instead of failing. The script asserts this file ends with the closing
+  tag on its own line — keep it that way.
+-->
+<installer-gui-script minSpecVersion="1">
+    <title>VibeHub</title>
+    <organization>com.vibehub</organization>
+    <domains enable_localSystem="true"/>
+    <options customize="never" require-scripts="true" rootVolumeOnly="true"/>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="license.txt" mime-type="text/plain"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="13.0"/>
+        </allowed-os-versions>
+    </volume-check>
+    <choices-outline>
+        <line choice="vibehub"/>
+    </choices-outline>
+    <choice id="vibehub" title="VibeHub" description="Installs VibeHub.app to /Applications.">
+        <pkg-ref id="com.vibehub.menubar.pkg"/>
+    </choice>
+    <pkg-ref id="com.vibehub.menubar.pkg" version="__VERSION__" onConclusion="none">VibeHub-component.pkg</pkg-ref>
+</installer-gui-script>

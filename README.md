@@ -42,7 +42,19 @@
 
 Sign in with GitHub, go to **Settings → Tracker → New token**, then:
 
-**macOS / Linux**
+**macOS — the app**
+
+```bash
+curl -fsSL https://web-production-da778.up.railway.app/tracker/mac.sh | bash
+```
+
+Installs `VibeHub.app` — menu bar, notch island, tracker included — and opens it; the app
+asks for the token, so nothing above carries one. Or download the `.pkg` from **Settings →
+Tracker → macOS app**, which is also where you press *Create a device key* to get the one
+the app asks for. Tracking starts when you start it in the app, then resumes at every
+login until you turn it off.
+
+**macOS / Linux — the connector**
 
 ```bash
 curl -fsSL https://web-production-da778.up.railway.app/tracker/connect.sh | VIBEHUB_TOKEN='<device token>' bash -s -- --start
@@ -63,7 +75,8 @@ $env:VIBEHUB_TOKEN='<device token>'; & ([scriptblock]::Create((irm https://web-p
 Open VibeHub — it turns green after the first ping.
 ```
 
-Nothing is added to autostart; `stop` and delete `~/.vibehub` to remove it.
+The connector adds nothing to autostart; `stop` and delete `~/.vibehub` to remove it.
+The Mac app does start at login — after you ask it to, and only until you turn it off.
 Details, manage commands and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Privacy

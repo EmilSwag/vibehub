@@ -174,7 +174,9 @@ eq("ChatGPT asks before offering the command for manual use", promptFor("chatgpt
 
 // The previous 1700-char ratchet omitted critical current local-reading/audience
 // facts and assumed bare Node controls. Raise only to fit that load-bearing content.
-const PROMPT_BODY_MAX = 3400;
+// Round 4 (Quadcode support): the support line now names three tools and says
+// Quadcode's tokens are absent rather than estimated — +170 chars of truth, no filler.
+const PROMPT_BODY_MAX = 3600;
 eq("generic prose stays bounded without deleting consent (both-OS compatibility)", AGENTIC.map((target) => {
   let body = promptFor(target);
   for (const os of OSES) body = body.replace(buildOneCommandConnect(os, TOKEN, API, WEB), "");
@@ -184,12 +186,13 @@ eq("foreground scope is one connection for supported tools, not providers", DEVI
 eq("Node preparation is explicit", NODE_SETUP_NOTICE, "Node.js is installed automatically if needed.");
 eq("running, not copying, installs and starts", INSTALL_START_MEANS.includes("Running this command") && INSTALL_START_MEANS.includes("starts background tracking"), true);
 eq("background lifetime and no OS autostart remain explicit", BACKGROUND_START_MEANS, "Runs in the background until you stop it. No OS autostart.");
-eq("local activity reads are Claude Code and Codex session logs only", TRACKER_LOCAL_READS.startsWith("Reads only Claude Code and Codex session logs."), true);
+eq("local activity reads are Claude Code, Codex and Quadcode AI session logs only", TRACKER_LOCAL_READS.startsWith("Reads only Claude Code, Codex and Quadcode AI session logs."), true);
 eq("temporary mixed-record parsing is disclosed, not called metadata-only", TRACKER_LOCAL_READS.includes("Parsing may temporarily read records containing prompts, code and tool output."), true);
 eq("record contents are neither saved nor sent", TRACKER_LOCAL_READS.includes("These contents are not saved or sent."), true);
-eq("uploads name bounded metadata and usage including tokens, not project paths", TRACKER_UPLOADS, "Sends only tool/model, timing, usage counts (including tokens) and a bounded project alias to VibeHub.");
+eq("uploads name bounded metadata and measured usage, not project paths", TRACKER_UPLOADS, "Sends only tool/model, timing, measured usage counts (tokens where the tool reports them) and a bounded project alias to VibeHub.");
 eq("public statistics and friend-only live cards are explicit", TRACKER_VISIBILITY.includes("statistics, including recent activity, are public") && TRACKER_VISIBILITY.includes("Live presence cards are shared with accepted friends"), true);
-eq("support explicitly excludes Quadcode, Cursor and ChatGPT/browser", TRACKER_SUPPORT_NOTICE, "Claude Code and Codex only. Quadcode, Cursor and ChatGPT/browser tracking are unavailable.");
+eq("support names Claude Code, Codex and Quadcode AI; Quadcode tokens are absent, not estimated; Cursor, Windsurf and ChatGPT/browser stay excluded", TRACKER_SUPPORT_NOTICE,
+  "Tracks Claude Code, Codex (GPT models) and Quadcode AI. Quadcode AI counts activity and model only: it reports no tokens, so none are shown or estimated. Cursor, Windsurf and ChatGPT/browser tracking are unavailable.");
 eq("host observation is excluded, not advertised as collection", TRACKER_SUPPORT_DETAILS.includes("No monitoring of other apps, processes, windows, browsing, keyboard activity, computer idle or Git."), true);
 eq("unknown models stay unknown and unsupported activity is not estimated", TRACKER_SUPPORT_DETAILS.includes("Unknown models stay unknown.") && TRACKER_SUPPORT_DETAILS.includes("Unsupported activity is not estimated."), true);
 eq("setup does not install AI apps or connect provider accounts", TRACKER_SUPPORT_DETAILS.includes("Setup does not install AI apps or connect provider accounts."), true);

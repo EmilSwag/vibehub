@@ -1,8 +1,10 @@
+import { AttestedMetadataAdapter } from "./adapters/attested";
 import { ClaudeCodeAdapter } from "./adapters/claudeCode";
 import { CodexAdapter } from "./adapters/codex";
 import { MAX_LOG_FILES } from "./adapters/jsonlTail";
+import { QuadcodeAdapter } from "./adapters/quadcode";
 import type { Adapter, Observation } from "./adapters/types";
-import { isCount, isSupportedTool, MAX_EVENT_AGE_MS, MAX_FUTURE_SKEW_MS, MAX_USAGE_ENTRIES, projectUsage, safeAlias, safeModel } from "./privacy";
+import { isAttestedTool, isCount, isSupportedTool, MAX_EVENT_AGE_MS, MAX_FUTURE_SKEW_MS, MAX_USAGE_ENTRIES, projectUsage, safeAlias, safeModel } from "./privacy";
 
 export interface DetectionUsage { tool: string; model: string | null; tokensInputDelta: number; tokensOutputDelta: number; estimated?: boolean }
 export interface SeenSource { tool: string; model: string | null; lastSeenAt: number; cwd?: string | null; projectHint?: string | null }
@@ -82,13 +84,37 @@ function projectObservation(o: Observation, now: number, windowMs: number): Obse
 /** Only fresh, supported AI usage evidence. There is no editor/process fallback. */
 export class Detector {
   private adapters: Adapter[];
+  /**
+   * Which tool ids each adapter is permitted to speak for.
+   *
+   * Round 4 tightened this from a category rule to an exact one. `quadcode` is now
+   * both natively collected and receiver-eligible, so "is it a native tool" no longer
+   * distinguishes anything: a category check would have let the Claude adapter speak
+   * for Quadcode. Each log adapter may therefore emit ONLY its own `name`, and the
+   * receiver only `ATTESTED_TOOLS`. The default for an adapter injected later
+   * (fixtures, tests) is the same exact-name rule, which is strictly narrower than
+   * the category default it replaces.
+   */
+  private readonly origin = new WeakMap<Adapter, (tool: unknown) => boolean>();
   private cancellation: AbortController | null = null;
   private generation = 0;
   private activeWindowMs: number;
 
-  constructor(activeWindowMs: number, private adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
+  constructor(activeWindowMs: number, private adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS, attestedTools: readonly string[] = []) {
     this.activeWindowMs = Math.min(Math.max(1, activeWindowMs), MAX_EVENT_AGE_MS);
-    this.adapters = [new ClaudeCodeAdapter(this.activeWindowMs), new CodexAdapter(this.activeWindowMs)];
+    this.adapters = [new ClaudeCodeAdapter(this.activeWindowMs), new CodexAdapter(this.activeWindowMs),
+      new QuadcodeAdapter(this.activeWindowMs)];
+    for (const adapter of this.adapters) this.origin.set(adapter, (tool) => tool === adapter.name);
+    // Built ONLY when the user opted in. With the switch off the receiver does not
+    // exist, so its inbox is never opened and the v1 guarantee is unchanged. It stays
+    // separate from the native Quadcode adapter above: that one reports activity and
+    // model, this one is the only path by which a measured claim could ever arrive.
+    const accepted = attestedTools.filter(isAttestedTool);
+    if (accepted.length) {
+      const receiver = new AttestedMetadataAdapter(this.activeWindowMs, accepted);
+      this.origin.set(receiver, isAttestedTool);
+      this.adapters.push(receiver);
+    }
   }
 
   clear(): void {
@@ -107,13 +133,22 @@ export class Detector {
     const cancel = (): void => controller.abort();
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
+    const adapters = [...this.adapters];
     let results: Observation[][];
     try {
-      results = await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs, now, controller.signal)));
+      results = await Promise.all(adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs, now, controller.signal)));
     } finally { signal?.removeEventListener("abort", cancel); }
     if (controller.signal.aborted || generation !== this.generation) return null;
+    // An adapter may only speak for the tool ids it owns. This runs BEFORE projection
+    // so an out-of-origin id cannot reach tokens, the source list or selection even
+    // if it would otherwise have been well-formed.
+    const owned = results.flatMap((list, index) => {
+      const adapter = adapters[index];
+      const mayEmit = this.origin.get(adapter) ?? ((tool: unknown) => tool === adapter.name);
+      return list.filter((o) => mayEmit(o?.tool));
+    });
     // Hidden sources are removed BEFORE tokens, source lists or selection are built.
-    const all = results.flat().map((o) => projectObservation(o, now, this.activeWindowMs))
+    const all = owned.map((o) => projectObservation(o, now, this.activeWindowMs))
       .filter((o): o is Observation => o !== null).filter(allowed);
     if (!all.length) return null;
     const usage = new Map<string, DetectionUsage>();

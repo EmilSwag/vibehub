@@ -2,6 +2,7 @@ import type { Session } from "@prisma/client";
 import { prisma } from "../db";
 import { env } from "../env";
 import { fromJsonArrayValue } from "./json-field";
+import { isTokenlessTool } from "./tools";
 import { latestTrackerLastSeenAt, trackerConnections, trackerTimestamp } from "./trackerConnection";
 
 // Round 5: presence must decay from `lastHeartbeatAt` at *read* time, not trust
@@ -58,6 +59,13 @@ export interface PresenceActivity {
   tool: string;
   /** null when the tool exposes no model (presence-only tools) — never an empty string. */
   model: string | null;
+  /**
+   * Tokens measured for this session, or `null` when the tool has no token counter in
+   * any source the tracker reads (see `TOKENLESS_TOOLS`). Null means unknown and must
+   * render as nothing; it is deliberately not `0`, which would claim a measurement of
+   * zero was taken.
+   */
+  tokens: number | null;
   startedAt: string;
 }
 
@@ -272,6 +280,8 @@ export function sessionToActivity(session: Session): PresenceActivity {
     // Normalize the new null and every legacy sentinel ("unknown", "<synthetic>", "")
     // to null — rows written before ingestion-time normalization may still carry one.
     model: normalizeModel(session.model),
+    // Unknown stays unknown: a tokenless tool reports null, never a zero.
+    tokens: isTokenlessTool(session.tool) ? null : session.tokensInput + session.tokensOutput,
     startedAt: session.startedAt.toISOString(),
   };
 }
