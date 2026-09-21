@@ -26,8 +26,10 @@ SIGN_IDENTITY="${VIBEHUB_SIGN_IDENTITY:--}"
 
 build_arch() {
   local arch="$1" bin_path
-  bin_path="$(swift build -c release --arch "$arch" --package-path "$ROOT" --show-bin-path)"
-  swift build -c release --arch "$arch" --package-path "$ROOT"
+  # Newer toolchains print "Building for production..." on stdout before the path, so
+  # only the last line is the answer (CI run 35547297231 died on exactly that).
+  bin_path="$(swift build -c release --arch "$arch" --package-path "$ROOT" --show-bin-path 2>/dev/null | tail -n 1)"
+  swift build -c release --arch "$arch" --package-path "$ROOT" 1>&2
   printf '%s/%s' "$bin_path" "$BINARY"
 }
 
