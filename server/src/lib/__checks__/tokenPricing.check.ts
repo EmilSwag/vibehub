@@ -11,9 +11,17 @@ import { costUnits, estimateUsd, foldEstimatedUsd, getTokenPrice, isValidTokenCo
 let passed = 0;
 const failures: string[] = [];
 
+// Formatting only - no assertion changes. A top-level bigint was handled, but a bigint
+// NESTED in a value (foldEstimatedUsd returns `amountUnits: 0n`) threw inside
+// JSON.stringify and aborted the run at the first fold assertion. Both sides go through
+// the same formatter, so comparisons stay exact.
+const show = (value: unknown): string => typeof value === "bigint"
+  ? `${value}n`
+  : JSON.stringify(value, (_key, nested) => typeof nested === "bigint" ? `${nested}n` : nested);
+
 function eq<T>(label: string, actual: T, expected: T): void {
-  const a = typeof actual === "bigint" ? `${actual}n` : JSON.stringify(actual);
-  const e = typeof expected === "bigint" ? `${expected}n` : JSON.stringify(expected);
+  const a = show(actual);
+  const e = show(expected);
   if (a === e) {
     passed += 1;
     console.log(`ok   ${label} -> ${a}`);

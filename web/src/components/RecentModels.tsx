@@ -9,7 +9,6 @@ import {
   collapseWouldDropFocus,
   formatHoursOnRecord,
   groupStatsByModelWithCosts,
-  isEstimatedTool,
   modelRowAria,
   modelRowLabel,
   NO_MODEL_SELECTION,
@@ -18,6 +17,7 @@ import {
 } from "../lib/recentModels";
 import type { ModelSelection, PricedRecentModelRow } from "../lib/recentModels";
 import { isValidTokenCount } from "../lib/tokenCost";
+import { TOKENS_NOT_REPORTED, TOKENS_NOT_REPORTED_TITLE } from "../lib/supportedTools";
 import { TokenCost, TokenCostDetails } from "./ui/TokenCost";
 import type { UserStats } from "../types";
 import type { PresenceLike } from "./ui/PresenceBlock";
@@ -58,24 +58,24 @@ function liveLabels(presence: PresenceLike | null | undefined): Set<string> {
 }
 
 /**
- * A tokenless tool (Quadcode AI) reports no token counts at all, so a figure made of
- * nothing but such tools says so instead of printing a measured-looking "0 tokens".
- * A non-zero figure from a tokenless tool can only be history from the retired
- * chars/4 estimate, and keeps its "~"; a measured count from another tool on the same
- * row stays unmarked — Quadcode contributed activity to it, not tokens.
+ * A tokenless tool reports no token counts at all, so a figure made of nothing but
+ * such tools says so instead of printing a measured-looking "0 tokens". Which tools
+ * those are is the table's call, never this file's — see `lib/supportedTools.ts`.
+ *
+ * A non-zero figure from a tool that once estimated keeps its "~"; a measured count
+ * from another tool on the same row stays unmarked, because the tokenless tool
+ * contributed activity to that row, not tokens.
  */
 const tokenCount = (tokens: number, tokenless: boolean, legacyEstimate: boolean) =>
   isValidTokenCount(tokens) ?
-    (tokenless && tokens === 0 ? "tokens not reported" : `${legacyEstimate ? "~" : ""}${formatTokens(tokens)} tokens`)
+    (tokenless && tokens === 0 ? TOKENS_NOT_REPORTED : `${legacyEstimate ? "~" : ""}${formatTokens(tokens)} tokens`)
     : "— tokens";
 
-const TOKENS_TITLE = "Quadcode AI reports no token counts; older figures are legacy estimates";
-
-/** Row-level view of the per-tool buckets: nothing but tokenless tools, and whether
- *  any tokenless tool still carries a legacy estimated figure. */
+/** Row-level view of the per-tool buckets: the grouping already decided whether the
+ *  row is wholly tokenless; this only adds "does a legacy figure survive on it". */
 const rowTokenFlags = (row: PricedRecentModelRow) => ({
-  tokenless: row.byTool.every((bucket) => isEstimatedTool(bucket.tool)),
-  legacyEstimate: row.byTool.some((bucket) => isEstimatedTool(bucket.tool) && bucket.tokens > 0),
+  tokenless: row.tokenless,
+  legacyEstimate: row.byTool.some((bucket) => bucket.estimated && bucket.tokens > 0),
 });
 
 interface RowProps {
@@ -208,7 +208,7 @@ function Row({
                 );
               })}
             <span className={cx(styles.tokens, styles.tokenPair)}>
-              <span className={styles.tokenNumber} title={row.estimated ? TOKENS_TITLE : "Tokens"}>
+              <span className={styles.tokenNumber} title={row.tokenless || row.estimated ? TOKENS_NOT_REPORTED_TITLE : "Tokens"}>
                 {tokenCount(row.tokens, rowFlags.tokenless, rowFlags.legacyEstimate)}
               </span>
               <TokenCost id={`${detailId}-cost`} estimate={row.cost} />
@@ -253,8 +253,8 @@ function Row({
                 </span>
                 <span className={styles.toolLineHours}>{formatHoursOnRecord(bucket.activeSeconds)}</span>
                 <span className={cx(styles.toolLineTokens, styles.tokenPair)}>
-                  <span className={styles.tokenNumber} title={bucket.estimated ? TOKENS_TITLE : "Tokens"}>
-                    {tokenCount(bucket.tokens, bucket.estimated, bucket.estimated && bucket.tokens > 0)}
+                  <span className={styles.tokenNumber} title={bucket.tokenless || bucket.estimated ? TOKENS_NOT_REPORTED_TITLE : "Tokens"}>
+                    {tokenCount(bucket.tokens, bucket.tokenless, bucket.estimated && bucket.tokens > 0)}
                   </span>
                   <TokenCost estimate={bucket.cost} />
                 </span>

@@ -25,5 +25,15 @@
   <p class="faint">Mint one on the web under Settings &rarr; Tracker and paste it in. No
   installer carries your token &mdash; not this one, not the one-command version. You type
   it once, in the app.</p>
+  <p>A <code>vibehub-tracker</code> command was also installed in your own
+  <code>~/.local/bin</code> &mdash; optional, for counting Cursor and Windsurf turns. If
+  your shell cannot find it, add that directory to your PATH and reopen the terminal:</p>
+  <p><code>echo 'export PATH="$HOME/.local/bin:$PATH"' &gt;&gt; ~/.zshrc</code><br>
+  <span class="faint">zsh, the macOS default. If your terminal runs bash, use
+  <code>~/.bash_profile</code> instead &mdash; a login bash never reads
+  <code>~/.bashrc</code>.</span></p>
+  <p class="faint">It belongs to you, not to root. Dragging VibeHub to the Trash removes it
+  as well: the next time it runs it sees the app is gone and deletes itself, with no
+  password needed.</p>
 </body>
 </html>

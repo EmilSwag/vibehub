@@ -7,26 +7,36 @@
 // (round-7 findings).
 
 import { humanizeModel, toolLabel } from "./format";
-import { isEstimatedTool, modelRowLabel } from "./recentModels";
+import { modelRowLabel } from "./recentModels";
+import { isLegacyEstimateTool, isTokenlessTool } from "./supportedTools";
 import type { TrackerSource } from "../types";
 
 export interface TodayTotals {
   tokens: number;
   activeSeconds: number;
-  /** At least one contributing tool estimates its token counts (Quadcode AI). */
+  /** At least one contributing tool carries a figure from the retired estimate. */
   estimated: boolean;
+  /**
+   * False when EVERY contributing source is a tokenless tool: the sum is then not a
+   * measurement of anything and must read "tokens not reported" rather than "0".
+   * A day with no sources at all has nothing to misreport and stays reported, so a
+   * fresh account still shows a plain zero.
+   */
+  tokensReported: boolean;
 }
 
 /** Everything the tracker has reported for today, summed across tools and models. */
 export function sumToday(sources: TrackerSource[]): TodayTotals {
-  return sources.reduce<TodayTotals>(
+  const totals = sources.reduce<TodayTotals>(
     (acc, s) => ({
       tokens: acc.tokens + s.tokensToday,
       activeSeconds: acc.activeSeconds + s.activeSecondsToday,
-      estimated: acc.estimated || (s.tokensToday > 0 && isEstimatedTool(s.tool)),
+      estimated: acc.estimated || (s.tokensToday > 0 && isLegacyEstimateTool(s.tool)),
+      tokensReported: acc.tokensReported || !isTokenlessTool(s.tool),
     }),
-    { tokens: 0, activeSeconds: 0, estimated: false }
+    { tokens: 0, activeSeconds: 0, estimated: false, tokensReported: false }
   );
+  return sources.length === 0 ? { ...totals, tokensReported: true } : totals;
 }
 
 export interface SourceModel {

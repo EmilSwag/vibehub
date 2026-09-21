@@ -41,11 +41,18 @@ const entry = (overrides: Record<string, unknown> = {}): Record<string, unknown>
 
 // ---- the tool table ----
 eq("quadcode is tokenless", isTokenlessTool("quadcode"), true);
+// Round 5: Cursor and Windsurf are collected through their own hook systems, which
+// report a model and a turn boundary and no token counter whatsoever. Same rule, same
+// table - and it must stay identical to the tracker's, or the API would accept a count
+// the tracker itself refuses to send.
+eq("cursor is tokenless", isTokenlessTool("cursor"), true);
+eq("windsurf is tokenless", isTokenlessTool("windsurf"), true);
 eq("claude-code is not tokenless", isTokenlessTool("claude-code"), false);
 eq("codex is not tokenless", isTokenlessTool("codex"), false);
 eq("an absent tool is not tokenless", isTokenlessTool(undefined), false);
 eq("a null tool is not tokenless", isTokenlessTool(null), false);
-eq("the tokenless table is exactly quadcode", [...TOKENLESS_TOOLS], ["quadcode"]);
+eq("the tokenless table is exactly quadcode, cursor and windsurf",
+  [...TOKENLESS_TOOLS], ["quadcode", "cursor", "windsurf"]);
 
 // ---- the rejection ----
 eq("a claimed Quadcode usage entry is rejected", usageEntrySchema.safeParse(entry()).success, false);
@@ -57,6 +64,16 @@ eq("a Quadcode entry with no model is still rejected",
   usageEntrySchema.safeParse(entry({ model: null })).success, false);
 eq("the rejection is reported against the tool field",
   usageEntrySchema.safeParse(entry()).error?.issues[0]?.path, ["tool"]);
+
+// ---- the same rejection covers the hook tools ----
+for (const tool of ["cursor", "windsurf"]) {
+  eq(`a claimed ${tool} usage entry is rejected`,
+    usageEntrySchema.safeParse(entry({ tool, model: "claude-opus-5" })).success, false);
+  eq(`a zeroed ${tool} usage entry is rejected too`,
+    usageEntrySchema.safeParse(entry({ tool, tokensInputDelta: 0, tokensOutputDelta: 0 })).success, false);
+  eq(`the ${tool} rejection is reported against the tool field`,
+    usageEntrySchema.safeParse(entry({ tool })).error?.issues[0]?.path, ["tool"]);
+}
 
 // ---- tools that DO measure are unaffected ----
 eq("a Codex usage entry is accepted", usageEntrySchema.safeParse(entry({ tool: "codex", model: "gpt-5-codex" })).success, true);

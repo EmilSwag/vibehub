@@ -42,6 +42,7 @@ import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import { ConnectCelebration } from "../ui/ConnectCelebration";
 import { MacInstall } from "../MacInstall";
+import { HookTools } from "./HookTools";
 import styles from "./ConnectSheet.module.css";
 
 const WEB_URL = window.location.origin;
@@ -502,6 +503,8 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
                 </div>
               )}
             </div>
+
+            <HookTools />
             </>)}
 
             {showProgress && (

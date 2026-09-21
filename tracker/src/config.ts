@@ -12,6 +12,11 @@ import type { AttestedMetadataConfig, TrackerConfig } from "./types";
  * never happened. `quadcode` is listable here *and* collected natively — the two
  * paths coexist, and the native one needs no consent flag because it reads nothing a
  * user did not already install.
+ *
+ * Round 5: `cursor` and `windsurf` are listable and receiver-only. `hooks install`
+ * writes this entry itself, so consent and the IDE-side hook are turned on together —
+ * and consent alone still collects nothing, because without the hook nobody writes the
+ * inbox, and without the inbox the receiver has nothing to read.
  */
 export function projectAttestedMetadata(value: unknown): AttestedMetadataConfig | null | "invalid" {
   if (value === undefined) return null;

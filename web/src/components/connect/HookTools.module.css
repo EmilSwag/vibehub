@@ -1,0 +1,165 @@
+/*
+ * HookTools — the Cursor/Windsurf opt-in, rendered inside both the connect sheet and
+ * Settings Add device. Same visual language as the disclosures it sits beside
+ * (toggle, tinted command well, pill picker), built from the shared tokens only, so
+ * it reads as one of them rather than a panel dropped in from elsewhere.
+ *
+ * No hue: the marks inherit `currentColor` and everything else is a token.
+ */
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toggle {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--vh-text-faint);
+  text-decoration: underline;
+  text-decoration-color: var(--vh-border-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+.toggle:hover {
+  color: var(--vh-text-dim);
+  text-decoration-color: currentColor;
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--vh-radius-sm);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.explain {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--vh-text-dim);
+}
+
+.note {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
+}
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+}
+
+.segBtn {
+  min-height: 44px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: var(--vh-radius-pill);
+  background: transparent;
+  color: var(--vh-text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-state) var(--ease-out),
+    color var(--dur-state) var(--ease-out);
+}
+.segBtn:hover {
+  color: var(--vh-text);
+}
+.segBtn:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+.segBtnOn,
+.segBtnOn:hover {
+  background: var(--vh-text);
+  color: var(--vh-bg);
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolName {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--vh-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vh-text);
+}
+
+.toolGlyph {
+  flex: none;
+  color: var(--vh-text-dim);
+}
+
+/* Tinted well, no border — one border per block, so this is not a card in a card. */
+.cmd {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 160px;
+  overflow: auto;
+  scrollbar-width: thin;
+  border-radius: var(--vh-radius-md);
+  background: var(--vh-surface-2);
+  font-family: var(--vh-font-mono);
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--vh-text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.cmd:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+
+.copy {
+  align-self: flex-start;
+  min-height: 44px;
+}
+
+.error {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  color: var(--vh-text-dim);
+}

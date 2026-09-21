@@ -191,11 +191,149 @@ function Install-PrivateNode([string]$Architecture) {
 
 function Quote-PowerShell([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
 
+# >>> vibehub-launcher v1 -- extracted verbatim by tracker/test/installShimWindows.test.ts
+# The `vibehub-tracker` command on Windows.
+#
+# Directory: %LOCALAPPDATA%\Programs\VibeHub. Per user, no administrator, no UAC prompt,
+# and the same place VS Code and other per-user apps install to. Deliberately NOT
+# %ProgramFiles% (needs elevation, and an ordinary user could then never remove it) and
+# not the Node runtime folder (that belongs to the runtime, not to a command).
+#
+# The launcher is a .cmd, so both `cmd.exe` and PowerShell run it by bare name once the
+# directory is on PATH, and a vendor's hook runner - which spawns commands through cmd -
+# can invoke it as ONE quoted token instead of two nested quoted paths.
+#
+# Paths are written as %USERPROFILE%-relative whenever they sit under the home. A batch
+# file is read in the console's OEM code page, so an absolute path through a home
+# directory with non-ASCII characters would be mangled; %USERPROFILE% is expanded by cmd
+# at run time and sidesteps that entirely.
+$VibeHubShimMark = '# vibehub-tracker shim v1 (managed by VibeHub; safe to delete)'
+
+function Get-VibeHubUserProfile {
+  # The same variable the .cmd expands at run time, so the two always agree. ($HOME is
+  # read-only in PowerShell and equals this on Windows anyway.)
+  if ($env:USERPROFILE) { return $env:USERPROFILE }
+  return $HOME
+}
+
+function Get-VibeHubLauncherDir {
+  $base = $env:LOCALAPPDATA
+  if (-not $base) { $base = Join-Path (Get-VibeHubUserProfile) 'AppData\Local' }
+  return (Join-Path $base 'Programs\VibeHub')
+}
+
+function ConvertTo-VibeHubPortablePath([string]$Value) {
+  $profileDir = (Get-VibeHubUserProfile).TrimEnd('\')
+  if ($Value.StartsWith($profileDir + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    return '%USERPROFILE%' + $Value.Substring($profileDir.Length)
+  }
+  return $Value
+}
+
+function Get-VibeHubLauncherText([string]$Root, [string]$NodePath, [string]$CjsPath) {
+  # Each concatenated element is parenthesised on purpose: in PowerShell the comma
+  # operator binds TIGHTER than `+`, so `'a' + $x + 'b', 'c'` parses as
+  # `'a' + $x + ('b', 'c')` and the rest of the array is swallowed into one element.
+  $lines = @(
+    '@echo off',
+    "rem $VibeHubShimMark",
+    'rem Rewritten by every VibeHub install. Removes itself once VibeHub is gone.',
+    'setlocal',
+    ('set "VIBEHUB_ROOT=' + (ConvertTo-VibeHubPortablePath $Root) + '"'),
+    ('set "VIBEHUB_NODE=' + (ConvertTo-VibeHubPortablePath $NodePath) + '"'),
+    ('set "VIBEHUB_CJS=' + (ConvertTo-VibeHubPortablePath $CjsPath) + '"'),
+    'if not exist "%VIBEHUB_ROOT%\" goto vibehub_gone',
+    'if not exist "%VIBEHUB_NODE%" goto vibehub_incomplete',
+    'if not exist "%VIBEHUB_CJS%" goto vibehub_incomplete',
+    '"%VIBEHUB_NODE%" "%VIBEHUB_CJS%" %*',
+    'exit /b %ERRORLEVEL%',
+    ':vibehub_gone',
+    '>&2 echo vibehub-tracker: VibeHub was removed, so this command removed itself.',
+    'endlocal',
+    'rem cmd re-reads a batch file by byte offset, so a script that deletes itself and then',
+    'rem carries on prints "cannot find the file" and exits 1. `(goto) 2>nul` pops the batch',
+    'rem context first, after which the delete and the exit code both behave. Measured, not',
+    'rem assumed: the three other spellings were tried and this is the one that returns 127.',
+    '(goto) 2>nul & del /f /q "%~f0" >nul 2>&1 & exit /b 127',
+    ':vibehub_incomplete',
+    '>&2 echo vibehub-tracker: this VibeHub install is incomplete.',
+    '>&2 echo   missing: %VIBEHUB_NODE% or %VIBEHUB_CJS%',
+    '>&2 echo   reinstall VibeHub to repair it.',
+    'exit /b 127'
+  )
+  # CRLF on purpose: a .cmd is a Windows-native file and cmd.exe is happiest with it.
+  return (($lines -join "`r`n") + "`r`n")
+}
+
+# Returns: 'written' | 'foreign' | 'failed'. Never throws; the explicit node+path
+# commands printed by Show-Controls always work regardless.
+function Install-VibeHubLauncher([string]$Root, [string]$NodePath, [string]$CjsPath) {
+  try {
+    $dir = Get-VibeHubLauncherDir
+    $target = Join-Path $dir 'vibehub-tracker.cmd'
+    if (Test-Path -LiteralPath $target) {
+      $item = Get-Item -LiteralPath $target -Force
+      if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return 'foreign' }
+      if (-not ($item -is [IO.FileInfo])) { return 'foreign' }
+      $existing = [IO.File]::ReadAllText($target)
+      if (-not $existing.Contains($VibeHubShimMark)) { return 'foreign' }
+    }
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $text = Get-VibeHubLauncherText $Root $NodePath $CjsPath
+    # ASCII while it can be: a batch file is read in the console's OEM code page.
+    $encoding = if ($text -cmatch '[^\u0000-\u007F]') {
+      [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+    } else { [Text.Encoding]::ASCII }
+    $temp = Join-Path $dir ('vibehub-tracker.cmd.new.' + [Guid]::NewGuid().ToString('N'))
+    [IO.File]::WriteAllText($temp, $text, $encoding)
+    [IO.File]::Copy($temp, $target, $true)
+    Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    return 'written'
+  } catch { return 'failed' }
+}
+
+function Test-VibeHubOnPath([string]$Directory) {
+  $entries = @()
+  foreach ($scope in @('User', 'Machine')) {
+    $value = [Environment]::GetEnvironmentVariable('Path', $scope)
+    if ($value) { $entries += $value.Split(';') }
+  }
+  if ($env:Path) { $entries += $env:Path.Split(';') }
+  foreach ($entry in $entries) {
+    if ($entry -and $entry.TrimEnd('\') -eq $Directory.TrimEnd('\')) { return $true }
+  }
+  return $false
+}
+# <<< vibehub-launcher v1
+
 function Show-Controls {
   $ruleTop = (([string]$BH) * 3) + ' Installed in ~/.vibehub ' + (([string]$BH) * 22)
   $ruleBottom = ([string]$BH) * 52
   Write-Host "${CBold}$ruleTop${CReset}"
   foreach ($verb in @('start', 'status', 'stop')) { Write-Host ('  ' + ($verb + ':').PadRight(8) + '& ' + (Quote-PowerShell $Node) + ' ' + (Quote-PowerShell $Bin) + ' ' + $verb) }
+  Write-Host ''
+  $launcherDir = Get-VibeHubLauncherDir
+  $launcher = Join-Path $launcherDir 'vibehub-tracker.cmd'
+  switch ($LauncherState) {
+    'written' {
+      Write-Host "${CBold}Command installed${CReset} $GDash $launcher"
+      if (Test-VibeHubOnPath $launcherDir) {
+        Write-Host '  vibehub-tracker status'
+        Write-Host '  vibehub-tracker hooks install cursor'
+        Write-Host '  vibehub-tracker hooks install windsurf'
+      } else {
+        Write-Host "  ${CYellow}$launcherDir is not on your PATH. Add it for your account, then reopen the terminal:${CReset}"
+        Write-Host ("    [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';" + $launcherDir + "', 'User')")
+        Write-Host "  ${CDim}(that is the User scope, so no administrator is needed. setx would also work but truncates PATH at 1024 characters, which is why it is not the advice here.)${CReset}"
+        Write-Host '  Until then, call it by path:'
+        Write-Host ('    & ' + (Quote-PowerShell $launcher) + ' hooks install cursor')
+        Write-Host ('    & ' + (Quote-PowerShell $launcher) + ' hooks install windsurf')
+      }
+      Write-Host "  ${CDim}Deleting ~/.vibehub disables it; the command then removes itself the next time you run it.${CReset}"
+    }
+    'foreign' { Write-Host "${CYellow}${GDash}${CReset} A different vibehub-tracker.cmd is already at $launcher $GDash left untouched; use the commands above." }
+    default { Write-Host "${CYellow}${GDash}${CReset} Could not create $launcher $GDash use the commands above." }
+  }
   Write-Host ''
   Write-Host "Open VibeHub $GDash it turns green after the first ping."
   Write-Host "${CDim}Connection is confirmed in VibeHub only after a fresh server heartbeat, not by this command.${CReset}"
@@ -220,6 +358,7 @@ try {
   $App = Join-Path $Base 'app'
   $Bin = Join-Path $App 'vibehub-tracker.cjs'
   $Runtime = Join-Path $Base 'runtime'
+  $LauncherState = 'failed'
   foreach ($dir in @($Base, $App, $Runtime)) { Assert-Directory $dir }
   foreach ($file in @($Bin, (Join-Path $Base 'config.json'), (Join-Path $Runtime 'node.exe'), (Join-Path $Runtime 'LICENSE'))) { Assert-File $file }
   New-Item -ItemType Directory -Force -Path $Base | Out-Null
@@ -237,7 +376,9 @@ try {
   Write-Host "${CBold}What this does${CReset}"
   foreach ($line in @(
     'One device installation covers supported tools. It does not install AI apps or connect their accounts.',
-    'Local reads: Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session logs (JSONL) only; no other apps, processes, windows, browsing or Git are read.',
+    'Local reads: session logs (JSONL) of Claude Code (~/.claude/projects), Codex (~/.codex/sessions) and Quadcode AI only; no other apps, processes, windows, browsing or Git are read.',
+    "Cursor and Windsurf are off until you run 'vibehub-tracker hooks install cursor' or 'vibehub-tracker hooks install windsurf'. Their own hook then writes tool, time, model and project name to ~/.vibehub/attested.jsonl, which is read only while that hook is installed. No prompt, response, transcript, path or email is read.",
+    'Tokens: measured for Claude Code and Codex. Quadcode AI, Cursor and Windsurf report none, so none are shown and none are estimated.',
     'Parsing may temporarily read records containing prompts, code and tool output. These contents are not saved or sent.',
     'Uploads: tool, model, timing, token counts and a bounded project alias only.',
     'Profiles and statistics, including recent activity, are public. Live presence cards are shared with accepted friends.',
@@ -275,6 +416,9 @@ try {
   $Token = $null
   New-Item -ItemType Directory -Force -Path $App | Out-Null
   Promote-File $stagedBin $Bin
+  # Everything VibeHub documents is `vibehub-tracker <command>`; make that name real.
+  # Never fatal: the explicit node+path commands below always work.
+  $LauncherState = Install-VibeHubLauncher $Base $Node $Bin
 
   # vibehub-start-anchor: explicit tracker start begins below
   if ($Start) {

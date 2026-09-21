@@ -345,6 +345,57 @@ eq("an empty day still reports tokens 0 on the payload",
 // A mixed day reports its measured count, unreduced by the tokenless session.
 eq("a mixed day reports only the measured tokens on the payload",
   buildTrackerMePayload({ ...base, today: mixedTokenless }).today.tokens, 1_000_000);
+
+// ---- Round 5: the hook tools land on exactly the same rule ----
+// Cursor and Windsurf arrive through the opt-in receiver with a model and no counts, so
+// a day spent in either is unknown rather than free. Pinned per tool, because the rule
+// lives in a shared table and a tool dropped from it would silently start reporting 0.
+for (const tool of ["cursor", "windsurf"]) {
+  const day = foldToday([], [session(at(9 * H), at(11 * H), 0, 0, "claude-opus-5", tool)], today);
+  const payload = buildTrackerMePayload({ ...base, today: day });
+  eq(`a ${tool}-only day reports tokens null, never 0`, payload.today.tokens, null);
+  eq(`a ${tool}-only day reports estimatedUsd null, never 0`, payload.today.estimatedUsd, null);
+  eq(`a ${tool}-only day prices no model`, payload.today.byModel, {});
+  eq(`a ${tool} session still accrues its elapsed time`, payload.today.activeSeconds, 7_200);
+  // Presence is unaffected: the tool and its model are shown, only the count is unknown.
+  const active = buildTrackerMePayload({
+    ...base, today: day,
+    presence: activeAt("emil", "vibehub", tool, "claude-opus-5", at(11 * H).toISOString(), null),
+  }).presence.activity;
+  eq(`a ${tool} turn is real presence with a model`, active?.tool, tool);
+  eq(`...whose tokens are reported as unknown`, active?.tokens, null);
+}
+
+// One measuring tool in the same day is enough to make the count real again.
+const hookMixed = foldToday(
+  [stat(today, 0, 500_000, 0, "gpt-4.1")],
+  [session(at(10 * H), at(11 * H), 0, 0, "claude-opus-5", "cursor")],
+  today
+);
+eq("a Cursor + Claude Code day reports the measured part",
+  buildTrackerMePayload({ ...base, today: hookMixed }).today.tokens, 500_000);
+
+// The subtle one, and the reason `tokens` and `estimatedUsd` are decided separately: a
+// measuring tool that genuinely measured ZERO, next to a tokenless session. The count is
+// real and must stay 0 - a measurement was taken. The cost is NOT: the Cursor session may
+// well have cost money, and nobody can say how much, so it stays unknown. Reporting $0.00
+// here would be the same fabricated-zero error in a different field.
+const measuredZeroWithHook = foldToday(
+  [],
+  [session(at(9 * H), at(10 * H), 0, 0, "claude-opus-5", "claude-code"),
+    session(at(10 * H), at(11 * H), 0, 0, "claude-opus-5", "cursor")],
+  today
+);
+const measuredZeroWithHookPayload = buildTrackerMePayload({ ...base, today: measuredZeroWithHook });
+eq("a measured zero beside a tokenless session is still 0, not null",
+  measuredZeroWithHookPayload.today.tokens, 0);
+eq("...but that day's cost is unknown, not $0", measuredZeroWithHookPayload.today.estimatedUsd, null);
+// byModel keeps the model that WAS priced, at its real $0.00 - a measured zero is a
+// measurement. Only the day total is unknown, because the tokenless session cannot be
+// priced at all. The two fields answer different questions and are allowed to differ.
+eq("...while the priced model keeps its real zero",
+  measuredZeroWithHookPayload.today.byModel, { "claude-opus-5": 0 });
+eq("...while both sessions still accrue their time", measuredZeroWithHookPayload.today.activeSeconds, 7_200);
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

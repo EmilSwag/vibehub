@@ -7,13 +7,13 @@ import {
   collapseWouldDropFocus,
   formatHoursOnRecord,
   groupStatsByModel,
-  isEstimatedTool,
   modelRowAria,
   modelRowLabel,
   NO_MODEL_SELECTION,
   requestSelection,
   selectionTickFor,
 } from "../recentModels";
+import { isLegacyEstimateTool, isTokenlessTool } from "../supportedTools";
 import type { StatByModel } from "../../types";
 
 let passed = 0;
@@ -66,8 +66,8 @@ eq(
   "byTool keeps each tool's own numbers, hours desc",
   merged[1].byTool,
   [
-    { tool: "codex", tokens: 300, activeSeconds: 7200, lastActiveAt: "2026-09-02T00:00:00.000Z", estimated: false },
-    { tool: "claude-code", tokens: 2000, activeSeconds: 3600, lastActiveAt: "2026-09-04T00:00:00.000Z", estimated: false },
+    { tool: "codex", tokens: 300, activeSeconds: 7200, lastActiveAt: "2026-09-02T00:00:00.000Z", estimated: false, tokenless: false },
+    { tool: "claude-code", tokens: 2000, activeSeconds: 3600, lastActiveAt: "2026-09-04T00:00:00.000Z", estimated: false, tokenless: false },
   ]
 );
 eq("tools is byTool's ids, in the same order", merged[1].tools, merged[1].byTool.map((b) => b.tool));
@@ -89,13 +89,45 @@ const oneTool = groupStatsByModel([
 eq(
   "one bucket per tool, not per raw model id",
   oneTool[0].byTool,
-  [{ tool: "claude-code", tokens: 300, activeSeconds: 900, lastActiveAt: "2026-09-03T00:00:00.000Z", estimated: false }]
+  [{ tool: "claude-code", tokens: 300, activeSeconds: 900, lastActiveAt: "2026-09-03T00:00:00.000Z", estimated: false, tokenless: false }]
 );
 
-// ---- Quadcode's estimated tokens are flagged, everyone else's are not ----
-eq("quadcode row is estimated", merged[0].estimated, true);
+// ---- tokenless (no counts at all) is a WIDER set than legacy-estimate ----
+//
+// Both predicates live in lib/supportedTools.ts; these pin the split they encode and
+// the two row/bucket flags it drives. A tool can be tokenless with no legacy figure
+// ever (Cursor, Windsurf); it cannot carry a legacy figure without being tokenless.
+eq("quadcode row carries a legacy estimate", merged[0].estimated, true);
 eq("claude-code row is measured", merged[1].estimated, false);
-eq("isEstimatedTool", [isEstimatedTool("quadcode"), isEstimatedTool("genui"), isEstimatedTool("codex")], [true, true, false]);
+eq("a legacy-estimate tool is also tokenless", merged[0].tokenless, true);
+eq("a measuring row is not tokenless", merged[1].tokenless, false);
+eq("isLegacyEstimateTool is quadcode only",
+  [isLegacyEstimateTool("quadcode"), isLegacyEstimateTool("genui"), isLegacyEstimateTool("cursor"), isLegacyEstimateTool("windsurf"), isLegacyEstimateTool("codex")],
+  [true, true, false, false, false]);
+eq("isTokenlessTool covers all three tools that report no counts",
+  [isTokenlessTool("quadcode"), isTokenlessTool("genui"), isTokenlessTool("cursor"), isTokenlessTool("windsurf"), isTokenlessTool("codex"), isTokenlessTool("claude-code")],
+  [true, true, true, true, false, false]);
+eq("every legacy-estimate tool is tokenless, never the other way round",
+  ["quadcode", "cursor", "windsurf", "codex", "claude-code"].every((tool) => !isLegacyEstimateTool(tool) || isTokenlessTool(tool)), true);
+
+// A hook tool reports activity and model with no counts: its bucket is tokenless and
+// its zero must never be read as a measurement.
+const hookRows = groupStatsByModel([
+  row("cursor", "<synthetic>", 0, 0, 1800, "2026-09-06T00:00:00.000Z"),
+  row("windsurf", "<synthetic>", 0, 0, 900, "2026-09-06T00:00:00.000Z"),
+]);
+eq("a hook-only row is tokenless and carries no legacy estimate",
+  hookRows.map((r) => [r.label, r.tokenless, r.estimated, r.tokens]),
+  [["Cursor", true, false, 0], ["Windsurf", true, false, 0]]);
+
+// One measuring tool on the row makes the total a real measurement again — the
+// tokenless tool contributed activity to it, not tokens.
+const mixed = groupStatsByModel([
+  row("cursor", "claude-opus-5", 0, 0, 600, "2026-09-06T00:00:00.000Z"),
+  row("claude-code", "claude-opus-5", 100, 200, 600, "2026-09-06T00:00:00.000Z"),
+]);
+eq("a mixed row is not tokenless", mixed[0].tokenless, false);
+eq("but its hook bucket still is", mixed[0].byTool.map((b) => [b.tool, b.tokenless]).sort(), [["claude-code", false], ["cursor", true]]);
 
 // ---- two raw ids that humanize to one name are one row ----
 const sameName = groupStatsByModel([

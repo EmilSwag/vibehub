@@ -14,6 +14,7 @@ import {
 import { stagger } from "../lib/motion";
 import { modelRowLabel } from "../lib/recentModels";
 import { sumToday } from "../lib/sources";
+import { TOKENS_NOT_REPORTED, TOKENS_NOT_REPORTED_TITLE, isTokenlessTool } from "../lib/supportedTools";
 import { homeDevices, revokePrompt, showHomeDevices } from "../lib/trackerPing";
 import {
   TRACKER_HISTORY_NOTICE,
@@ -133,7 +134,12 @@ function SourceRow({ source, now, index }: { source: TrackerSource; now: number;
         )}
       </span>
       <span className={styles.rowRight}>
-        <span className={styles.rowTokens}>{formatTokens(source.tokensToday)} today</span>
+        {/* A hook tool's row is a real sighting with no counts behind it. "0 today"
+            would read as a measured nothing, which is the one thing the tokenless
+            contract forbids (server/src/lib/tools.ts). */}
+        <span className={styles.rowTokens} title={isTokenlessTool(source.tool) ? TOKENS_NOT_REPORTED_TITLE : undefined}>
+          {isTokenlessTool(source.tool) && source.tokensToday === 0 ? TOKENS_NOT_REPORTED : `${formatTokens(source.tokensToday)} today`}
+        </span>
         <span className={styles.sep} aria-hidden="true">
           ·
         </span>
@@ -225,11 +231,17 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
 
       <span className={styles.stripRight}>
         <span className={styles.stripCounter}>
-          <span className={styles.stripValue}>
-            {today.estimated ? "~" : ""}
-            {formatTokens(today.tokens)}
-          </span>
-          <span className={styles.counterUnit}>tokens</span>
+          {today.tokensReported ? (
+            <>
+              <span className={styles.stripValue}>
+                {today.estimated ? "~" : ""}
+                {formatTokens(today.tokens)}
+              </span>
+              <span className={styles.counterUnit}>tokens</span>
+            </>
+          ) : (
+            <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
+          )}
           <span className={styles.sep} aria-hidden="true">
             ·
           </span>
@@ -407,11 +419,17 @@ export function TrackingStatus({
       <section className={styles.section} aria-label="Today">
         <span className={styles.label}>Today</span>
         <span className={styles.counter}>
-          <span className={styles.counterValue}>
-            {today.estimated ? "~" : ""}
-            {formatTokens(today.tokens)}
-          </span>
-          <span className={styles.counterUnit}>tokens</span>
+          {today.tokensReported ? (
+            <>
+              <span className={styles.counterValue}>
+                {today.estimated ? "~" : ""}
+                {formatTokens(today.tokens)}
+              </span>
+              <span className={styles.counterUnit}>tokens</span>
+            </>
+          ) : (
+            <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
+          )}
           <span className={styles.sep} aria-hidden="true">
             ·
           </span>

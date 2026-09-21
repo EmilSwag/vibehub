@@ -15,7 +15,47 @@ const workspace = path.resolve(tracker, "../..");
 const require = createRequire(path.join(tracker, "package.json"));
 const ts = require("typescript");
 const bundleMode = process.argv.includes("--bundle");
-const bundleFile = path.resolve(tracker, "../web/public/tracker/vibehub-tracker.cjs");
+/**
+ * Which bundle `--bundle` verifies.
+ *
+ * The SERVED artifact is the one the one-command installer downloads, and writing it is a
+ * `web/**` change. So this mode prefers an ISOLATED artifact built inside `tracker/` by
+ * `npm run bundle:check` (into the already-ignored `dist/`), which lets the bundle gates
+ * run from this package alone. The served path stays the fallback, unchanged, so a
+ * checkout without the local artifact behaves exactly as before, and
+ * `--bundle-file <path>` / `VIBEHUB_BUNDLE_FILE` can name either explicitly.
+ *
+ * Whichever is chosen must be FRESH: a bundle older than the newest source it claims to
+ * contain is a stale artifact, and verifying one would report on code that is not in it.
+ */
+const SERVED_BUNDLE = path.resolve(tracker, "../web/public/tracker/vibehub-tracker.cjs");
+const LOCAL_BUNDLE = path.resolve(tracker, "dist/bundle/vibehub-tracker.cjs");
+const bundleFlag = process.argv.indexOf("--bundle-file");
+const bundleFile = bundleFlag >= 0 && process.argv[bundleFlag + 1]
+  ? path.resolve(process.argv[bundleFlag + 1])
+  : process.env.VIBEHUB_BUNDLE_FILE
+    ? path.resolve(process.env.VIBEHUB_BUNDLE_FILE)
+    : fs.existsSync(LOCAL_BUNDLE) ? LOCAL_BUNDLE : SERVED_BUNDLE;
+
+function assertFreshBundle() {
+  if (!fs.existsSync(bundleFile)) {
+    throw new Error(`No bundle at ${bundleFile}. Build one with \`npm run bundle:check\` (isolated, inside tracker/).`);
+  }
+  const built = fs.statSync(bundleFile).mtimeMs;
+  const newest = (function walk(directory) {
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return walk(full);
+      return entry.isFile() && full.endsWith(".ts") ? [fs.statSync(full).mtimeMs] : [];
+    });
+  })(path.join(tracker, "src")).concat(fs.statSync(path.join(tracker, "package.json")).mtimeMs)
+    .reduce((a, b) => Math.max(a, b), 0);
+  if (built < newest) {
+    throw new Error(`Stale bundle: ${path.relative(workspace, bundleFile)} predates tracker sources. ` +
+      "Rebuild it (`npm run bundle:check`) and re-run, or point --bundle-file at a fresh one.");
+  }
+  console.log(`BUNDLE_FILE ${path.relative(workspace, bundleFile)} (built ${new Date(built).toISOString()})`);
+}
 const tempParent = path.join(workspace, ".temp/vibehub-ai-only");
 fs.mkdirSync(tempParent, { recursive: true });
 const runRoot = fs.mkdtempSync(path.join(tempParent, "check-"));
@@ -258,9 +298,19 @@ test("empty sources stay AI-idle while bodyless daemon verification remains aliv
   assert.equal(h.status().tool, null); assert.equal(h.status().projectAlias, null);
 });
 test("browser/history/editor/Quadcode/git fixtures are never scanned or inferred as activity", async (h) => {
-  for (const file of [".cursor/logs/session.jsonl", ".quadcode/chats/session.jsonl", ".bash_history", "Library/Application Support/Chrome/History",
+  // `.cursor/hooks.json` and `.codeium/windsurf/hooks.json` are in this list deliberately:
+  // the hook PRODUCER writes them, on an explicit `hooks install`, in its own process. The
+  // collector must never read them - it learns about those tools only from the inbox.
+  for (const file of [".cursor/logs/session.jsonl", ".cursor/hooks.json", ".codeium/windsurf/hooks.json",
+    ".quadcode/chats/session.jsonl", ".bash_history", "Library/Application Support/Chrome/History",
     "AppData/Roaming/Code/logs/session.jsonl", "UNRELATED_NEVER_OPEN/private-project/.git/config", ".config/quadcode/settings.json"]) h.seed(file, CANARY);
   await h.tick(); assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+  // Stated as its own assertion rather than left to the allowlist: the daemon must never
+  // read a vendor's hook configuration, with or without consent. It learns about those
+  // tools from the inbox and from nothing else.
+  h.optIn(["cursor", "windsurf"]); await h.tick(); h.time(30000); await h.tick();
+  assert.ok(h.io.every((i) => !i.path.includes("hooks.json")), "the collector touched a vendor hook file");
+  assert.ok(h.io.every((i) => !i.path.startsWith(".cursor") && !i.path.startsWith(".codeium")));
 });
 test("Quadcode first sight primes EOF: a turn that completed before the daemon is not replayed", async (h) => {
   const file = h.quadcodeFile();
@@ -381,6 +431,81 @@ test("stale/future/malformed/non-assistant records and non-integer token counter
     h.claude({ type: "user" }), h.claude({ timestamp: "not-a-time" }), badCount, fractional, synthetic, "{invalid-json", { content: CANARY });
   await h.tick(); assert.equal(h.posts().length, 0);
 });
+// Ported from the retired scripts/local-attribution-check.js (finding F3). That script
+// drove the same flow through a fake CLAUDE_CONFIG_DIR, which the root rule now refuses by
+// design, so its whole run was red. These are the assertions it made that nothing else
+// covers, rewritten against the real root this harness already uses.
+test("one file, two models: each message's tokens are booked under its own model", async (h) => {
+  const file = h.claudeFile(); await h.tick();
+  const first = h.claude();
+  const second = h.claude({ message: { ...h.claude().message, id: "msg_two", model: "claude-opus-5",
+    usage: { input_tokens: 500, output_tokens: 200, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
+  h.append(file, first, second); await h.tick();
+  const beat = h.beats().at(-1);
+  const byModel = Object.fromEntries(beat.usage.map((u) => [u.model, [u.tokensInputDelta, u.tokensOutputDelta]]));
+  assert.deepEqual(byModel["claude-sonnet-4-5-20250929"], [20, 5]);
+  assert.deepEqual(byModel["claude-opus-5"], [500, 200]);
+  // The legacy top-level sums must equal the per-model totals, or an older server would
+  // book a different number from a newer one reading `usage`.
+  assert.equal(beat.tokensInputDelta, 520);
+  assert.equal(beat.tokensOutputDelta, 205);
+  assert.equal(beat.usage.every((u) => u.tool === undefined || u.tool === "claude-code"), true);
+});
+test("a <synthetic> record contributes no usage at all, and the literal never travels", async (h) => {
+  // The retired script expected these tokens under `model: null`. They are not booked at
+  // all any more: `claudeCode.ts` refuses the record outright, which is strictly more
+  // conservative. Pinned in its current form so a later change has to be deliberate.
+  const file = h.claudeFile(); await h.tick();
+  const synthetic = h.claude();
+  synthetic.message.id = "msg_synthetic";
+  synthetic.message.model = "<synthetic>";
+  h.append(file, h.claude(), synthetic); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.deepEqual(beat.usage.map((u) => u.model), ["claude-sonnet-4-5-20250929"]);
+  assert.equal(beat.tokensInputDelta, 20);
+  assert.equal(beat.model, "claude-sonnet-4-5-20250929");
+  assert.ok(!JSON.stringify(h.posts()).includes("<synthetic>"));
+});
+test("within one tool, presence follows the newest model that burned tokens", async (h) => {
+  // The retired script asserted a presence-MODEL hysteresis (a one-off side call must not
+  // switch the session). No such rule exists in the tree today - `detector.ts` keeps tool
+  // and project, not model - so what actually happens is pinned here instead, and the
+  // divergence from tracker/README.md is recorded as F8 rather than quietly "fixed".
+  const file = h.claudeFile(); await h.tick();
+  h.append(file, h.claude()); await h.tick();
+  assert.equal(h.beats().at(-1).model, "claude-sonnet-4-5-20250929");
+  const side = h.claude({ message: { ...h.claude().message, id: "msg_side_1", model: "claude-opus-5",
+    usage: { input_tokens: 40, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
+  h.append(file, side); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.model, "claude-opus-5");
+  assert.equal(h.status().model, "claude-opus-5");
+  // Whatever presence says, the tokens are attributed to the model that spent them.
+  assert.deepEqual(beat.usage.map((u) => [u.model, u.tokensInputDelta]), [["claude-opus-5", 40]]);
+  assert.equal(beat.tool, "claude-code");
+  // And the model change RESTARTS the session: session_end, then a new session_start.
+  // That is exactly the churn the retired script's hysteresis was written to prevent, so
+  // it is pinned here as the current contract and raised as F8, not silently changed.
+  const kinds = h.posts().map((p) => p.eventType);
+  assert.equal(kinds.filter((k) => k === "session_start").length, 2);
+  assert.ok(kinds.lastIndexOf("session_end") < kinds.lastIndexOf("session_start"));
+});
+test("Detector: tokens break hysteresis, and a quiet current project is kept", async (h) => {
+  const observation = (tool, projectHint, tokens) => ({ tool, cwd: null, projectHint,
+    model: tool === "codex" ? "gpt-5.1-codex" : "claude-opus-5", confidence: "activity",
+    observedAt: h.now(), lastActivityAt: h.now(), tokensInputDelta: tokens, tokensOutputDelta: 0,
+    usage: tokens ? [{ model: tool === "codex" ? "gpt-5.1-codex" : "claude-opus-5", tokensInputDelta: tokens, tokensOutputDelta: 0 }] : [] });
+  const d = new h.api.Detector(300000);
+  // A current session on one tool loses to another tool that actually burned tokens.
+  d.adapters = [{ name: "claude-code", poll: async () => [observation("claude-code", "alpha", 0)] },
+    { name: "codex", poll: async () => [observation("codex", "beta", 7)] }];
+  assert.equal((await d.detect(h.now(), { tool: "claude-code", cwd: null, projectHint: "alpha" })).tool, "codex");
+  // Same tool, two projects, nobody burning: the project already open is kept.
+  const quiet = new h.api.Detector(300000);
+  quiet.adapters = [{ name: "claude-code", poll: async () => [
+    observation("claude-code", "alpha", 0), observation("claude-code", "beta", 0)] }];
+  assert.equal((await quiet.detect(h.now(), { tool: "claude-code", cwd: null, projectHint: "alpha" })).projectHint, "alpha");
+});
 test("unknown or malicious model IDs remain null, never invented or copied", async (h) => {
   const file = h.claudeFile(); await h.tick(); const record = h.claude(); record.message.model = CANARY;
   h.append(file, record); await h.tick(); assert.equal(h.beats().at(-1).model, null); assert.equal(h.beats().at(-1).usage[0].model, null);
@@ -489,9 +614,23 @@ test("final heartbeat allowlist drops canary fields and rejects unrelated tools/
   assert.equal((await h.api.postHeartbeat(config.apiUrl, config.deviceToken, payload)).ok, true);
   const post = h.posts().at(-1); assert.equal(post.tokensInputDelta, 2); assert.equal(post.tokensOutputDelta, 3); assert.equal(post.model, null);
   assert.ok(!JSON.stringify(post).includes(CANARY)); const n = h.requests.length;
+  // Round 5, deliberate: `cursor` and `windsurf` are now supported ids, so this case no
+  // longer fails for being unknown - it fails because they are TOKENLESS. A usage entry
+  // claiming counts for a tool that reports none is rejected outright rather than zeroed,
+  // and the whole heartbeat goes with it. `chatgpt` still has no source at all.
   for (const bad of [{ ...payload, tool: "chatgpt" }, { ...payload, eventType: "git_commit" }, { ...payload, projectAlias: "../../secret" },
-    { ...payload, usage: [{ tool: "cursor", model: "gpt-4.1", tokensInputDelta: 1, tokensOutputDelta: 1 }] }]) assert.equal((await h.api.postHeartbeat(config.apiUrl, config.deviceToken, bad)).ok, false);
+    { ...payload, usage: [{ tool: "cursor", model: "gpt-4.1", tokensInputDelta: 1, tokensOutputDelta: 1 }] },
+    { ...payload, usage: [{ tool: "windsurf", model: "claude-opus-5", tokensInputDelta: 0, tokensOutputDelta: 0 }] },
+    { ...payload, tool: "cursor", usage: [{ tool: "cursor", model: null, tokensInputDelta: 1, tokensOutputDelta: 1 }] }]) {
+    assert.equal((await h.api.postHeartbeat(config.apiUrl, config.deviceToken, bad)).ok, false);
+  }
   assert.equal(h.requests.length, n);
+  // ...while a hook tool's presence, with no usage claimed, is a first-class heartbeat.
+  assert.equal((await h.api.postHeartbeat(config.apiUrl, config.deviceToken,
+    { eventType: "heartbeat", projectAlias: "Demo", tool: "windsurf", model: CANARY, occurredAt: h.iso(), usage: [] })).ok, true);
+  const hookBeat = h.posts().at(-1);
+  assert.equal(hookBeat.tool, "windsurf"); assert.equal(hookBeat.model, null);
+  assert.equal(Object.hasOwn(hookBeat, "tokensInputDelta"), false);
 });
 test("legacy/unbound local status is not trusted or forwarded", async (h) => {
   h.seed(".vibehub/status.json", { status: "active", tool: "cursor", projectAlias: CANARY, model: CANARY, sources: [{ tool: CANARY }] });
@@ -605,9 +744,50 @@ test("the receiver never replays history and counts a repeated record id once", 
 });
 test("the receiver cannot assert activity for a natively supported tool", async (h) => {
   const inbox = h.attestedInbox(); h.optIn(); await h.tick();
-  h.append(inbox, h.attested({ tool: "claude-code" }), h.attested({ tool: "codex" }), h.attested({ tool: "cursor" }));
+  h.append(inbox, h.attested({ tool: "claude-code" }), h.attested({ tool: "codex" }));
   await h.tick(); assert.equal(h.posts().length, 0);
 });
+test("a receiver-eligible tool the user did not consent to is still refused", async (h) => {
+  // Round 5: `cursor` and `windsurf` are receiver-eligible ids, which is NOT the same as
+  // consented. Consent is per tool, so a producer writing records for a second tool
+  // cannot ride in on the first tool's switch.
+  const inbox = h.attestedInbox(); h.optIn(["quadcode"]); await h.tick();
+  h.append(inbox, h.attested({ tool: "cursor" }), h.attested({ tool: "windsurf" }));
+  await h.tick(); assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+});
+for (const tool of ["cursor", "windsurf"]) {
+  test(`a consented ${tool} hook record is activity with a model and NO tokens`, async (h) => {
+    const inbox = h.attestedInbox(); h.optIn([tool]); await h.tick();
+    // Exactly what src/hooks/payload.ts writes: v, tool, recordId, occurredAt, model and
+    // an optional folder-basename projectHint. No `measured`, no counts, no `estimated` -
+    // absence is what makes the usage unknown rather than a measured zero.
+    const { measured, tokensInputDelta, tokensOutputDelta, ...hook } = h.attested({ tool });
+    assert.deepEqual(Object.keys(hook), ["v", "tool", "recordId", "occurredAt", "model", "projectHint"]);
+    h.append(inbox, hook); await h.tick();
+    const beat = h.beats().at(-1);
+    assert.equal(beat.tool, tool);
+    assert.equal(beat.model, "claude-fable-5-1");
+    assert.equal(beat.projectAlias, "unknown");
+    assert.deepEqual(beat.usage, []);
+    assert.equal(Object.hasOwn(beat, "tokensInputDelta"), false);
+    assert.equal(Object.hasOwn(beat, "tokensOutputDelta"), false);
+    assert.equal(h.status().tool, tool);
+    assert.equal(h.status().attestedReceiver, true);
+  });
+  test(`a producer cannot book ${tool} tokens by claiming it measured them`, async (h) => {
+    // Neither vendor's hook system reports a token count, so a measured claim for one of
+    // them is wrong by construction. The turn still counts as activity: the record is
+    // accepted, and only its counts are refused.
+    const inbox = h.attestedInbox(); h.optIn([tool]); await h.tick();
+    h.append(inbox, h.attested({ tool, measured: true, tokensInputDelta: 4000, tokensOutputDelta: 900 }));
+    await h.tick();
+    const beat = h.beats().at(-1);
+    assert.equal(beat.tool, tool);
+    assert.deepEqual(beat.usage, []);
+    assert.equal(Object.hasOwn(beat, "tokensInputDelta"), false);
+    assert.equal(Object.hasOwn(beat, "tokensOutputDelta"), false);
+  });
+}
 test("consent for a natively supported tool is malformed config, not a wider receiver", async (h) => {
   h.attestedInbox(); h.optIn(["claude-code"]);
   await h.tick(); assert.equal(h.posts().length, 0); assert.equal(h.status().status, "offline");
@@ -656,6 +836,21 @@ if (!bundleMode) {
     assert.equal(h.api.isRealWindowTitle(CANARY), false);
     assert.equal(h.api.projectFromTitle(CANARY, ["Cursor"]), null);
   });
+  // Ported from the retired scripts/local-title-model-check.ts (finding F2). That script
+  // still expected the window-title parser to RESOLVE a project; the parser was retired and
+  // its helpers are inert, so the useful half of it is this: no title, however realistic,
+  // may ever become a project or be called real. Nothing here enables a probe - both
+  // helpers are the retired stubs, and these assertions are what keeps them that way.
+  test("no window title, real-looking or OS-generated, can become a project", async (h) => {
+    for (const title of ["● index.ts - vibehub - Cursor", "myrepo - Cursor",
+      "app.ts - deephold - Visual Studio Code", "Quadcode.ai", "Grok", "OleMainThreadWndName",
+      "OleDdeWndName", "MSCTFIME UI", "Default IME", "", " ", CANARY]) {
+      assert.equal(h.api.isRealWindowTitle(title), false, `${title} must not be a real title`);
+      for (const suffixes of [["Cursor"], ["Visual Studio Code"], []]) {
+        assert.equal(h.api.projectFromTitle(title, suffixes), null, `${title} must not yield a project`);
+      }
+    }
+  });
   test("Quadcode QUADCODE_HOME may name the real root, and nothing else", async (h) => {
     const file = h.quadcodeFile(); await h.tick();
     h.env.QUADCODE_HOME = path.join(h.home, "UNRELATED_NEVER_OPEN");
@@ -671,16 +866,50 @@ if (!bundleMode) {
 } else test("served bundle preserves CLI command registrations without executing install/start/status/stop", async (h) => {
   // `serve` is the supervisor entry point (lane B, mac app). It was missing here only
   // because the served CJS predated it; regenerating the bundle surfaced the gap.
-  assert.deepEqual(plain(h.api.commands), ["login", "set", "start", "status", "stop", "logout", "run-loop", "serve"]);
+  //
+  // Round 5 adds `hook` (the Cursor/Windsurf producer a vendor spawns) and `hooks` (how a
+  // person turns it on). A bundle without them is STALE, not broken: the fix is
+  // `npm --prefix vibehub/tracker run bundle`, whose output lands in web/public/tracker/.
+  assert.deepEqual(plain(h.api.commands),
+    ["login", "set", "start", "status", "stop", "logout", "uninstall", "run-loop", "serve", "hook", "hooks"],
+    "served bundle is out of date - re-run `npm run bundle` in tracker/");
 });
 
 try {
   typecheck();
-  const source = ["detector.ts", ...["processes", "quadcode", "claudeCode", "codex", "jsonlTail", "attested"].map((n) => `adapters/${n}.ts`)]
+  // The producer's own sources are scanned by the same forbidden-probe regex as the
+  // collector's. It runs outside the daemon and outside this harness's fs facade, so its
+  // only guarantee that it never learned to look at processes, windows or the OS is this
+  // one - and it is the newest code in the tree, which is exactly why it is included.
+  const source = ["detector.ts", ...["processes", "quadcode", "claudeCode", "codex", "jsonlTail", "attested"].map((n) => `adapters/${n}.ts`),
+    ...["payload", "inbox", "install"].map((n) => `hooks/${n}.ts`)]
     .map((file) => fs.readFileSync(path.join(tracker, "src", file), "utf8")).join("\n");
   const forbidden = /Get-CimInstance|Win32_Process|GetForegroundWindow|GetWindowText|GetLastInputInfo|CGWindowList|CGEventSource|osascript|ioreg|tasklist|wmic|xprintidle|xprop|xdotool|git rev-parse|file_versions/;
   assert.ok(!forbidden.test(source), "retired host/content probes must not remain in collector sources");
-  if (bundleMode) { const bytes = fs.readFileSync(bundleFile); assert.ok(!forbidden.test(bytes.toString("utf8"))); console.log(`BUNDLE_SHA256 ${crypto.createHash("sha256").update(bytes).digest("hex")}`); }
+  // Round 5 - the producer/collector separation, enforced statically rather than trusted.
+  // `src/hooks/**` writes ~/.vibehub/attested.jsonl and a vendor's own hooks.json; the
+  // collector may do neither. Every case above runs against collector modules only, so
+  // this assertion is what keeps that boundary honest: if a collector module ever imports
+  // the producer, the daemon could write its own evidence and the harness would never see
+  // it. index.ts is the CLI entry point and is allowed to reach both sides.
+  const collectorSources = (function walk(directory) {
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return entry.name === "hooks" ? [] : walk(full);
+      return entry.isFile() && full.endsWith(".ts") && path.relative(path.join(tracker, "src"), full) !== "index.ts" ? [full] : [];
+    });
+  })(path.join(tracker, "src"));
+  for (const file of collectorSources) {
+    assert.ok(!/["']\.{1,2}\/hooks\//.test(fs.readFileSync(file, "utf8")),
+      `collector module must not import the hook producer: ${path.relative(tracker, file)}`);
+  }
+  console.log(`PASS producer isolation (${collectorSources.length} collector modules import no ./hooks/)`);
+  if (bundleMode) {
+    assertFreshBundle();
+    const bytes = fs.readFileSync(bundleFile);
+    assert.ok(!forbidden.test(bytes.toString("utf8")));
+    console.log(`BUNDLE_SHA256 ${crypto.createHash("sha256").update(bytes).digest("hex")}`);
+  }
   for (const { name, fn } of cases) {
     let h;
     try { h = createHarness(); await fn(h); h.clean(); results.push({ name, passed: true }); console.log(`PASS ${name}`); }

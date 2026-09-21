@@ -24,10 +24,13 @@ import {
   buildStartCommand,
   buildStatusCommand,
   buildStopCommand,
+  buildHooksCommand,
   buildTrackerCommand,
   buildVerifyLine,
 } from "../connectPrompt";
-import type { ConnectPromptTarget, InstallOs, TrackerVerb } from "../connectPrompt";
+import type { ConnectPromptTarget, HookVerb, InstallOs, TrackerVerb } from "../connectPrompt";
+import { HOOK_TOOL_IDS } from "../supportedTools";
+import type { HookToolId } from "../supportedTools";
 
 let passed = 0;
 const failures: string[] = [];
@@ -176,23 +179,43 @@ eq("ChatGPT asks before offering the command for manual use", promptFor("chatgpt
 // facts and assumed bare Node controls. Raise only to fit that load-bearing content.
 // Round 4 (Quadcode support): the support line now names three tools and says
 // Quadcode's tokens are absent rather than estimated — +170 chars of truth, no filler.
-const PROMPT_BODY_MAX = 3600;
+// Cursor/Windsurf rollout: the support line now separates the two measuring tools
+// from the three tokenless ones, says the two hook tools need their own opt-in, and
+// the local-reads line states that their logs and windows are still never read.
+// Then two more load-bearing qualifications: a hook tool shows a model only for an id
+// this project already recognises (an unreviewed vendor id normalises to null, so
+// promising "the model" would over-claim), and ChatGPT is refused with its reason
+// rather than a bare "unavailable". +84 chars; measured body is 3851.
+const PROMPT_BODY_MAX = 3900;
 eq("generic prose stays bounded without deleting consent (both-OS compatibility)", AGENTIC.map((target) => {
   let body = promptFor(target);
   for (const os of OSES) body = body.replace(buildOneCommandConnect(os, TOKEN, API, WEB), "");
   return { target, chars: body.length };
 }).filter(({ chars }) => chars >= PROMPT_BODY_MAX), []);
-eq("foreground scope is one connection for supported tools, not providers", DEVICE_CONNECT_SCOPE, "One connection for all supported tools on this device. No per-tool setup.");
+eq("foreground scope is one connection for supported tools, not providers", DEVICE_CONNECT_SCOPE,
+  "One connection for all supported tools on this device. Cursor and Windsurf each add a one-time opt-in.");
+eq("the one-connection promise no longer over-claims: hook tools are named as extra setup",
+  HOOK_TOOL_IDS.every((tool) => DEVICE_CONNECT_SCOPE.toLowerCase().includes(tool)) && /one-time opt-in/.test(DEVICE_CONNECT_SCOPE), true);
 eq("Node preparation is explicit", NODE_SETUP_NOTICE, "Node.js is installed automatically if needed.");
 eq("running, not copying, installs and starts", INSTALL_START_MEANS.includes("Running this command") && INSTALL_START_MEANS.includes("starts background tracking"), true);
 eq("background lifetime and no OS autostart remain explicit", BACKGROUND_START_MEANS, "Runs in the background until you stop it. No OS autostart.");
 eq("local activity reads are Claude Code, Codex and Quadcode AI session logs only", TRACKER_LOCAL_READS.startsWith("Reads only Claude Code, Codex and Quadcode AI session logs."), true);
+eq("hook tools are disclosed as a push, and their own files are still never read",
+  TRACKER_LOCAL_READS.includes("Cursor and Windsurf send their own turn events through a hook you install; their logs, files and windows are never read."), true);
 eq("temporary mixed-record parsing is disclosed, not called metadata-only", TRACKER_LOCAL_READS.includes("Parsing may temporarily read records containing prompts, code and tool output."), true);
 eq("record contents are neither saved nor sent", TRACKER_LOCAL_READS.includes("These contents are not saved or sent."), true);
 eq("uploads name bounded metadata and measured usage, not project paths", TRACKER_UPLOADS, "Sends only tool/model, timing, measured usage counts (tokens where the tool reports them) and a bounded project alias to VibeHub.");
 eq("public statistics and friend-only live cards are explicit", TRACKER_VISIBILITY.includes("statistics, including recent activity, are public") && TRACKER_VISIBILITY.includes("Live presence cards are shared with accepted friends"), true);
-eq("support names Claude Code, Codex and Quadcode AI; Quadcode tokens are absent, not estimated; Cursor, Windsurf and ChatGPT/browser stay excluded", TRACKER_SUPPORT_NOTICE,
-  "Tracks Claude Code, Codex (GPT models) and Quadcode AI. Quadcode AI counts activity and model only: it reports no tokens, so none are shown or estimated. Cursor, Windsurf and ChatGPT/browser tracking are unavailable.");
+eq("support separates measured from tokenless, qualifies the hook tools' models, and refuses ChatGPT with a reason", TRACKER_SUPPORT_NOTICE,
+  "Tracks Claude Code and Codex (GPT models) with measured tokens. Quadcode AI, Cursor and Windsurf count activity and model only: they report no tokens, so none are shown or estimated. Cursor and Windsurf report through a hook you install on each device, and show a model only when VibeHub recognises the id. ChatGPT is not tracked: browser and app leave no local source to read.");
+eq("no supported tool is promised tokens it does not report", /Quadcode AI, Cursor and Windsurf count activity and model only: they report no tokens, so none are shown or estimated./.test(TRACKER_SUPPORT_NOTICE), true);
+eq("a hook tool's model is promised only for an id this project already recognises",
+  TRACKER_SUPPORT_NOTICE.includes("show a model only when VibeHub recognises the id"), true);
+eq("ChatGPT is refused because there is no local source, not merely declared unavailable",
+  TRACKER_SUPPORT_NOTICE.includes("ChatGPT is not tracked: browser and app leave no local source to read."), true);
+eq("neither the browser nor the app is left as a maybe",
+  /browser and app/.test(TRACKER_SUPPORT_NOTICE), true);
+eq("four sentences, one fact each", TRACKER_SUPPORT_NOTICE.split(". ").length, 4);
 eq("host observation is excluded, not advertised as collection", TRACKER_SUPPORT_DETAILS.includes("No monitoring of other apps, processes, windows, browsing, keyboard activity, computer idle or Git."), true);
 eq("unknown models stay unknown and unsupported activity is not estimated", TRACKER_SUPPORT_DETAILS.includes("Unknown models stay unknown.") && TRACKER_SUPPORT_DETAILS.includes("Unsupported activity is not estimated."), true);
 eq("setup does not install AI apps or connect provider accounts", TRACKER_SUPPORT_DETAILS.includes("Setup does not install AI apps or connect provider accounts."), true);
@@ -203,7 +226,63 @@ eq("Copy only copies", COPY_ONLY_NOTICE.includes("Copying does not run anything"
 eq("Revoke is not a promise of local shutdown or erasure", TRACKER_CONTROL_NOTICE.includes("does not guarantee local shutdown") && TRACKER_CONTROL_NOTICE.includes("Neither action erases history"), true);
 eq("shared disclosure has no unsafe promises", UNSAFE_PROMISE.test([...DISCLOSURES, TRACKER_HISTORY_NOTICE].join(" ")), false);
 eq("no notice or generated prompt advertises retired collection", [...DISCLOSURES, TRACKER_HISTORY_NOTICE, ...ALL.flatMap((target) => OSES.map((os) => promptFor(target, os)))].some((text) => LEGACY_COLLECTION_CLAIM.test(text)), false);
-eq("no generated command weakens policy or installs packages globally", OSES.flatMap((os) => [buildOneCommandConnect(os, TOKEN, API, WEB), buildInstallCommand(os, TOKEN, API, WEB), ...VERBS.map((verb) => buildTrackerCommand(os, verb))]).some((command) => /ExecutionPolicy|\bsudo\b|npm (?:i|install).* (?:-g|--global)|\b(?:brew|apt|winget|choco)\b|\bchmod\b/i.test(command)), false);
+
+// ---- Cursor / Windsurf hook opt-in (docs/ARCHITECTURE.md 4.7) ----
+//
+// Same key-free family as start/status/stop: these lines are safe to share, and
+// PRIVATE_COMMAND_NOTICE must never be attached to one. The tool id is an argument,
+// so it is validated against the table rather than interpolated from free input.
+// The four commands the product documents, byte for byte. These are literal CLI
+// invocations, NOT the private-runtime wrapper the three tracker controls use: a
+// wrapper would mean the line on screen is not the line a person can quote in a
+// support thread, paste into a runbook or read back over a call. What the panel
+// shows and what it copies are this same string (pinned in connectUx.check.mjs).
+const HOOK_VERBS: HookVerb[] = ["install", "uninstall", "status"];
+eq("install cursor is exactly the documented command", buildHooksCommand("install", "cursor"), "vibehub-tracker hooks install cursor");
+eq("install windsurf is exactly the documented command", buildHooksCommand("install", "windsurf"), "vibehub-tracker hooks install windsurf");
+eq("hooks status is exactly the documented command", buildHooksCommand("status"), "vibehub-tracker hooks status");
+eq("uninstall cursor is exactly the documented command", buildHooksCommand("uninstall", "cursor"), "vibehub-tracker hooks uninstall cursor");
+eq("uninstall windsurf is exactly the documented command", buildHooksCommand("uninstall", "windsurf"), "vibehub-tracker hooks uninstall windsurf");
+eq("preview is the install command plus --dry-run and nothing else", buildHooksCommand("install", "cursor", true), "vibehub-tracker hooks install cursor --dry-run");
+const HOOK_COMMANDS = [
+  ...HOOK_VERBS.filter((verb) => verb !== "status").flatMap((verb) => HOOK_TOOL_IDS.map((tool) => buildHooksCommand(verb, tool))),
+  ...HOOK_TOOL_IDS.map((tool) => buildHooksCommand("install", tool, true)),
+  buildHooksCommand("status"),
+];
+eq("exactly the two hook tools are offered", [...HOOK_TOOL_IDS], ["cursor", "windsurf"]);
+eq("the whole offered set is those lines and no others", HOOK_COMMANDS, [
+  "vibehub-tracker hooks install cursor",
+  "vibehub-tracker hooks install windsurf",
+  "vibehub-tracker hooks uninstall cursor",
+  "vibehub-tracker hooks uninstall windsurf",
+  "vibehub-tracker hooks install cursor --dry-run",
+  "vibehub-tracker hooks install windsurf --dry-run",
+  "vibehub-tracker hooks status",
+]);
+const WRAPPER_MARKS = ["$HOME", "node ", "Test-Path", "if [", "& {", ".cjs", "2>", "vhNode"];
+const SHELL_META = [";", "&", "|", "`", "$", "(", ")", "{", "}", "<", ">", "'", '"', "*"];
+for (const command of HOOK_COMMANDS) {
+  eq(`"${command}": names the CLI first`, command.startsWith("vibehub-tracker hooks "), true);
+  eq(`"${command}": carries no runtime wrapper`, WRAPPER_MARKS.filter((mark) => command.includes(mark)), []);
+  eq(`"${command}": carries no shell metacharacter`, SHELL_META.filter((ch) => command.includes(ch)), []);
+  eq(`"${command}": is one copyable line`, /[\r\n]/.test(command), false);
+  eq(`"${command}": carries no device key and no login`, command.includes(TOKEN) || /\blogin\b/.test(command), false);
+  eq(`"${command}": has no path of any kind`, command.includes("/") || command.includes("~"), false);
+}
+// The same on both platforms, which is why the builder takes no InstallOs: there is
+// no shell syntax in it to differ over.
+eq("nothing about the command is OS-specific", new Set(HOOK_COMMANDS.map((c) => c.split(" ").length)).size <= 3, true);
+eq("an unknown hook tool cannot be interpolated into a shell",
+  ["", "cursor; id", "$(id)", "claude-code", "CURSOR", "cursor windsurf", null, undefined].every((tool) =>
+    rejected(() => buildHooksCommand("install", tool as HookToolId))), true);
+eq("an unknown hook verb cannot inject a command", rejected(() => buildHooksCommand("install; id" as HookVerb, "cursor")), true);
+eq("per-tool verbs refuse to run without a tool", HOOK_VERBS.filter((verb) => verb !== "status").every((verb) =>
+  rejected(() => buildHooksCommand(verb))), true);
+eq("status refuses a tool rather than silently ignoring it", rejected(() => buildHooksCommand("status", "cursor")), true);
+eq("preview is only meaningful on install", ["uninstall", "status"].every((verb) =>
+  rejected(() => buildHooksCommand(verb as HookVerb, verb === "status" ? undefined : "cursor", true))), true);
+
+eq("no generated command weakens policy or installs packages globally", [...OSES.flatMap((os) => [buildOneCommandConnect(os, TOKEN, API, WEB), buildInstallCommand(os, TOKEN, API, WEB), ...VERBS.map((verb) => buildTrackerCommand(os, verb))]), ...HOOK_COMMANDS].some((command) => /ExecutionPolicy|\bsudo\b|npm (?:i|install).* (?:-g|--global)|\b(?:brew|apt|winget|choco)\b|\bchmod\b/i.test(command)), false);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`connectPrompt check failed: ${failures.join(", ")}`);

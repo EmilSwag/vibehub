@@ -77,17 +77,37 @@ $env:VIBEHUB_TOKEN='<device token>'; & ([scriptblock]::Create((irm https://web-p
 Open VibeHub — it turns green after the first ping.
 ```
 
-The connector adds nothing to autostart; `stop` and delete `~/.vibehub` to remove it.
+The connector adds nothing to autostart. It writes one command so the rest work by name —
+`~/.local/bin/vibehub-tracker`, or `%LOCALAPPDATA%\Programs\VibeHub\vibehub-tracker.cmd` on
+Windows, per user and with no administrator — and `vibehub-tracker uninstall` takes that
+back out along with any Cursor/Windsurf hook it installed. To remove the rest, `stop` and
+delete `~/.vibehub`.
 The Mac app does start at login — after you ask it to, and only until you turn it off.
 Details, manage commands and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 
+## Your tools
+
+| | Activity | Model | Tokens & $ | Turned on by |
+|---|---|---|---|---|
+| Claude Code | yes | yes | **measured** | nothing — the log is there |
+| Codex | yes | yes | **measured** | nothing — the log is there |
+| Quadcode AI | yes | yes | not reported | nothing — the log is there |
+| Cursor | yes | when recognised | not reported | `vibehub-tracker hooks install cursor` |
+| Windsurf | yes | when recognised | not reported | `vibehub-tracker hooks install windsurf` |
+
+Cursor and Windsurf write no session log, so they are reported through their own official
+hooks: the IDE runs one VibeHub command when an AI turn finishes and it appends a single
+metadata line. Nothing happens until you install it, and `hooks uninstall` takes it back
+out. ChatGPT in the browser or the desktop app is **not** tracked — there is no local
+record to read, and we would rather say so than guess.
+
 ## Privacy
 
-The tracker reads **only** Claude Code, Codex and Quadcode AI session logs on your
-machine. It sends tool, model, timestamps, token counts and a project alias — never code,
-prompts, diffs, window titles or anything about other apps. Quadcode AI's logs carry no
-token counts, so its rows show activity and model and say *tokens not reported* — nothing
-is estimated. Profiles and stats are public; live presence is for friends. Full model:
+The tracker reads **only** the sources in that table. It sends tool, model, timestamps,
+token counts and a project alias — never code, prompts, diffs, window titles or anything
+about other apps. Three of the five tools report no usage at all, so their rows say
+*tokens not reported* and stay out of the $ estimate: a number we cannot measure is never
+one we invent. Profiles and stats are public; live presence is for friends. Full model:
 [Architecture §3](docs/ARCHITECTURE.md).
 
 ## Built with

@@ -29,15 +29,32 @@ export const NATIVE_TOOLS = ["claude-code", "codex", "quadcode"] as const;
  * producer that genuinely measured a turn may still report it, while the native
  * adapter covers activity and model on its own. Claude Code and Codex are absent
  * deliberately — a file another process writes must never assert their activity.
+ *
+ * Round 5: `cursor` and `windsurf` join as receiver-ONLY ids. Both vendors publish an
+ * official hook system (Cursor Agent Hooks, Windsurf Cascade Hooks) that hands a
+ * process the fact that an AI turn started or finished. That process is a producer the
+ * *user* installs (`vibehub-tracker hooks install <tool>`, see `src/hooks/`); this
+ * repository still reads no Cursor or Windsurf file, directory, process or window. The
+ * daemon's only contact with them remains `~/.vibehub/attested.jsonl`, read-only.
  */
-export const ATTESTED_TOOLS = ["quadcode"] as const;
+export const ATTESTED_TOOLS = ["quadcode", "cursor", "windsurf"] as const;
 /**
  * Tools for which NO measured token count exists in any source this repo reads.
  * Their usage is not "zero" — it is unknown, and unknown never becomes a number.
  * Any usage entry naming one of these is rejected outright rather than zeroed.
+ *
+ * Cursor and Windsurf hooks document a model and an event, and no token counter at all
+ * (Round 3 matrix, rows 3 and 5a). So they are tokenless for the same reason Quadcode
+ * is, and the vendors' team/billing APIs — which do report tokens — are receivers, not
+ * local sources, and are deliberately not consulted.
  */
-export const TOKENLESS_TOOLS = ["quadcode"] as const;
-export const SUPPORTED_TOOLS = NATIVE_TOOLS;
+export const TOKENLESS_TOOLS = ["quadcode", "cursor", "windsurf"] as const;
+/**
+ * Every id that may appear on the wire: what an adapter here can collect, plus what the
+ * opt-in receiver can accept. Derived from the two tables above rather than restated,
+ * so a tool can never be receiver-eligible yet rejected by the outgoing projection.
+ */
+export const SUPPORTED_TOOLS = [...NATIVE_TOOLS, "cursor", "windsurf"] as const;
 export type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 export type NativeTool = (typeof NATIVE_TOOLS)[number];
 export type AttestedTool = (typeof ATTESTED_TOOLS)[number];
@@ -74,33 +91,46 @@ export function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+// Membership is read straight off the tables above. Each set is built once from a
+// frozen literal tuple, so a predicate cannot drift from the table it claims to
+// enforce, and no runtime value can widen one.
+const supported = new Set<string>(SUPPORTED_TOOLS);
+const native = new Set<string>(NATIVE_TOOLS);
+const attested = new Set<string>(ATTESTED_TOOLS);
+const tokenless = new Set<string>(TOKENLESS_TOOLS);
+
 export function isSupportedTool(tool: unknown): tool is SupportedTool {
-  return tool === "claude-code" || tool === "codex" || tool === "quadcode";
+  return typeof tool === "string" && supported.has(tool);
 }
 
 /** A tool a log adapter in this repo is allowed to produce. */
 export function isNativeTool(tool: unknown): tool is NativeTool {
-  return tool === "claude-code" || tool === "codex" || tool === "quadcode";
+  return typeof tool === "string" && native.has(tool);
 }
 
 /** A tool the opt-in receiver may accept records for. Never Claude Code or Codex. */
 export function isAttestedTool(tool: unknown): tool is AttestedTool {
-  return tool === "quadcode";
+  return typeof tool === "string" && attested.has(tool);
 }
 
 /** A tool with no measured token count in any source. Usage stays unknown, never 0. */
 export function isTokenlessTool(tool: unknown): tool is TokenlessTool {
-  return tool === "quadcode";
+  return typeof tool === "string" && tokenless.has(tool);
 }
 
 export function safeModel(value: unknown, tool?: SupportedTool): string | null {
   if (typeof value !== "string") return null;
   const accepted = tool === "claude-code" ? CLAUDE_MODELS.has(value)
     : tool === "codex" ? CODEX_MODELS.has(value)
-    // Multi-model hosts (Quadcode, and the receiver) can drive any reviewed model, so
-    // the union of the existing allowlists applies. Deliberately NO id is added on
-    // their behalf — an observed-but-unreviewed id stays null rather than becoming a
-    // new entry with no pricing evidence behind it.
+    // Multi-model hosts (Quadcode, Cursor, Windsurf, and the receiver in general) can
+    // drive any reviewed model, so the union of the existing allowlists applies.
+    // Deliberately NO id is added on their behalf — an observed-but-unreviewed id stays
+    // null rather than becoming a new entry with no pricing evidence behind it.
+    //
+    // Round 5, worth knowing before someone "fixes" this: a vendor's hook reports the
+    // id that vendor displays, which is not always the provider's API id. Those land on
+    // the `null` branch and the tool is reported with no model, which is the honest
+    // answer — inventing a mapping would attribute work to a model nobody verified.
     : CLAUDE_MODELS.has(value) || CODEX_MODELS.has(value);
   return accepted ? value : null;
 }

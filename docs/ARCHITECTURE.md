@@ -322,9 +322,9 @@ agent — packaging that is out of scope for this scaffold).
 
 Shipped detection is log-adapter based, not host-process based: the tracker polls every
 `HEARTBEAT_INTERVAL_MS` (default 30000) and reads only newly appended, recognized
-session-log records from supported AI tools — currently Claude Code and Codex only (see
+session-log records from supported AI tools — Claude Code, Codex and Quadcode AI (see
 `tracker/README.md` and `meta/facts/vibehub-ai-only-privacy.md`). The active detector
-(`tracker/src/detector.ts`) wires in only these two log adapters; there is no generic
+(`tracker/src/detector.ts`) wires in only those three log adapters; there is no generic
 process/window enumeration, foreground-app polling, editor presence or Git probing in
 the collection path. `projectAlias` comes from a bounded hint on the log's own `cwd`
 field (basename, or the configured alias override), never from scanning the filesystem
@@ -353,6 +353,15 @@ Each adapter may speak only for its own tool id. The origin fence is an exact
 `tool === adapter.name` match rather than a category test, because `quadcode` is both
 natively collected and receiver-eligible, so "is it a native tool" no longer separates
 anything — a category rule would have let the Claude adapter assert Quadcode activity.
+
+**Cursor and Windsurf are reported without being read.** As of Round 5 both are supported
+tool ids, and neither has an adapter here: no file, directory, process or window of
+theirs is opened anywhere in `tracker/src`. Their activity arrives only as records their
+own hook systems asked a separate producer process to write (§4.7), through the receiver
+of §4.6, and only while the user has that switched on. The three tool tables in
+`privacy.ts` are what keep those roles apart — `NATIVE_TOOLS` (an adapter here may
+collect it), `ATTESTED_TOOLS` (the receiver may accept it) and `TOKENLESS_TOOLS` (no
+source measures its tokens, so its usage is unknown rather than zero).
 
 ### 4.3 Wire format — `POST /api/v1/tracker/heartbeat`
 
@@ -568,9 +577,9 @@ one too, and a heartbeat whose only source is Quadcode **omits** `tokensInputDel
 `tokensOutputDelta` entirely — absent, not `0`, because a zero would be booked as a
 measurement that came back empty. `/users/me/tracker` carries `activity.tokens: null`
 for the same reason. The opt-in receiver (§4.6) remains available for a producer that
-genuinely measured a turn; today `quadcode` is its only consentable tool and is
-tokenless, so that measured path is implemented and unreachable until a tool with a
-real counter joins `ATTESTED_TOOLS`.
+genuinely measured a turn; every consentable tool today — `quadcode`, and Round 5's
+`cursor` and `windsurf` (§4.7) — is tokenless, so that measured path is implemented and
+unreachable until a tool with a real counter joins `ATTESTED_TOOLS`.
 
 Quadcode writes one JSONL per chat section, per project:
 
@@ -639,12 +648,14 @@ off it opens no file descriptor at all.
 **Consent is explicit and lives in `~/.vibehub/config.json`:**
 
 ```json
-{ "attestedMetadata": { "enabled": true, "tools": ["quadcode"] } }
+{ "attestedMetadata": { "enabled": true, "tools": ["quadcode", "cursor", "windsurf"] } }
 ```
 
-Absent or `enabled: false` means the receiver is never constructed. Only receiver-only
-tool ids may be listed — a natively supported tool must come from its own log adapter,
-so no producer can assert Claude Code or Codex activity by writing a file. Malformed
+Absent or `enabled: false` means the receiver is never constructed. Only receiver-eligible
+tool ids may be listed (`ATTESTED_TOOLS` = `quadcode`, `cursor`, `windsurf`) — a natively
+collected tool must come from its own log adapter, so no producer can assert Claude Code
+or Codex activity by writing a file. Consent is per tool: a producer writing records for
+a second tool cannot ride in on the first one's switch. Malformed
 consent invalidates the whole config (collection pauses) rather than silently
 downgrading. The setting is part of `configFingerprint`, so granting or withdrawing it
 re-fences collected state, and `refreshConfig` applies a change on the next tick without
@@ -691,6 +702,188 @@ Records that pass then travel the ordinary path: the same `projectObservation`
 projection, the same hidden-project filter, the same outgoing allowlist (§4.3). Nothing
 about pricing changes — measured tokens on a reviewed model price exactly as any other
 source's do, and an unpriced or `null` model stays unpriced.
+
+A tokenless tool (§4.7) is the one exception, and it is a narrowing, not a widening: even
+a producer's `measured: true` is not attributed for one, because no source measures it at
+all. The record still counts as activity and as a model sighting.
+
+### 4.7 Hook producer — Cursor and Windsurf (`tracker/src/hooks/`)
+
+§4.6 is the door; this is the only thing that walks through it. Cursor and Windsurf both
+publish an official hook system that spawns a command of the user's choosing at points in
+their agent loop. VibeHub ships such a command. It is **one producer for both vendors**:
+the difference between them is two rows of a table, never two parsers, and there is no
+Cursor adapter and no Windsurf adapter anywhere in this repository.
+
+**Sources.** Cursor Agent Hooks (`cursor.com/docs/agent/hooks`) and Windsurf Cascade Hooks
+(`docs.windsurf.com/windsurf/cascade/hooks`, now served from `docs.devin.ai/desktop/cascade/hooks`),
+read 2026-09-21. Everything below is from those pages; nothing was learned by inspecting
+an installed copy.
+
+| | Cursor | Windsurf / Cascade |
+|---|---|---|
+| User-scope config | `~/.cursor/hooks.json` | `~/.codeium/windsurf/hooks.json` |
+| File shape | `{"version":1,"hooks":{"<event>":[{"command":…}]}}` | `{"hooks":{"<event>":[{"command":…,"show_output":false}]}}` |
+| Events subscribed | `afterAgentResponse`, `stop` | `pre_user_prompt`, `post_cascade_response` |
+| Event field | `hook_event_name` | `agent_action_name` |
+| Model field | `model` (`model_id` also accepted) | `model_name` |
+| Timestamp | none published | `timestamp`, ISO 8601, zone not guaranteed |
+| Workspace path | `workspace_roots` (first entry) | `cwd` |
+| Tokens | none documented | none documented |
+
+Project-scope (`<repo>/.cursor/hooks.json`, `.windsurf/hooks.json`) and system-scope
+(`/etc/…`, `C:\ProgramData\…`) files exist for both and are **never** written: one is
+shared with a repository's collaborators, the other with every account on the machine,
+and neither is one user's to opt in on behalf of.
+
+**A host is not its guests.** A Cursor or Windsurf hook fires for that product's own agent
+turns. Claude Code or Codex running in a terminal *inside* one of those IDEs keeps
+reporting as `claude-code` / `codex` from its own logs, exactly as it does in any other
+terminal — crediting the host would both mislabel the work and count it twice. The
+presence hysteresis (`tracker/README.md`, "Presence") is what keeps a session from
+flipping between the two while both are live.
+
+**Four events, and nothing else.** Cursor contributes the two ends of an agent response;
+Windsurf contributes a prompt and a completed response. Every one of them is a turn.
+Deliberately not subscribed, and rejected even if a payload arrives claiming one:
+
+- Cursor's `beforeSubmitPrompt`, whose payload *is* the prompt the user just typed;
+- Windsurf's `post_cascade_response_with_transcript`, which writes the whole conversation
+  to `~/.windsurf/transcripts/`;
+- Cursor's `sessionStart` / `sessionEnd`. These were subscribed for one round and are now
+  **retired**: a session boundary is not a turn, and `sessionEnd` in particular can fire
+  hours after the last model call, which would report AI activity at a moment when none
+  happened;
+- every `pre_*`/`post_*` file, command and MCP event in both products — they describe what
+  the user is editing and running, which a presence product does not need.
+
+**Retiring an event upgrades existing installs.** `hooks install` sweeps VibeHub entries out
+of *every* event key in the vendor file before re-adding them to the subscribed ones, so a
+hook file written by an earlier build stops firing a retired event instead of spawning a
+process per event for a record the producer would refuse. `hooks status` lists such entries
+as `stale` and says to re-run install. Entries that are not ours are never touched, in any
+event, including ones we have never subscribed to.
+
+**What is read, and what is written.** The vendor hands the process far more than is
+wanted: Cursor's base payload carries `prompt`, `conversation_id`, `generation_id`,
+`workspace_roots`, `user_email` and `transcript_path`; Windsurf's `post_cascade_response`
+carries the whole response inside `tool_info`. Exactly three things are read — which event
+fired, the model id, and (as a folder basename only) the workspace path — and the record is
+then **constructed**, never copied:
+
+```json
+{ "v": 1, "tool": "cursor", "recordId": "574655f5-e803-41d4-8319-f295a03688a3",
+  "occurredAt": "2026-09-21T09:14:22.104Z", "model": "claude-opus-5",
+  "projectHint": "demo-project" }
+```
+
+Those are the only keys that exist. There is no `measured`, no `tokensInputDelta`, no
+`tokensOutputDelta` and no `estimated`, in either polarity — not set to `false`, **absent**,
+with no code path that could add them. Absence is the strongest available statement that
+nothing was measured: there is no field for a later change to flip, and §4.6 already reads
+absent counts as unknown rather than as a measured zero.
+
+- `tool` comes from the command's own argv (`hook cursor`), never from the payload, so a
+  vendor cannot name itself as another tool.
+- `recordId` is a fresh random UUID per event. No vendor identifier reaches the file — not
+  a conversation, generation, trajectory or execution id, and not a digest of one. The cost
+  is that a vendor retrying the identical hook invocation writes two records rather than
+  one; these tools carry no token counts, so that is one duplicate activity sighting and
+  nothing measurable.
+- `occurredAt`. Cursor publishes no timestamp on any hook payload, so the record is stamped
+  with this process's clock at the instant the hook fired — a hook is spawned synchronously
+  at the event, so its own clock is a genuine observation rather than a filesystem
+  heuristic. Windsurf publishes `timestamp`, which is used **only** when `eventTime` accepts
+  it as a real instant inside the active window; a zoneless, stale, future or malformed
+  stamp falls back to now. Nothing is ever repaired by assuming the host offset, and the
+  receiver applies the identical rule to whatever this writes — rejecting, never repairing,
+  a record that fails it.
+- `model` runs through the tracker's own allowlist **before** it is written, so the file
+  holds no model string this project has not already reviewed, and **no id is added on a
+  hook tool's behalf**. A vendor's display id (`claude-4.5-sonnet`, `auto`, `swe-1.5`) is
+  not the provider's API id; an unreviewed one becomes `null` and the tool is reported with
+  no model, because inventing a mapping would attribute work to a model nobody verified.
+- `projectHint` is optional and is a **folder basename**, extracted from a path string by
+  `folderFromCwd` exactly as the Claude Code and Codex adapters treat their logs' own `cwd`:
+  no directory is opened, stat-ed or walked, the full path never leaves the producer, and
+  the basename still passes through the user's alias/hidden override downstream. A relative
+  path, one with traversal segments, or a basename that fails `safeAlias` yields no hint at
+  all and the key is omitted — Windsurf's two subscribed events document no path field, so
+  their records usually carry none.
+- Tokens are unknown, not zero. Neither vendor reports a count, so both ids are in
+  `TOKENLESS_TOOLS`: a usage entry naming one is rejected by the tracker **and** by the
+  API (`server/src/lib/tools.ts`), and a day spent entirely in one reports
+  `today.tokens: null` and `estimatedUsd: null` — never `0`, never an estimate.
+  The vendors' team APIs (Cursor's admin API, Windsurf's CascadeAnalytics) do report
+  tokens; they are team-scoped receivers of what already happened, not a local feed, and
+  this product does not call them.
+
+**Turning it on and off.**
+
+```
+vibehub-tracker hooks install cursor      # writes the hook AND consents, in one act
+vibehub-tracker hooks install cursor --dry-run   # renders the exact bytes, writes nothing
+vibehub-tracker hooks status
+vibehub-tracker hooks uninstall cursor    # removes the hook AND withdraws consent
+```
+
+Nothing is automatic: no pass notices that Cursor is installed, and neither `login`,
+`start` nor an upgrade writes a vendor file. The vendor's file is treated as someone
+else's document — other people's hook entries, unknown events and unknown top-level keys
+are preserved, a shape the installer does not recognise aborts the whole operation rather
+than being rewritten, and the first modification leaves a `hooks.json.vibehub-backup`
+beside it. Re-installing is idempotent, and an install after the tracker moved rewrites
+the command in place instead of stacking a second hook.
+
+**The command a vendor stores, per platform.** Absolute paths on both sides: an IDE runs a
+hook from its own working directory and `PATH` may not carry the tracker at all.
+
+| | Stored `command` |
+|---|---|
+| macOS / Linux | `"<node>" "<…/vibehub-tracker.cjs>" hook <tool>` |
+| Windows, Cursor | `"%LOCALAPPDATA%\Programs\VibeHub\vibehub-tracker.cmd" hook cursor` |
+| Windows, Windsurf | `& '…\vibehub-tracker.cmd' hook windsurf`, and the same string in Cascade's documented `powershell` field |
+
+Windows takes the **launcher**, not `node.exe` + `.cjs`, and that is measured rather than
+assumed. A vendor spawns a stored command through a shell, and cmd's rule — if the line
+starts with a quote, strip the first and the last one — mangles *two* quoted paths in a
+row, so `"<node.exe>" "<tracker.cjs>" hook cursor` does not run under `cmd /c` at all. One
+quoted path plus plain arguments is unambiguous under both `cmd /d /c` and the
+`cmd /d /s /c "<line>"` form an Electron host uses. Cascade documents that a Windows hook
+runs through `powershell -Command`, where a quoted path on its own is a string literal and
+not an invocation, so Windsurf's command carries the call operator and the `powershell`
+field is set as well. Each form is wrong under the other's runner, which is why the two
+differ. The `.cmd` itself is written by `connect.ps1` into `%LOCALAPPDATA%\Programs\VibeHub`
+— per user, no elevation to install *or* to remove — and it resolves node and the bundle
+itself, writing its paths `%USERPROFILE%`-relative so a home directory with non-ASCII
+characters survives the console's OEM code page. `hooks install` **refuses** to register a
+Windows hook when that launcher is missing (a hook pointing at a missing file fails
+silently in every runner) or when its path contains `%` or `"`, which no shell can quote
+safely. `uninstall` recognises both the `%USERPROFILE%` and the expanded spelling, so it
+removes exactly what the connector wrote.
+
+**The producer is not the collector.** `hook` runs in a short-lived process the IDE spawns.
+It reads a bounded stdin, writes at most one line, prints nothing to stdout and **exits 0 on
+every path**, including every rejection — an unsubscribed event, a malformed payload, a
+withdrawn consent. A hook that talked would leak into the IDE's own output and one that
+failed would surface as a broken hook inside the user's editor; neither is acceptable for a
+metadata write that is allowed to do nothing. The daemon never loads that code, and
+`scripts/check-ai-only.mjs` asserts statically that no collector module imports
+`src/hooks/`. Within the daemon,
+`~/.vibehub/attested.jsonl` stays read-only exactly as §4.6 describes — the harness fails
+on any write, rename, chmod or unlink of it. The producer writes one bounded line per
+event, at 0600, append-only, refusing symlinks and hard links, and restarts the file if it
+ever grows past its bound (the receiver re-primes at EOF, so nothing is replayed). It
+re-checks consent on every event, so a hook left installed after consent was withdrawn
+writes nothing at all. It prints nothing and always exits 0: a hook that talked would leak
+into the IDE's own output, and one that failed would surface as a broken hook inside the
+user's editor.
+
+**What this does not claim.** No minimum Cursor or Windsurf version is verified for the
+hook payloads (`cursor_version` rides in every Cursor payload and would be the field to
+gate on if one is ever needed). A user who never runs `hooks install` sees no change of
+any kind. And the parsed format is one VibeHub defines — the inbox — not a vendor's, so a
+vendor update can stop the flow of records but cannot silently change their meaning.
 
 ## 5. REST + WebSocket Contract
 
@@ -1056,7 +1249,9 @@ vibehub/
 ├── server/                    Express + Prisma API + WS
 ├── web/                       React + Vite SPA
 ├── tracker/                   Node CLI, published as `vibehub-tracker`
-├── macos/                     Swift menu-bar app (SwiftPM)
+│   └── src/hooks/             the Cursor/Windsurf hook producer (§4.7) — never loaded
+│                              by the daemon, and no collector module may import it
+├── mac/                       Swift menu-bar app + Island (SwiftPM), was `macos/`
 ├── assets/branding/           logo.png, icon.png, banner.png (done — see plans.vibehub-branding)
 ├── package.json                root npm workspaces (server, web, tracker)
 ├── docker-compose.yml          local Postgres for dev

@@ -87,7 +87,17 @@ ok("invalid recent token labels are guarded", recent.text.includes("isValidToken
 ok("each model/tool numeric count has a dedicated nowrap span", tags(fn(recent, "Row"), "span").filter((t) => attr(t, "className") === "styles.tokenNumber").length === 2);
 ok("model skeleton has a distinct cost footprint", fn(recent, "RecentModelsSkeleton").getText().includes("styles.tokenPair"));
 const groupedCostCalls = calls(fn(grouping, "groupStatsByModelWithCosts"), "estimateTokenCost");
-ok("folded group uses original records, not representative model", groupedCostCalls.length === 2 && groupedCostCalls[0].arguments.map((a) => a.getText()).join("|") === "[...tools.values()].flat()|group.tokens");
+const groupedTokenlessCalls = calls(fn(grouping, "groupStatsByModelWithCosts"), "tokenlessCost");
+ok("folded group uses original records, not representative model", groupedCostCalls.length === 2 && groupedCostCalls[0].arguments.map((a) => a.getText()).join("|") === "measured|group.tokens");
+// "measured" is those original records minus the tools that report no counts. The
+// expanded row prints the per-tool prices under the row price, so pricing a bucket
+// the row then suppresses would leave the detail not adding up to its own total.
+ok("the row prices exactly the buckets it will show a price for",
+  fn(grouping, "groupStatsByModelWithCosts").getText().includes("group.byTool.filter((bucket) => !bucket.tokenless).flatMap((bucket) => tools.get(bucket.tool) ?? [])"));
+ok("the row still declares its whole token figure, so the unmeasured part reads as uncovered",
+  groupedCostCalls[0].arguments[1].getText() === "group.tokens");
+ok("a tokenless row and a tokenless bucket are unpriced, never a zero",
+  groupedTokenlessCalls.length === 2 && groupedTokenlessCalls.map((c) => c.arguments[0].getText()).join("|") === "group.tokens|bucket.tokens");
 ok("folded tool uses its own original records and count", groupedCostCalls.length === 2 && groupedCostCalls[1].arguments.map((a) => a.getText()).join("|") === "tools.get(bucket.tool)|bucket.tokens");
 
 const levelCalls = calls(level, "estimateTokenCost");

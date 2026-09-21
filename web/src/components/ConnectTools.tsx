@@ -45,6 +45,7 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { ConnectCelebration } from "./ui/ConnectCelebration";
 import { ConnectSheet } from "./connect/ConnectSheet";
+import { HookTools } from "./connect/HookTools";
 import { MacInstall } from "./MacInstall";
 import { DeviceList, TrackingStatus, TrackingStrip } from "./TrackingStatus";
 import { useNow } from "./ui/PresenceBlock";
@@ -212,6 +213,7 @@ function ManualInstall({ token, choice, onChoice, copied, onCopy, error }: {
           ))}
         </div>
       )}
+      <HookTools />
         </>
       )}
     </div>

@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { toolsOf } from "../../lib/api";
 import { formatActiveTime, formatTokens, humanizeModel, modelFamily, toolFamily, toolLabel } from "../../lib/format";
 import { modelsOfSources, sumToday } from "../../lib/sources";
+import { TOKENS_NOT_REPORTED, TOKENS_NOT_REPORTED_TITLE } from "../../lib/supportedTools";
 import type { TrackerStatus } from "../../types";
 import { Button } from "./Button";
 import { Confetti } from "./Confetti";
@@ -114,11 +115,17 @@ export function ConnectCelebration({ open, status, onRefresh, onClose }: Props) 
 
         <div className={styles.counter}>
           <div className={styles.metric}>
-            <span className={styles.metricValue}>
-              {today.estimated ? "~" : ""}
-              {formatTokens(today.tokens)}
-            </span>
-            <span className={styles.metricLabel}>tokens today</span>
+            {today.tokensReported ? (
+              <>
+                <span className={styles.metricValue}>
+                  {today.estimated ? "~" : ""}
+                  {formatTokens(today.tokens)}
+                </span>
+                <span className={styles.metricLabel}>tokens today</span>
+              </>
+            ) : (
+              <span className={styles.metricLabel} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED} today</span>
+            )}
           </div>
           <span className={styles.metricRule} aria-hidden="true" />
           <div className={styles.metric}>

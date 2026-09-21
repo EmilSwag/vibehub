@@ -99,11 +99,12 @@ Done in 6s.
 
 | Step | Detail |
 |---|---|
-| 1 Node.js | Reuses a system Node ≥ 18 if present. Otherwise downloads the pinned **v24.21.0** from `nodejs.org`, checks its SHA-256 against a hash baked into the script, and installs only the `node` binary + LICENSE into `~/.vibehub/runtime`. PATH is never modified. |
+| 1 Node.js | Reuses a system Node ≥ 18 if present. Otherwise downloads the pinned **v24.21.0** from `nodejs.org`, checks its SHA-256 against a hash baked into the script, and installs only the `node` binary + LICENSE into `~/.vibehub/runtime`. Your PATH is never edited. |
 | 2 Tracker | Downloads `vibehub-tracker.cjs` (single file, no npm) into a staging dir, runs `node --check`, then atomically moves it into `~/.vibehub/app`. |
 | 3 Token | Calls `GET /api/v1/tracker/verify` with the token in an `Authorization` header (never in a URL). Fails closed on anything but a valid `{ username }`. |
 | 4 Config | `~/.vibehub/config.json`, mode `0600`, directory `0700`. |
 | 5 Start | Only with `--start` / `-Start`. Spawns the background daemon and confirms it with an independent `status` call. No launchd / Task Scheduler / registry entries. |
+| Launcher | A small `vibehub-tracker` command is written so the commands below work by name — `~/.local/bin/vibehub-tracker` on macOS and Linux, `%LOCALAPPDATA%\Programs\VibeHub\vibehub-tracker.cmd` on Windows (per user, so no administrator is needed to install it *or* to remove it). It is ours and rewritten in place on every re-install; a file of that name the installer does not recognise is left untouched. If that directory is not already on your PATH, the installer says so and prints both the line to add and the full-path form to use meanwhile. |
 
 Colours and ✓ glyphs appear only in an interactive UTF-8 terminal; `NO_COLOR=1` or a
 non-TTY gives plain text. Every failure prints one red `✗` line plus a one-line hint and
@@ -111,10 +112,32 @@ exits non-zero. If the failure happens before step 5, the hint reads *Nothing wa
 
 ## 4. What the tracker reads and sends
 
-- **Reads:** Claude Code (`~/.claude/projects/**/*.jsonl`) and Codex
-  (`~/.codex/sessions/**/*.jsonl`) session logs. Nothing else — no process list, window
-  titles, browser, keyboard/idle, Git, other AI tools (Quadcode, Cursor, ChatGPT are not
-  tracked).
+- **Reads:** the session logs of Claude Code (`~/.claude/projects/**/*.jsonl`), Codex
+  (`~/.codex/sessions/**/*.jsonl`) and Quadcode AI (its per-project chat JSONL), plus
+  `~/.vibehub/attested.jsonl` — the inbox the Cursor/Windsurf hook writes to, read only
+  while you have that hook installed. Nothing else: no process list, window titles,
+  browser, keyboard/idle and no Git. ChatGPT in the browser or desktop app is **not**
+  tracked — it leaves no local record to read.
+- **Cursor and Windsurf are reported without being read.** Neither writes a session log
+  we could parse, so instead their own hook mechanism runs one VibeHub command when an AI
+  turn completes, and that command appends a single metadata line — tool, time, model id,
+  project folder name. It is off until you install it:
+
+  ```bash
+  vibehub-tracker hooks install cursor
+  vibehub-tracker hooks install windsurf
+  vibehub-tracker hooks status
+  vibehub-tracker hooks uninstall cursor
+  ```
+
+  Install merges into your own `~/.cursor/hooks.json` /
+  `~/.codeium/windsurf/hooks.json`, keeping any hooks you already had, and backs the file
+  up first. The prompt, the response, the transcript, the workspace path and your email
+  are all available to that hook and none of them are read.
+- **Tokens.** Claude Code and Codex report usage per turn, so their counts are real.
+  Quadcode AI, Cursor and Windsurf report none, so VibeHub shows *tokens not reported*
+  for them and leaves them out of the ≈$ estimate. Nothing is ever inferred from the
+  length of a prompt or a reply.
 - Parsing may temporarily read records that contain prompts, code and tool output. Those
   contents are not stored and not sent.
 - **Sends:** tool, model, timestamps/duration, token counts and a bounded project alias.
@@ -132,18 +155,46 @@ exits non-zero. If the failure happens before step 5, the hint reads *Nothing wa
 | Status | `… vibehub-tracker.cjs status` | `… vibehub-tracker.cjs status` |
 | Stop | `… vibehub-tracker.cjs stop` | `… vibehub-tracker.cjs stop` |
 
-If the connector reused your system Node, replace the runtime path with plain `node`.
-The web app's **Connect** sheet prints the exact commands for your device.
+With the launcher's directory on your PATH the short form works everywhere:
+`vibehub-tracker start` / `status` / `stop` / `hooks status`. That directory is
+`~/.local/bin` on macOS and Linux and `%LOCALAPPDATA%\Programs\VibeHub` on Windows. If it
+is not on your PATH the connector prints the exact line to add it — an `export PATH=…`
+line for the file your login shell really reads, or on Windows
+
+```powershell
+[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:LOCALAPPDATA\Programs\VibeHub", 'User')
+```
+
+which is the User scope, so no administrator is needed; reopen the terminal afterwards.
+(The directory has to go in resolved, as above — a literal `%LOCALAPPDATA%` would be stored
+unexpanded and the entry would never match anything. The connector prints the line with
+your own absolute path already substituted.)
+(`setx` would also work but truncates PATH at 1024 characters, so it is not the advice.)
+If the connector reused your system Node, replace the runtime path with plain `node`. The
+web app's **Connect** sheet prints the exact commands for your device.
 
 Rename or hide a project alias: `… vibehub-tracker.cjs set <path> "<alias>"`.
 
 ## 6. Uninstall
 
-1. `… vibehub-tracker.cjs stop`
-2. Delete `~/.vibehub` (Windows: `%USERPROFILE%\.vibehub`).
-3. Optionally revoke the token in VibeHub → Settings → Tracker.
+```bash
+vibehub-tracker uninstall
+```
 
-Nothing else was written outside that directory.
+That stops the daemon, removes the Cursor/Windsurf hook entries from your own hook files,
+clears the saved config and deletes its launcher. The downloaded tracker, the private Node
+runtime and the metadata inbox stay where they are, and the command prints the one line
+that removes them — deleting a directory on your behalf is not something an uninstaller
+should decide silently.
+
+Manually, if you prefer: `… vibehub-tracker.cjs stop`, then delete `~/.vibehub`
+(Windows: `%USERPROFILE%\.vibehub`) and the launcher —
+`~/.local/bin/vibehub-tracker`, or `%LOCALAPPDATA%\Programs\VibeHub\vibehub-tracker.cmd`
+on Windows. Optionally revoke the token in VibeHub → Settings → Tracker. If you delete
+`~/.vibehub` and forget the launcher, it removes itself the next time it is run rather
+than sitting on your PATH as a broken command.
+
+Outside those two paths and your own hook files, nothing was written.
 
 ## 7. Troubleshooting
 
@@ -156,7 +207,9 @@ Nothing else was written outside that directory.
 | `This is Git Bash/MSYS/Cygwin` / `WSL is not supported` | Use the Windows PowerShell command instead. |
 | PowerShell: *running scripts is disabled* | The one-liner uses `irm` + `scriptblock`, which does not require changing the execution policy. If your org blocks it, download `connect.ps1` and run it with `powershell -ExecutionPolicy Bypass -File connect.ps1 -Start`. |
 | Tracker runs, VibeHub still grey | Wait ~30 s for the first ping. Check `status`: `Connected: yes` plus a fresh server heartbeat is required. Corporate proxies that strip `Authorization` headers break this. |
-| Shows *Connected · idle* | Normal when no Claude Code / Codex session has produced tokens recently. |
+| Shows *Connected · idle* | Normal when no supported tool has produced AI activity recently. |
+| Cursor / Windsurf never appear | Run `vibehub-tracker hooks status`. If it reports the hook as missing, the IDE never ran it: re-run `hooks install`, then restart the IDE so it re-reads its hook file. Note that only a completed AI turn counts — opening the editor does not. |
+| `vibehub-tracker: command not found` | The launcher's directory is not on your PATH — `~/.local/bin`, or `%LOCALAPPDATA%\Programs\VibeHub` on Windows. Add it as the installer printed and reopen the terminal, or call the launcher by its full path. |
 
 ## Requirements
 

@@ -48,9 +48,10 @@ describe("attested receiver: usage is measured or unknown, never derived", () =>
   it("does NOT attribute counts for a tokenless tool, even when measured", () => {
     // Round 4: `quadcode` has no token counter in any source, so a producer's
     // measured claim cannot be honoured for it — the turn still counts as activity
-    // and as a model sighting. Today `quadcode` is the only consentable receiver
-    // tool, so the measured path below is implemented but unreachable until a tool
-    // with a real counter joins ATTESTED_TOOLS.
+    // and as a model sighting. Round 5 added `cursor` and `windsurf`, whose hook
+    // systems report no counts either, so every consentable receiver tool is still
+    // tokenless: the measured path below stays implemented and stays unreachable
+    // until a tool with a real counter joins ATTESTED_TOOLS.
     const observation = project();
     assert.equal(observation?.tool, "quadcode");
     assert.equal(observation?.tokensInputDelta, 0);
@@ -96,11 +97,20 @@ describe("attested receiver: identity is allowlisted, never invented", () => {
     assert.equal(project({ projectHint: "/Users/me/secret" }), null);
     assert.equal(project({ projectHint: "../escape" }), null);
   });
-  it("refuses a tool the user did not consent to, and every native tool id", () => {
+  it("refuses a tool the user did not consent to, and every native-only tool id", () => {
     assert.equal(projectAttestedRecord(record(), NOW, WINDOW, []), null);
+    // Claude Code and Codex are refused outright: a file another process writes must
+    // never assert their activity, whatever the user consented to.
     assert.equal(project({ tool: "claude-code" }), null);
     assert.equal(project({ tool: "codex" }), null);
+    // Round 5: cursor and windsurf ARE receiver-eligible, so they are refused here for a
+    // different reason - this fixture consents to `quadcode` only. Consent is per tool.
     assert.equal(project({ tool: "cursor" }), null);
+    assert.equal(project({ tool: "windsurf" }), null);
+    // The exact shape the hook producer writes: no `measured`, no counts at all.
+    const { measured, tokensInputDelta, tokensOutputDelta, ...hookRecord } = record({ tool: "cursor" });
+    assert.equal(projectAttestedRecord(hookRecord, NOW, WINDOW, ["cursor"])?.tool, "cursor");
+    assert.equal(projectAttestedRecord(hookRecord, NOW, WINDOW, ["windsurf"]), null);
   });
   it("refuses an unversioned record or a malformed record id", () => {
     assert.equal(project({ v: 2 }), null);

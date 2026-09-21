@@ -14,6 +14,7 @@ vibehub-tracker start                                    # spawn the background 
 vibehub-tracker status                                    # pretty-print ~/.vibehub/status.json
 vibehub-tracker stop                                      # stop the daemon
 vibehub-tracker logout                                    # stop the daemon and remove config.json
+vibehub-tracker uninstall                                 # logout, plus remove the hooks and the `vibehub-tracker` command it owns
 ```
 
 `start` requires a device token from a prior `login`. For local testing, seed one
@@ -154,11 +155,17 @@ A third adapter, `attested`, exists but is **constructed only when the user opts
 (`attestedMetadata` in `config.json`). It is a receiver, not a producer — see
 "Opt-in attested metadata" below and ARCHITECTURE.md §4.6.
 
+**Cursor and Windsurf have no adapter here, and never will.** They are reported through
+that same receiver, from records their own hook systems ask a separate producer to write
+(`vibehub-tracker hooks install cursor` — see "Cursor and Windsurf" below and
+ARCHITECTURE.md §4.7). Nothing in `src/` opens a Cursor or Windsurf file, directory,
+process or window.
+
 | Adapter | Source | Gives | Active? |
 |---|---|---|---|
 | `claudeCode` | `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`) | project (from `cwd`), model, **real token counts per model** (input + cache read/creation, output), precise timestamps | Yes |
 | `codex` | `~/.codex/sessions/**/*.jsonl` (or `CODEX_HOME`) | project, model, token deltas from running `token_count` totals, attributed to the model of the latest `turn_context` | Yes |
-| `attested` | `~/.vibehub/attested.jsonl`, written by a separate producer you installed | whatever that producer states: dated activity, an allowlisted model or null, and token counts **only** when it marks them measured | Only when opted in |
+| `attested` | `~/.vibehub/attested.jsonl`, written by a separate producer you installed — VibeHub's own Cursor / Windsurf hook is one | whatever that producer states: dated activity, an allowlisted model or null, and token counts **only** when it marks them measured | Only when opted in |
 | `quadcode` | `<app data>/QuadcodeAI/apps/*/.quadcodeai/.data/chats/**/chat_N.jsonl` | project (from the `<Project>` folder), model from `variations[].model_name`, activity — **never tokens** | Yes |
 | `processes` | nothing — inert stub | nothing; `poll()` returns `[]` | No |
 
@@ -189,14 +196,15 @@ that actually knows what a turn used. The `attested` adapter lets a **separate p
 you install** state that. It is a receiver: it discovers nothing, derives nothing, and
 while the switch is off it opens no file at all.
 
-Note that `quadcode` — currently the only tool you can consent to — is tokenless, so
-even a producer's measured claim contributes activity and model only. The measured path
-stays implemented for a future tool that has a real counter.
+The tools you can consent to are `quadcode`, `cursor` and `windsurf` — and every one of
+them is tokenless, so even a producer's measured claim contributes activity and model
+only. The measured path stays implemented for a future tool that has a real counter.
 
-Turn it on in `~/.vibehub/config.json`:
+Turn it on in `~/.vibehub/config.json` (for Cursor and Windsurf, `hooks install` writes
+this entry for you):
 
 ```json
-{ "attestedMetadata": { "enabled": true, "tools": ["quadcode"] } }
+{ "attestedMetadata": { "enabled": true, "tools": ["quadcode", "cursor", "windsurf"] } }
 ```
 
 Your producer then appends one JSON record per line to `~/.vibehub/attested.jsonl`
@@ -220,13 +228,118 @@ Rules, all fail-closed — a record that breaks one is dropped, never repaired:
 - `estimated` must not appear, in either polarity.
 - `model` goes through the same allowlist as every other source; an unreviewed id (for
   example `grok-4.6`) becomes `null`. Nothing is added to the allowlist for this path.
-- `tool` may only be a receiver-only id. Listing `claude-code` or `codex` is a config
-  error, not a wider receiver — those must come from their own logs.
+- `tool` may only be a receiver-eligible id, and only one you actually listed — consent
+  is per tool. Listing `claude-code` or `codex` is a config error, not a wider receiver:
+  those must come from their own logs.
 - `recordId` is deduplicated, and the reader primes at EOF, so a retry, a restart or a
   rewritten file never replays or double-bills.
 - Withdrawing consent removes the receiver and clears its state on the next tick.
 
 `vibehub-tracker status` prints a `Receiver:` line whenever it is on.
+
+## Cursor and Windsurf (opt-in hooks)
+
+Both products publish an official hook system that runs a command you choose at points in
+their agent loop. VibeHub ships such a command, and one code path covers both vendors.
+
+```
+vibehub-tracker hooks install cursor
+vibehub-tracker hooks install windsurf
+vibehub-tracker hooks install cursor --dry-run   # shows the exact file, writes nothing
+vibehub-tracker hooks status
+vibehub-tracker hooks uninstall cursor
+```
+
+`install` does two things at once, because either alone is useless: it registers the hook
+in **your** config (`~/.cursor/hooks.json`, `~/.codeium/windsurf/hooks.json`) and it adds
+the tool to `attestedMetadata` so the tracker will read what the hook writes. Restart the
+IDE afterwards. Nothing is automatic — no part of this tracker looks for an installed IDE,
+and `login`, `start` and upgrades never touch a vendor file.
+
+| | Cursor | Windsurf |
+|---|---|---|
+| File written | `~/.cursor/hooks.json` | `~/.codeium/windsurf/hooks.json` |
+| Events | `afterAgentResponse`, `stop` | `pre_user_prompt`, `post_cascade_response` |
+| You get | activity, the model when its id is one this tracker knows, and your project folder's name | same |
+| You do not get | token counts — neither product reports any | same |
+
+What leaves the hook process is one line per event, and this is all of it:
+
+```json
+{ "v": 1, "tool": "cursor", "recordId": "574655f5-e803-41d4-8319-f295a03688a3",
+  "occurredAt": "2026-09-21T09:14:22.104Z", "model": "claude-opus-5",
+  "projectHint": "demo-project" }
+```
+
+The vendor hands the hook much more than that — the prompt, the conversation and
+generation ids, your full workspace paths, your e-mail, a transcript path, and on Windsurf
+the entire response — and none of it is read. `recordId` is random, not derived from
+anything the vendor sent. `projectHint` is the **last segment** of the workspace path and
+never the path itself, treated exactly like the folder name Claude Code and Codex logs
+already provide, so your own `vibehub-tracker set <folder> <alias>` and `hidden` overrides
+still apply. Windsurf's two events document no path, so those records usually carry no
+project at all.
+
+There is no `measured` flag and no token field anywhere in that line — not zero, absent.
+Cursor's `beforeSubmitPrompt` (which carries your prompt) and Windsurf's
+`post_cascade_response_with_transcript` (which writes the whole conversation to disk) are
+never subscribed to, and a payload claiming one of them is dropped. Cursor's
+`sessionStart`/`sessionEnd` were subscribed briefly and are retired — a session boundary is
+not a turn, and `sessionEnd` can fire hours after the last model call.
+
+If an older VibeHub left hooks on retired events, `hooks status` lists them as **stale** and
+re-running `hooks install` clears them. Your own entries are never touched, on any event.
+
+Because neither tool reports tokens, `cursor` and `windsurf` are **tokenless**: a usage
+entry naming one is rejected (not zeroed) by the tracker and by the server, and a day
+spent only in them reports unknown tokens and unknown cost — never `0`, never an estimate.
+
+Your hook file stays yours: other entries, other events and unknown keys are preserved, a
+file the installer does not recognise aborts the operation instead of being rewritten, and
+the original is copied to `hooks.json.vibehub-backup` the first time it changes.
+
+**Removing VibeHub removes its command too.** The installers put a `vibehub-tracker` shim
+on your PATH (`~/.local/bin` for the terminal connector, `/usr/local/bin` for the Mac app).
+Nothing runs when you delete an app, so the shim checks its own install root: once
+`VibeHub.app` or `~/.vibehub` is gone it **deletes itself** and says so, leaving nothing
+dangling on PATH. An interrupted upgrade is different - the root is still there, so it
+keeps the command and tells you to reinstall. `vibehub-tracker uninstall` does the same
+deliberately while everything still works: it stops the daemon, removes the hooks it wrote
+from Cursor and Windsurf, withdraws consent, removes `config.json`, and removes its own
+shim - never a command by that name that is not ours, and never one belonging to a
+different VibeHub install. The hook
+command prints nothing and always exits 0 — including when it records nothing at all — so
+it cannot interrupt your editor.
+
+### Windows
+
+The connector installs `vibehub-tracker.cmd` into `%LOCALAPPDATA%\Programs\VibeHub` -
+per user, no administrator, and runnable from both `cmd` and PowerShell. If that directory
+is not on your PATH, `connect.ps1` prints the exact line to add it for your account:
+
+```
+[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:LOCALAPPDATA\Programs\VibeHub", 'User')
+```
+
+then reopen the terminal. The directory goes in **resolved** - `connect.ps1` substitutes
+your own absolute path before printing, and the form above resolves it the same way,
+because `SetEnvironmentVariable` stores a user PATH as `REG_SZ`: a literal
+`%LOCALAPPDATA%` would sit there unexpanded and match nothing. (`setx` works too but
+truncates PATH at 1024 characters, which is why it is not the advice.)
+
+The hook that Cursor and Windsurf store on Windows points at that `.cmd`, not at
+`node.exe` + the bundle: a vendor spawns hook commands through `cmd`, and two quoted paths
+in a row are not parseable there - measured, not assumed. Paths inside the launcher are
+written as `%USERPROFILE%\...`, so a home directory with non-ASCII characters still works
+whatever the console code page is. Deleting `~/.vibehub` disarms it the same way as
+everywhere else: the next run removes the command itself.
+
+Times: Cursor publishes no timestamp, so the record is stamped when the hook fires.
+Windsurf's own `timestamp` is used when it is a real, fresh, zoned instant, and otherwise
+the record is stamped now — a timestamp with no timezone is never "fixed" by assuming
+yours, and the tracker's receiver rejects such a record rather than repairing it.
+
+Full contract: `../docs/ARCHITECTURE.md` §4.7.
 
 **Process/window detection is gone, not paused.** The Windows `Get-Process` listing and
 the macOS/Linux `ps`/`lsof` walk this section used to describe were deleted along with
@@ -254,10 +367,11 @@ Rules:
   activity — Claude tokens are never booked under Cursor just because Cursor's
   window title changed last.
 - **Presence** (the one activity reported at the top level of the payload). The rules
-  below were written when `processes`/`quadcode` could also feed candidates; with only
-  the two active log adapters, "window title changed" and "process-only" candidates do
-  not currently occur, but the same tool/project hysteresis applies between Claude Code
-  and Codex:
+  below were written when `processes` could also feed candidates; no adapter reports a
+  window title or a process any more, so "window title changed" and "process-only"
+  candidates do not occur at all. The same tool/project hysteresis applies across every
+  live source — Claude Code, Codex, Quadcode, and anything arriving through the opt-in
+  receiver:
   1. Candidates are observations with `activity` confidence whose evidence is
      inside `idleThresholdMs` (default 5 min): a log line, or a window title that
      changed. An editor left open with a static title decays to idle;
@@ -301,8 +415,6 @@ is populated server-side from the GitHub API instead (ARCHITECTURE.md §2.12).
   — two real ticks against a mock API; prints each tick's duration, each
   payload's presence and `usage`. Redirects `~/.vibehub` to a temp dir, tails
   the real logs.
-- `npx tsx scripts/local-title-model-check.ts` — pure-function checks for the
-  window-title → project parsing.
 - `npx tsx scripts/local-quadcode-check.ts` — reads nothing at all. It holds the
   documented Quadcode record shape as an executable record and shows, on that shape
   alone, why it cannot date a request or a response, that the native adapter is inert,
@@ -311,12 +423,14 @@ is populated server-side from the GitHub API instead (ARCHITECTURE.md §2.12).
   (pure functions, no filesystem), and `scripts/check-ai-only.mjs` covers it end to end
   against a synthetic HOME: off by default, dated-only, measured-or-unknown, no replay,
   no double-billing, read-only inbox, and consent withdrawal.
-- `node scripts/local-attribution-check.js` — deterministic end-to-end
-  attribution test with a fake Claude Code log (multiple models, `<synthetic>`)
-  in isolated temp dirs; asserts `usage`, the legacy sums and the presence model,
-  the model hysteresis (one side call → no switch; two polls alone → switch), and
-  the `stop.request` shutdown (`session_end` after the last heartbeat, status
-  `"offline"`).
+- **Retired (2026-09-21):** `local-title-model-check.ts` and
+  `local-attribution-check.js`. Both drove behaviour that later hardening deliberately
+  removed — window-title parsing (the helpers are inert stubs now) and a custom
+  `CLAUDE_CONFIG_DIR` (a non-default root disables the source), so both were permanently
+  red. Their coverage that still means something now lives in `scripts/check-ai-only.mjs`:
+  no title may become a project, per-message model attribution with two models in one
+  file, a `<synthetic>` record contributing nothing, and the detector's tool/project
+  hysteresis. `stop.request` shutdown is covered by `test/serve.test.ts`.
 
 ## Privacy invariant
 

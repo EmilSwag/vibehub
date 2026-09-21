@@ -22,6 +22,95 @@ box_rule() { local n="$1" ch="$2" out='' i=0; while [ "$i" -lt "$n" ]; do out="$
 printf '%s\n' "${C_BOLD}VibeHub${C_RESET}"
 printf '%s\n' 'Connecting this device'
 
+# >>> vibehub-shim v1 -- keep byte-identical in connect.sh, mac.sh and mac/pkg/scripts/postinstall
+# Writes the `vibehub-tracker` command, so the documented commands (status, stop,
+# `hooks install cursor`) work by name instead of only as `<node> <path-to>.cjs`.
+#
+#   vibehub_write_shim <shim path> <install root> <node path> <tracker .cjs path>
+#     0  written, or already exactly this
+#     1  refused: something that is not our shim is already there (never clobbered)
+#     2  could not write (permissions, read-only prefix)
+#
+# Removal parity, which is the point of the <install root> argument. Neither entrance has
+# an uninstaller that runs on removal: a .pkg has none, and dragging VibeHub.app to the
+# Trash runs nothing at all. So the shim carries the check itself:
+#   - install root gone (app trashed, ~/.vibehub deleted) -> it DELETES ITSELF, then says
+#     so. Nothing dangling is left behind on PATH, and a second invocation is impossible
+#     because the file is no longer there.
+#   - root still present but the runtime is incomplete (interrupted upgrade) -> it does
+#     NOT remove itself, because a reinstall is about to repair it; it just says which
+#     file is missing.
+# `vibehub-tracker uninstall` does the same job from the other side, deliberately, while
+# the install is still healthy.
+#
+# Re-running an installer rewrites the same path in place: one file, never a second copy,
+# and an upgrade that moves the runtime is just a rewrite. A file without our marker is
+# left untouched, whoever owns it.
+VIBEHUB_SHIM_MARK='# vibehub-tracker shim v1 (managed by VibeHub; safe to delete)'
+vibehub_shim_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+vibehub_write_shim() {
+  vibehub_shim_path="$1"; vibehub_shim_root="$2"; vibehub_shim_node="$3"; vibehub_shim_cjs="$4"
+  [ -n "$vibehub_shim_path" ] && [ -n "$vibehub_shim_root" ] || return 2
+  [ -n "$vibehub_shim_node" ] && [ -n "$vibehub_shim_cjs" ] || return 2
+  [ ! -L "$vibehub_shim_path" ] || return 1
+  if [ -e "$vibehub_shim_path" ]; then
+    [ -f "$vibehub_shim_path" ] || return 1
+    grep -qF "$VIBEHUB_SHIM_MARK" "$vibehub_shim_path" 2>/dev/null || return 1
+  fi
+  mkdir -p "$(dirname "$vibehub_shim_path")" 2>/dev/null || return 2
+  vibehub_shim_tmp="$vibehub_shim_path.vibehub-new.$$"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' "$VIBEHUB_SHIM_MARK"
+    printf '%s\n' '# Rewritten by every VibeHub install. Removes itself once VibeHub is gone.'
+    printf 'VIBEHUB_ROOT=%s\n' "$(vibehub_shim_quote "$vibehub_shim_root")"
+    printf 'VIBEHUB_NODE=%s\n' "$(vibehub_shim_quote "$vibehub_shim_node")"
+    printf 'VIBEHUB_CJS=%s\n' "$(vibehub_shim_quote "$vibehub_shim_cjs")"
+    printf '%s\n' 'if [ ! -d "$VIBEHUB_ROOT" ]; then'
+    printf '%s\n' '  rm -f -- "$0" 2>/dev/null'
+    printf '%s\n' '  if [ -e "$0" ]; then'
+    printf '%s\n' '    printf "vibehub-tracker: VibeHub is gone; remove this command:  sudo rm -f %s\n" "$0" >&2'
+    printf '%s\n' '  else'
+    printf '%s\n' '    printf "vibehub-tracker: VibeHub was removed, so this command removed itself.\n" >&2'
+    printf '%s\n' '  fi'
+    printf '%s\n' '  exit 127'
+    printf '%s\n' 'fi'
+    printf '%s\n' 'if [ ! -x "$VIBEHUB_NODE" ] || [ ! -f "$VIBEHUB_CJS" ]; then'
+    printf '%s\n' '  printf "vibehub-tracker: this VibeHub install is incomplete.\n" >&2'
+    printf '%s\n' '  printf "  missing: %s\n" "$VIBEHUB_CJS" >&2'
+    printf '%s\n' '  printf "  reinstall VibeHub to repair it.\n" >&2'
+    printf '%s\n' '  exit 127'
+    printf '%s\n' 'fi'
+    printf '%s\n' 'exec "$VIBEHUB_NODE" "$VIBEHUB_CJS" "$@"'
+  } >"$vibehub_shim_tmp" 2>/dev/null || { rm -f "$vibehub_shim_tmp" 2>/dev/null; return 2; }
+  chmod 755 "$vibehub_shim_tmp" 2>/dev/null || true
+  mv -f "$vibehub_shim_tmp" "$vibehub_shim_path" 2>/dev/null || { rm -f "$vibehub_shim_tmp" 2>/dev/null; return 2; }
+  return 0
+}
+# `exec` above is deliberate: stdin, stdout, stderr and the exit code pass straight
+# through, which is what `login --token-stdin` and the IDE hook command depend on.
+vibehub_shim_on_path() {
+  case ":${PATH:-}:" in *":$1:"*) return 0 ;; *) return 1 ;; esac
+}
+
+# Which file a PATH line has to go in to survive a new terminal.
+#
+# macOS Terminal and iTerm start LOGIN shells. A login bash reads ~/.bash_profile (then
+# ~/.bash_login, ~/.profile) and does NOT read ~/.bashrc - so the usual ">> ~/.bashrc"
+# advice is silently useless on a Mac. Linux terminals start non-login interactive shells,
+# where ~/.bashrc is the right file. zsh reads ~/.zshrc either way.
+vibehub_shell_rc() {
+  vibehub_rc_shell="${1:-${SHELL:-}}"
+  case "$vibehub_rc_shell" in
+    *zsh) printf '%s' "$HOME/.zshrc" ;;
+    *bash)
+      if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then printf '%s' "$HOME/.bash_profile"
+      else printf '%s' "$HOME/.bashrc"; fi ;;
+    *) printf '%s' "$HOME/.profile" ;;
+  esac
+}
+# <<< vibehub-shim v1
+
 vibehub_connect_main() (
   set -euo pipefail
   umask 077
@@ -176,6 +265,26 @@ vibehub_connect_main() (
       printf '%q %q %s\n' "$NODE" "$BIN" "$verb"
     done
     printf '\n'
+    case "$SHIM_STATE" in
+      0)
+        printf '%s\n' "${C_BOLD}Command installed${C_RESET} ${G_DASH} $SHIM"
+        if vibehub_shim_on_path "$SHIM_DIR"; then
+          printf '  %s\n' 'vibehub-tracker status'
+          printf '  %s\n' 'vibehub-tracker hooks install cursor'
+          printf '  %s\n' 'vibehub-tracker hooks install windsurf'
+        else
+          printf '  %s%s%s\n' "$C_YELLOW" "$SHIM_DIR is not on your PATH. Add it, then reopen the terminal:" "$C_RESET"
+          printf '    %s\n' "echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $(vibehub_shell_rc)"
+          printf '  %s%s%s\n' "$C_DIM" "(that is the file your login shell actually reads; on a Mac a login bash reads ~/.bash_profile, not ~/.bashrc)" "$C_RESET"
+          printf '  %s\n' 'Until then, call it by path:'
+          printf '    %q %s\n' "$SHIM" 'hooks install cursor'
+        fi
+        printf '  %s%s%s\n' "$C_DIM" "Deleting ~/.vibehub disables it; remove $SHIM to clean up." "$C_RESET"
+        ;;
+      1) printf '%s\n' "${C_YELLOW}${G_DASH}${C_RESET} A different vibehub-tracker already exists at $SHIM ${G_DASH} left untouched; use the commands above."; ;;
+      *) printf '%s\n' "${C_YELLOW}${G_DASH}${C_RESET} Could not create $SHIM ${G_DASH} use the commands above."; ;;
+    esac
+    printf '\n'
     printf '%s\n' "Open VibeHub ${G_DASH} it turns green after the first ping."
     printf '%s%s%s\n' "$C_DIM" 'Connection is confirmed in VibeHub only after a fresh server heartbeat, not by this command.' "$C_RESET"
     printf '%s\n' "${C_BOLD}${rule_bottom}${C_RESET}"
@@ -221,7 +330,9 @@ vibehub_connect_main() (
     printf '  %s%s%s\n' "$C_DIM" "$vibehub_disclosure_line" "$C_RESET"
   done <<'DISCLOSURE'
 One device installation covers supported tools. It does not install AI apps or connect their accounts.
-Local reads: Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session logs (JSONL) only; no other apps, processes, windows, browsing or Git are read.
+Local reads: session logs (JSONL) of Claude Code (~/.claude/projects), Codex (~/.codex/sessions) and Quadcode AI only; no other apps, processes, windows, browsing or Git are read.
+Cursor and Windsurf are off until you run 'vibehub-tracker hooks install cursor' or 'vibehub-tracker hooks install windsurf'. Their own hook then writes tool, time, model and project name to ~/.vibehub/attested.jsonl, which is read only while that hook is installed. No prompt, response, transcript, path or email is read.
+Tokens: measured for Claude Code and Codex. Quadcode AI, Cursor and Windsurf report none, so none are shown and none are estimated.
 Parsing may temporarily read records containing prompts, code and tool output. These contents are not saved or sent.
 Uploads: tool, model, timing, token counts and a bounded project alias only.
 Profiles and statistics, including recent activity, are public. Live presence cards are shared with accepted friends.
@@ -265,6 +376,14 @@ DISCLOSURE
   TOKEN=''; unset VIBEHUB_TOKEN
   mkdir -p "$APP"
   mv -f -- "$STAGED_BIN" "$BIN" || fail 'Could not promote the tracker download. No start was requested.'
+
+  # Everything VibeHub documents is `vibehub-tracker <command>`, so make that name real.
+  # Never fatal: the explicit node+path commands printed below always work, and a
+  # `vibehub-tracker` that is not ours is left exactly where it is.
+  SHIM_DIR="$HOME/.local/bin"
+  SHIM="$SHIM_DIR/vibehub-tracker"
+  SHIM_STATE=0
+  vibehub_write_shim "$SHIM" "$BASE" "$NODE" "$BIN" || SHIM_STATE=$?
 
   # vibehub-start-anchor: explicit tracker start begins below
   if [ "$START" -eq 1 ]; then

@@ -7,7 +7,7 @@ export interface TokenUsage {
   readonly tokensOutput?: unknown;
 }
 
-export type TokenCostReason = "missing-breakdown" | "invalid-counts" | "overflow" | "inconsistent-total" | "unknown-model";
+export type TokenCostReason = "missing-breakdown" | "invalid-counts" | "overflow" | "inconsistent-total" | "unknown-model" | "tokenless-tool";
 
 export interface TokenCostEstimate {
   readonly status: "complete" | "partial" | "unavailable";
@@ -106,8 +106,20 @@ export function estimateTokenCost(
   };
 }
 
+/**
+ * A subtotal made entirely of tools that report no token count. Not a zero and not a
+ * failed lookup: there is nothing to price, because the vendor publishes no counts at
+ * all. Deliberately outside `estimateTokenCost` — that function prices the records it
+ * is handed, and the decision that a whole class of record is unmeasured belongs to
+ * the tool table (`supportedTools.ts`), not to the arithmetic.
+ */
+export function tokenlessCost(displayedTokens: unknown): TokenCostEstimate {
+  return unavailable("tokenless-tool", isValidTokenCount(displayedTokens) ? displayedTokens : null);
+}
+
 function reasonText(reason: TokenCostReason | null): string {
   switch (reason) {
+    case "tokenless-tool": return "This tool reports no token counts.";
     case "missing-breakdown": return "Model input/output breakdown is unavailable.";
     case "unknown-model": return "No verified model price for this usage.";
     case "inconsistent-total": return "Model usage does not match this token total.";

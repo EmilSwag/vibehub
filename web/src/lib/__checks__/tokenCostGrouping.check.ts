@@ -1,5 +1,6 @@
 // Synthetic grouping checks. Imports pure helpers only; no API/account/log access.
 import { groupStatsByModel, groupStatsByModelWithCosts, modelRowLabel } from "../recentModels";
+import { isTokenlessTool } from "../supportedTools";
 import { estimateTokenCost, presentTokenCost } from "../tokenCost";
 import type { StatByModel } from "../../types";
 
@@ -39,11 +40,16 @@ eq("tool ordering still follows hours", gpt.tools, ["claude-code", "codex"]);
 eq("each raw source bucket is included once in its tool subtotal", gpt.byTool.map((b) => [b.tool, b.cost.usd]), [["claude-code", 8], ["codex", 3.8]]);
 eq("tool tokens sum to model tokens", gpt.byTool.reduce((n, b) => n + b.tokens, 0), gpt.tokens);
 eq("tool prices sum EXACTLY to model price", gpt.byTool.reduce((n, b) => n + b.cost.amountUnits!, 0n), gpt.cost.amountUnits);
-eq("estimated-token flag is preserved", grouped.find((g) => g.label === "Claude Sonnet 5")?.estimated, true);
-eq("estimated tool uses recorded counts without new multipliers", grouped.find((g) => g.label === "Claude Sonnet 5")?.cost.usd, 0.2);
+eq("legacy-estimate flag is preserved", grouped.find((g) => g.label === "Claude Sonnet 5")?.estimated, true);
+// A tokenless tool's legacy figure is NOT billable usage: the vendor publishes no
+// counts, so the row is unpriced rather than priced at whatever the model costs.
+eq("a wholly tokenless row is unpriced, not zero", grouped.find((g) => g.label === "Claude Sonnet 5")?.cost.usd, null);
+eq("every tokenless group says why it has no price", grouped.filter((g) => g.tokenless).map((g) => [g.label, g.cost.reason]),
+  [["Claude Sonnet 5", "tokenless-tool"], ["Cursor", "tokenless-tool"]]);
 const total = estimateTokenCost(source, count(source));
 eq("unknown nonzero usage makes the full range partial", total.status, "partial");
-eq("model priced subtotals sum EXACTLY to raw same-range estimate", grouped.reduce((n, g) => n + (g.cost.amountUnits ?? 0n), 0n), total.amountUnits);
+const measuredRows = source.filter((r) => !isTokenlessTool(r.tool));
+eq("priced subtotals sum EXACTLY to the raw estimate over the MEASURING rows", grouped.reduce((n, g) => n + (g.cost.amountUnits ?? 0n), 0n), estimateTokenCost(measuredRows, count(measuredRows)).amountUnits);
 eq("model token subtotals sum to the displayed range count", grouped.reduce((n, g) => n + g.tokens, 0), count(source));
 eq("model-less tool never inherits a live/default model rate", presentTokenCost(grouped.find((g) => g.label === "Cursor")!.cost).amount, "≈ $—");
 
@@ -56,8 +62,11 @@ const snapshots = [
 const folded = groupStatsByModelWithCosts(snapshots);
 eq("different priced snapshots still share the existing display row", folded.length, 1);
 eq("same-tool snapshots use each snapshot's own rate", folded[0].byTool.find((b) => b.tool === "codex")?.cost.usd, 32.5);
-eq("folded price uses raw snapshots, not first-model tariff", folded[0].cost.usd, 32.500525);
-eq("snapshot subtotal equals its raw source estimate", folded[0].cost.amountUnits, estimateTokenCost(snapshots, count(snapshots)).amountUnits);
+eq("folded price uses raw snapshots, not first-model tariff", folded[0].cost.usd, 32.5);
+eq("a tokenless tool on a measured row adds activity, never price", folded[0].byTool.find((b) => b.tool === "quadcode")?.cost.reason, "tokenless-tool");
+eq("snapshot subtotal equals its raw estimate over the measuring rows", folded[0].cost.amountUnits,
+  estimateTokenCost(snapshots.filter((r) => !isTokenlessTool(r.tool)), folded[0].tokens).amountUnits);
+eq("the unmeasured share is reported as uncovered, not dropped from the total", presentTokenCost(folded[0].cost).coverage, "partial · 99% covered");
 eq("input ordering cannot change the chosen price", groupStatsByModelWithCosts([...snapshots].reverse())[0].cost.amountUnits, folded[0].cost.amountUnits);
 
 // Dotted/provider-prefixed names humanize identically but are NOT verified aliases.
@@ -114,8 +123,12 @@ const overflow = groupStatsByModelWithCosts([row("codex", "gpt-5", Number.MAX_SA
 eq("folded model overflow is unavailable", presentTokenCost(overflow.cost).amount, "≈ $—");
 eq("folded tool overflow is unavailable", presentTokenCost(overflow.byTool[0].cost).amount, "≈ $—");
 const rounding = groupStatsByModelWithCosts([row("codex", "gpt-5", 4000, 0), row("cursor", "gpt-5", 4000, 0)])[0];
-eq("two tiny tool amounts sum before rounding", presentTokenCost(rounding.cost).amount, "≈ $0.01");
-eq("tool subtotals are never rounded away", rounding.byTool.reduce((n, b) => n + b.cost.amountUnits!, 0n), rounding.cost.amountUnits);
+eq("a measuring tool keeps the row priced when a tokenless one shares it", rounding.tokenless, false);
+eq("the tokenless half is excluded from the row price", presentTokenCost(rounding.cost).amount, "≈ <$0.01");
+eq("the excluded half still counts against coverage", presentTokenCost(rounding.cost).coverage, "partial · 50% covered");
+eq("the tokenless bucket carries no price of its own", presentTokenCost(rounding.byTool.find((b) => b.tokenless)!.cost).amount, "≈ $—");
+// The expanded row prints these underneath the row total, so they have to add up.
+eq("measured tool subtotals still sum EXACTLY to the row", rounding.byTool.filter((b) => !b.tokenless).reduce((n, b) => n + b.cost.amountUnits!, 0n), rounding.cost.amountUnits);
 const frozenRows = source.map((r) => Object.freeze({ ...r }));
 Object.freeze(frozenRows);
 eq("frozen input is safe and deterministic", groupStatsByModelWithCosts(frozenRows), grouped);

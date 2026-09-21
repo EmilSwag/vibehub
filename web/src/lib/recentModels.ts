@@ -8,8 +8,9 @@
 // Pinned by web/src/lib/__checks__/recentModels.check.ts — run it after touching this
 // file: `npx tsx web/src/lib/__checks__/recentModels.check.ts`.
 
-import { humanizeModel, toolFamily, toolLabel } from "./format";
-import { estimateTokenCost } from "./tokenCost";
+import { humanizeModel, toolLabel } from "./format";
+import { isLegacyEstimateTool, isTokenlessTool } from "./supportedTools";
+import { estimateTokenCost, tokenlessCost } from "./tokenCost";
 import type { TokenCostEstimate } from "./tokenCost";
 import type { StatByModel } from "../types";
 
@@ -27,8 +28,11 @@ export interface RecentModelToolBucket {
   activeSeconds: number;
   /** Newest moment this tool ran this model; null on a pre-round-7 server. */
   lastActiveAt: string | null;
-  /** This tool's token figure is the tracker's estimate (see `isEstimatedTool`). */
+  /** This tool's non-zero figure is a retired estimate (`isLegacyEstimateTool`). */
   estimated: boolean;
+  /** This tool reports no measured count at all (`isTokenlessTool`), so a zero here
+   *  means "not reported" and the subtotal carries no cost. */
+  tokenless: boolean;
 }
 
 /** One model the person has used, with every tool that ran it merged in. */
@@ -49,21 +53,11 @@ export interface RecentModelRow {
   activeSeconds: number;
   /** Newest moment any contributing bucket was seen; null on a pre-round-7 server. */
   lastActiveAt: string | null;
-  /** At least one contributing tool reports estimated tokens (see `isEstimatedTool`). */
+  /** At least one contributing tool carries a retired estimate. */
   estimated: boolean;
-}
-
-/**
- * Tools that report no measured token count. Quadcode AI's logs carry none: the
- * current tracker sends activity and model only (tokens absent, never estimated), so
- * a zero on such a row means "not reported", and the UI says so. A non-zero figure can
- * only be history from the retired chars/4 estimate and stays marked ("~") rather than
- * passed off as measured.
- */
-const ESTIMATED_TOOL_FAMILIES = new Set(["quadcode"]);
-
-export function isEstimatedTool(tool: string | null | undefined): boolean {
-  return ESTIMATED_TOOL_FAMILIES.has(toolFamily(tool));
+  /** EVERY contributing tool is tokenless, so this row's total is not a measurement.
+   *  A mixed row stays measured: the tokenless tool contributed activity, not tokens. */
+  tokenless: boolean;
 }
 
 /**
@@ -115,13 +109,15 @@ export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
         activeSeconds: 0,
         lastActiveAt: null,
         estimated: false,
+        tokenless: false,
       };
       groups.set(label, group);
       toolBuckets.set(label, new Map());
     }
 
     const tokens = row.tokensInput + row.tokensOutput;
-    const estimated = isEstimatedTool(row.tool);
+    const estimated = isLegacyEstimateTool(row.tool);
+    const tokenless = isTokenlessTool(row.tool);
     const seen = row.lastActiveAt ?? null;
 
     group.tokens += tokens;
@@ -138,6 +134,7 @@ export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
         activeSeconds: row.activeSeconds,
         lastActiveAt: seen,
         estimated,
+        tokenless,
       });
     } else {
       bucket.tokens += tokens;
@@ -153,6 +150,9 @@ export function groupStatsByModel(rows: StatByModel[]): RecentModelRow[] {
       (a, b) => b.activeSeconds - a.activeSeconds || (a.tool < b.tool ? -1 : 1),
     );
     group.tools = group.byTool.map((bucket) => bucket.tool);
+    // Every bucket, not any: one measuring tool on the row makes the total a real
+    // measurement again, and the tokenless tool simply contributed no tokens to it.
+    group.tokenless = group.byTool.every((bucket) => bucket.tokenless);
   }
 
   // Recency first when the server knows it; hours otherwise. A bucket with no date
@@ -193,14 +193,24 @@ export function groupStatsByModelWithCosts(rows: StatByModel[]): PricedRecentMod
     else tools.set(row.tool, [row]);
   }
 
+  // A tokenless subtotal is never priced — not even at zero. The vendor publishes no
+  // counts, so "$0.00" would be a measurement claim this product cannot make, and a
+  // legacy figure from the retired estimate is not a billable one either.
+  //
+  // The ROW price is folded from the measuring tools' records only, for the same
+  // reason and one more: the expanded row shows the per-tool prices underneath it, so
+  // a parent that priced a suppressed bucket would not add up to its own detail. The
+  // row still declares the full token figure, so the unmeasured part reads as
+  // uncovered ("partial") rather than quietly vanishing from the denominator.
   return groupStatsByModel(rows).map((group) => {
     const tools = sources.get(group.label)!;
+    const measured = group.byTool.filter((bucket) => !bucket.tokenless).flatMap((bucket) => tools.get(bucket.tool) ?? []);
     return {
       ...group,
-      cost: estimateTokenCost([...tools.values()].flat(), group.tokens),
+      cost: group.tokenless ? tokenlessCost(group.tokens) : estimateTokenCost(measured, group.tokens),
       byTool: group.byTool.map((bucket) => ({
         ...bucket,
-        cost: estimateTokenCost(tools.get(bucket.tool), bucket.tokens),
+        cost: bucket.tokenless ? tokenlessCost(bucket.tokens) : estimateTokenCost(tools.get(bucket.tool), bucket.tokens),
       })),
     };
   });
