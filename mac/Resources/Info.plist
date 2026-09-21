@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>VibeHub</string>
+	<!-- Kept as-is (not "com.vibehub.app") on purpose: the Keychain item
+	     (service "com.vibehub.menubar") and the app's UserDefaults suite were both
+	     created under this identifier by earlier menu-bar-only builds, and
+	     SMAppService keys the app's login-item registration off it too. Changing it
+	     would strand the saved tracker token, reset every preference — including the
+	     persisted tracking opt-out — and duplicate the login item on upgrade. -->
+	<key>CFBundleIdentifier</key>
+	<string>com.vibehub.menubar</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>VibeHub</string>
+	<key>CFBundleDisplayName</key>
+	<string>VibeHub</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<!-- Menu-bar only: no Dock icon, no app switcher entry. -->
+	<key>LSUIElement</key>
+	<true/>
+	<!-- vibehub://connect?apiUrl=…&amp;webUrl=… — non-default server selection only.
+	     This scheme deliberately carries NO token: both install entrances are
+	     tokenless and the credential is typed once in onboarding (plan FC4).
+	     `Handoff.parse` ignores a `token` query item if an older web build sends one. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.vibehub.menubar.connect</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>vibehub</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+		</dict>
+	</array>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT licensed. Part of the VibeHub project.</string>
+	<key>NSSupportsAutomaticTermination</key>
+	<true/>
+	<key>NSSupportsSuddenTermination</key>
+	<true/>
+</dict>
+</plist>

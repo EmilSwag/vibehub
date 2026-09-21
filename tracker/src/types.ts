@@ -9,6 +9,20 @@ export interface TrackerConfig {
   idleThresholdMs?: number;
   /** Process names to watch for, e.g. ["claude", "cursor", "code"]. */
   toolProcessNames?: string[];
+  /**
+   * Explicit opt-in for the metadata receiver (`adapters/attested.ts`). Absent or
+   * `enabled: false` means the receiver is never constructed and its file is never
+   * opened. `tools` is the exact set of tool ids the user is accepting records for;
+   * an empty list accepts nothing. This never enables a producer — the tracker still
+   * reads no source for these tools, it only accepts what a separate, user-installed
+   * producer wrote. See docs/ARCHITECTURE.md §4.6.
+   */
+  attestedMetadata?: AttestedMetadataConfig;
+}
+
+export interface AttestedMetadataConfig {
+  enabled: boolean;
+  tools: string[];
 }
 
 export type PresenceStatus = "active" | "idle" | "offline";
@@ -25,6 +39,13 @@ export interface StatusFile {
   collectionPolicy?: string;
   /** Digest of the local config; prevents reusing status after account/alias changes. */
   configFingerprint?: string;
+  /**
+   * True only while the explicitly opt-in metadata receiver is switched on in
+   * `config.json`. `collectionPolicy` stays `ai-session-metadata-v1` either way —
+   * this is the field that says whether the extra evidence class is live, so a
+   * reader never has to infer it from the tool ids it happens to see.
+   */
+  attestedReceiver?: boolean;
   /** Result of the daemon's accepted connection-v1 receipt, not proof of AI activity. */
   connected?: boolean;
   lastConnectionCheckAt?: string;
@@ -66,11 +87,11 @@ export interface HeartbeatUsage {
   tokensInputDelta: number;
   tokensOutputDelta: number;
   /**
-   * Round 6: true when the numbers were derived, not reported. Quadcode logs carry
-   * no token counts at all, so its adapter estimates them from character counts.
-   * The server accepts and records the flag; it does not change accounting. Any
-   * surface showing these numbers must say "est." — never pass an estimate off as
-   * measured.
+   * Legacy wire field. It once marked counts derived from chat-body character
+   * lengths; that estimator is gone and `projectUsage` now REJECTS any entry
+   * carrying `estimated: true` outright, so nothing this tracker sends can set it.
+   * The field stays in the type only because the server still accepts it from
+   * older trackers. Unknown usage is reported as unknown, never as an estimate.
    */
   estimated?: boolean;
 }

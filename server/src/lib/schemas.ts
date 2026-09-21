@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { normalizeProjectUrl } from "./project-url";
+import { isTokenlessTool } from "./tools";
 
 // Enums are validated here as plain strings on purpose — the SQLite dev schema has
 // no native enum type, so the app layer is the single source of truth for both
@@ -143,16 +144,28 @@ export const toolEntrySchema = z.object({
 });
 
 export const MAX_USAGE_ENTRIES = 30;
+// Tool-identity facts live in ./tools, which is dependency-free so that zod-free
+// modules (sessions.ts, tracker-me.ts) can share them without dragging the whole
+// request-schema surface into the fixtures-only harness that pins them.
+export { TOKENLESS_TOOLS, isTokenlessTool } from "./tools";
+
 export const usageEntrySchema = z.object({
   tool: z.string().min(1).max(60),
   model: modelSchema,
-  // Round 6: the tracker sets this when the counts were derived rather than reported
-  // (Quadcode logs carry no token numbers, so its adapter estimates from character
-  // counts). Accepted and echoed into the ActivityEvent payload; it does not change
-  // accounting. Any surface that shows these numbers must label them "est.".
+  // Round 6 legacy. It marked counts derived rather than reported, for the Quadcode
+  // character-count estimator. That estimator no longer exists: the current tracker's
+  // `projectUsage` REJECTS any entry carrying `estimated: true`, and its opt-in
+  // metadata receiver refuses a record that even mentions the field
+  // (ARCHITECTURE.md 4.6). Quadcode usage is reported as measured or not at all.
+  // The field stays accepted here only so an older tracker still on the estimator is
+  // not 400'd mid-heartbeat; it has never changed accounting. Anything displaying a
+  // number that carries it must still label it "est.".
   estimated: z.boolean().optional(),
   tokensInputDelta: z.number().int().nonnegative(),
   tokensOutputDelta: z.number().int().nonnegative(),
+}).refine((entry) => !isTokenlessTool(entry.tool), {
+  message: "usage is not reportable for this tool",
+  path: ["tool"],
 });
 export type UsageEntryInput = z.infer<typeof usageEntrySchema>;
 

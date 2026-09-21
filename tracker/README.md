@@ -35,6 +35,7 @@ profile shows a model you don't expect, this is where to check what was actually
 | `tracker.pid` | `start` | pid of the detached daemon, used by `stop`/`status` |
 | `daemon.log` | the daemon | stdout/stderr of the detached process (for debugging `start`) |
 | `stop.request` | `stop` | transient — asks the daemon to shut down cleanly; removed by whichever side finishes first |
+| `attested.jsonl` | a separate producer you installed — **never** the tracker | opt-in attested metadata inbox; read-only, and only while `attestedMetadata.enabled` is set (see below) |
 
 Directory is created `0700`, files `0600`, on platforms with POSIX permission
 bits. Windows has no equivalent bit, so this degrades silently there.
@@ -110,12 +111,12 @@ job. `logout` runs the same `stop` before deleting `config.json`.
 - `model: null` inside `usage` means the tokens can't be attributed to a model —
   Claude Code's locally fabricated `"<synthetic>"` assistant lines, empty ids.
   Those never become the presence model either.
-- `estimated: true` on a `usage` entry means the counts were **derived, not read**.
-  Quadcode chat logs carry no token numbers at all, so its adapter estimates from
-  character counts (~4 chars per token, tool-result transcript excluded). The flag
-  rides through to the server unchanged and never alters accounting — but anywhere
-  those numbers are shown, including `vibehub-tracker status`, they are labelled
-  **est.**. An estimate is never presented as measured.
+- `estimated: true` on a `usage` entry once meant the counts were **derived, not read**
+  — the Quadcode character-count estimator. **This tracker can no longer send it.** The
+  estimator is gone, `projectUsage` rejects any entry carrying the flag, and the opt-in
+  receiver refuses a record that even mentions it. The server still accepts it from
+  older trackers, where it must still be shown as **est.**. Usage that cannot be
+  measured is reported as unknown — not estimated, and not zero.
 - `tools` lists **every tool seen open right now**, primary first (entry 0 always
   matches the top-level `tool`/`model`), deduped, at most 10, e.g.
   `[{"tool":"quadcode","model":"claude-fable-5-1","projectAlias":"vibehub"},
@@ -141,44 +142,96 @@ an extended offline stretch can't grow the file without bound.
 
 ## Detection adapters (`src/adapters/`, merged by `src/detector.ts`)
 
-**Current status: only `claudeCode` and `codex` are wired into the active detector.**
-`quadcode` and `processes` exist as adapter source files, but `Detector`'s constructor
-(`src/detector.ts`) instantiates only `ClaudeCodeAdapter`/`CodexAdapter`, so neither
-contributes to detection today — see `meta/facts/vibehub-ai-only-privacy.md` for the
-AI-only collection contract this repo currently ships. Their rows and the "Windows
-process listing" / "Quadcode specifics" notes below describe that adapter source for
-if/when either is explicitly re-enabled, not current behavior.
+**Current status: `claudeCode`, `codex` and `quadcode` are the log adapters.**
+`processes.ts` still exists as a file but is an **inert stub** — `poll()` returns `[]`
+and it touches no file and no process. The host-inventory implementation that name once
+held was removed, not merely unwired: there is no window/title reader anywhere in
+`src/`, and `estimateTokens()` / `stripToolResults()` still return `0` and `""`. See
+`meta/facts/vibehub-ai-only-privacy.md` for the AI-only collection contract, and
+`../docs/ARCHITECTURE.md` §4.5 for how Quadcode is read and why it never reports tokens.
+
+A third adapter, `attested`, exists but is **constructed only when the user opts in**
+(`attestedMetadata` in `config.json`). It is a receiver, not a producer — see
+"Opt-in attested metadata" below and ARCHITECTURE.md §4.6.
 
 | Adapter | Source | Gives | Active? |
 |---|---|---|---|
 | `claudeCode` | `~/.claude/projects/**/*.jsonl` (or `CLAUDE_CONFIG_DIR`) | project (from `cwd`), model, **real token counts per model** (input + cache read/creation, output), precise timestamps | Yes |
 | `codex` | `~/.codex/sessions/**/*.jsonl` (or `CODEX_HOME`) | project, model, token deltas from running `token_count` totals, attributed to the model of the latest `turn_context` | Yes |
-| `quadcode` | `<QuadcodeAI root>/apps/<Project>/.quadcodeai/.data/chats/*.files/*.jsonl` (or `QUADCODE_HOME`) | project (nearest git repo, else folder), model from `variations[].model_name`, **estimated** token counts — these logs contain no token numbers | No |
-| `processes` | Windows: one PowerShell `Get-Process` call (see below); macOS/Linux `ps` + `lsof` on the editor's integrated-terminal shell | tool is open (Cursor, VS Code, Windsurf, Zed, Quadcode AI, ChatGPT, Grok), project from `"file - project - Cursor"` titles; never any tokens | No |
+| `attested` | `~/.vibehub/attested.jsonl`, written by a separate producer you installed | whatever that producer states: dated activity, an allowlisted model or null, and token counts **only** when it marks them measured | Only when opted in |
+| `quadcode` | `<app data>/QuadcodeAI/apps/*/.quadcodeai/.data/chats/**/chat_N.jsonl` | project (from the `<Project>` folder), model from `variations[].model_name`, activity — **never tokens** | Yes |
+| `processes` | nothing — inert stub | nothing; `poll()` returns `[]` | No |
 
-**Quadcode specifics (inactive; not constructed by `Detector`).** The log's own timestamp is the turn *start* and the line is
-only appended once the turn ends (one observed record spanned 3h47m), so the **file
-append** is the activity signal, not the timestamp. Nothing is appended during a long
-turn — the `processes` adapter carries presence then. Estimation strips
-`<TOOL_RESULT>` spans (tool output) and keeps `<TOOL_RUN>` args (the model wrote
-those); on a real record 99.3% of the message was tool transcript, so counting it raw
-overstated output by ~138x. Media generation is not model-tagged: the log only ever
-names the chat model, and a media call names a meta-section id whose model lives in a
-file on disk. Logs embed base64 uploads inline, so appends over 8 MB and records over
-2 MB are skipped rather than read.
+**How Quadcode is dated, and why it reports no tokens.** Its chat records cannot date a
+reply from their own contents. The `timestamp` is local ISO with **no timezone**, and on
+an LLM record it marks the turn *start*, written only once the turn ends (one observed
+record spanned 3h47m). So the adapter does not use it as an instant at all: it reports
+the moment it **observes the append** of a completed LLM record while holding a byte
+offset in that file, bounded by the poll interval. First sight primes at EOF, so a turn
+that finished before the tracker started is never counted. The record's own stamp is
+used for one thing only — discarding turns whose start is over 24 h old.
 
-**Windows process listing (inactive; not constructed by `Detector`).** `tasklist /v` resolves every window title
-synchronously and was measured at ~54 s per call on a busy machine — longer than
-the 30 s tick. The adapter now runs a single
-`powershell.exe -NoProfile -NonInteractive -Command "Get-Process | Where-Object { $_.MainWindowTitle -or ($n -contains $_.ProcessName) } | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress"`
-where `$n` is the list of watched image names (`claude`, `codex`, `cursor`,
-`code`, `windsurf`, `zed`, `genui`, `chatgpt`, `grok`, …). That returns every
-process with a main window title (project parsing) **plus** the watched
-title-less processes (the `claude` / `codex` CLIs have no window), as compact
-JSON — a single match comes back as an object rather than an array, and
-`ProcessName` carries no `.exe`; both are handled. Measured at ~0.3–0.4 s per
-poll on the same machine. `tasklist` remains the fallback if PowerShell is
-missing, fails, or exceeds a 20 s timeout.
+The logs carry no token counts anywhere (`meta_info.max_tokens` is a boolean flag,
+`cluster_node_info` is a node id), so `quadcode` is a **tokenless** tool: usage entries
+naming it are rejected outright (not zeroed) by both the tracker and the server, and a
+Quadcode-only heartbeat omits the token fields entirely rather than sending `0`.
+
+Roots come from your home directory (`%USERPROFILE%\AppData\Roaming\QuadcodeAI`,
+`~/Library/Application Support/QuadcodeAI`, `~/.config/QuadcodeAI`). `APPDATA` and
+`XDG_CONFIG_HOME` are not consulted; `QUADCODE_HOME` may name the real root and nothing
+else. A non-default install location is simply not found. Full write-up:
+`../docs/ARCHITECTURE.md` §4.5.
+
+## Opt-in attested metadata (`attested-metadata-v1`)
+
+Measured token counts for a tool without its own counter can only come from something
+that actually knows what a turn used. The `attested` adapter lets a **separate producer
+you install** state that. It is a receiver: it discovers nothing, derives nothing, and
+while the switch is off it opens no file at all.
+
+Note that `quadcode` — currently the only tool you can consent to — is tokenless, so
+even a producer's measured claim contributes activity and model only. The measured path
+stays implemented for a future tool that has a real counter.
+
+Turn it on in `~/.vibehub/config.json`:
+
+```json
+{ "attestedMetadata": { "enabled": true, "tools": ["quadcode"] } }
+```
+
+Your producer then appends one JSON record per line to `~/.vibehub/attested.jsonl`
+(the tracker only reads that file — it never writes, rotates or deletes it):
+
+```json
+{ "v": 1, "tool": "quadcode", "recordId": "turn-7f3a",
+  "occurredAt": "2026-09-19T12:04:31.000Z", "model": "claude-fable-5-1",
+  "projectHint": "vibehub", "measured": true,
+  "tokensInputDelta": 391, "tokensOutputDelta": 120 }
+```
+
+Rules, all fail-closed — a record that breaks one is dropped, never repaired:
+
+- `occurredAt` must carry `Z` or a `±HH:MM` offset. A Quadcode-style local timestamp is
+  rejected. Stale and future records are dropped, not clamped.
+- `measured: true` is the only way tokens are accepted, and only as safe non-negative
+  integers. Leave it out and the counts must be absent too: the record then reports
+  activity and model with **no usage at all**. Unknown usage stays unknown — it never
+  becomes a zero, and it is never estimated.
+- `estimated` must not appear, in either polarity.
+- `model` goes through the same allowlist as every other source; an unreviewed id (for
+  example `grok-4.6`) becomes `null`. Nothing is added to the allowlist for this path.
+- `tool` may only be a receiver-only id. Listing `claude-code` or `codex` is a config
+  error, not a wider receiver — those must come from their own logs.
+- `recordId` is deduplicated, and the reader primes at EOF, so a retry, a restart or a
+  rewritten file never replays or double-bills.
+- Withdrawing consent removes the receiver and clears its state on the next tick.
+
+`vibehub-tracker status` prints a `Receiver:` line whenever it is on.
+
+**Process/window detection is gone, not paused.** The Windows `Get-Process` listing and
+the macOS/Linux `ps`/`lsof` walk this section used to describe were deleted along with
+the rest of the host-inventory adapter; `check-ai-only.mjs` greps the collector sources
+to keep them from coming back. An open editor is not evidence that a model ran.
 
 Every adapter returns `Observation`s with `usage: [{ model, tokensInputDelta,
 tokensOutputDelta }]` — per-model deltas since the last poll — plus the summed
@@ -250,11 +303,14 @@ is populated server-side from the GitHub API instead (ARCHITECTURE.md §2.12).
   the real logs.
 - `npx tsx scripts/local-title-model-check.ts` — pure-function checks for the
   window-title → project parsing.
-- `npx tsx scripts/local-quadcode-check.ts` — the Quadcode adapter end to end in a
-  throwaway `QUADCODE_HOME` (never reads your real chats): estimation and
-  `<TOOL_RESULT>` stripping, first-sighting priming (no replay), the append-not-
-  timestamp activity rule, the `estimated` flag, oversized-record skipping, a media
-  turn keeping the chat model, and all three project-alias cases.
+- `npx tsx scripts/local-quadcode-check.ts` — reads nothing at all. It holds the
+  documented Quadcode record shape as an executable record and shows, on that shape
+  alone, why it cannot date a request or a response, that the native adapter is inert,
+  and what the opt-in receiver accepts in its place.
+- `npm test` covers the receiver's projection in `test/attestedReceiver.test.ts`
+  (pure functions, no filesystem), and `scripts/check-ai-only.mjs` covers it end to end
+  against a synthetic HOME: off by default, dated-only, measured-or-unknown, no replay,
+  no double-billing, read-only inbox, and consent withdrawal.
 - `node scripts/local-attribution-check.js` — deterministic end-to-end
   attribution test with a fake Claude Code log (multiple models, `<synthetic>`)
   in isolated temp dirs; asserts `usage`, the legacy sums and the presence model,

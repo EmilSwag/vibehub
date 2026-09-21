@@ -3,6 +3,43 @@
 One command per OS. Setup is idempotent: re-running it refreshes the tracker and the
 saved device token without touching anything else on your machine.
 
+## macOS: VibeHub for Mac
+
+On a Mac, install the app instead of the connector. `VibeHub.app` carries the tracker and
+its private Node runtime, lives in the menu bar, and — once you start tracking inside the
+app — brings the tracker back at every login. Turning it off in the app keeps it off,
+across relaunch, reinstall and upgrade.
+
+Two entrances, one package, **neither carrying a device token**:
+
+1. **Download.** VibeHub → **Settings → Tracker → macOS app → Download VibeHub for Mac**.
+2. **One command:**
+
+   ```bash
+   curl -fsSL https://web-production-da778.up.railway.app/tracker/mac.sh | bash
+   ```
+
+Both resolve the newest `mac-v*` release through `GET /api/v1/mac/latest`, install the
+same `VibeHub.pkg` and open the app. The command verifies the release's published SHA-256
+first and stops rather than installing when that checksum is missing or does not match.
+
+The app asks for a device token on first launch. Create one on that same **macOS app**
+tab — *Create a device key* — and paste it into the app. The token is issued only when
+you press that button, is shown once, and is not saved in the browser. It is never in the
+download, in the command, in a URL or in the environment.
+
+| | |
+|---|---|
+| Requirements | macOS 13 or later, Apple Silicon or Intel. |
+| Releases come from | `github.com/EmilSwag/vibehub` — the `mac-v*` tags. Server-side this is `MAC_RELEASE_REPO`. |
+| Installs | `/Applications/VibeHub.app` plus, after you start tracking, `~/Library/LaunchAgents/com.vibehub.tracker.plist`. |
+| Tracking starts | Only when you start it in the app — installing and opening track nothing. |
+| First launch blocked | Open it once from Finder with right-click → **Open**. |
+| Not released yet | Before the first `mac-v*` release the endpoint answers 404 and Settings says *not released yet* instead of offering a dead button. Use the connector below on that Mac meanwhile. |
+
+Everything from section 1 onward describes the cross-platform connector
+(`connect.sh` / `connect.ps1`) — the path for Linux and Windows, still available on macOS.
+
 ## 1. Get a device token
 
 VibeHub → **Settings → Tracker → New token**. Treat it like a password: it is the only

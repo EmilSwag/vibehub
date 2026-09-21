@@ -23,6 +23,10 @@ export const env = {
   // /app/uploads (== <cwd>/uploads), so the default works without configuration;
   // override with UPLOAD_DIR to mount the volume elsewhere.
   uploadDir: process.env.UPLOAD_DIR || `${process.cwd()}/uploads`,
+  // Lane B (mac app): the GitHub repo whose `mac-v*` releases `GET /api/v1/mac/latest`
+  // resolves (routes/mac.ts), as `owner/repo`. Defaults to the public VibeHub repo;
+  // override on a fork or a staging deploy that cuts its own installer releases.
+  macReleaseRepo: process.env.MAC_RELEASE_REPO || "EmilSwag/vibehub",
   // Web and API are served from different hosts on Railway (*.up.railway.app is on the
   // Public Suffix List, so sibling subdomains count as different sites). Cross-site
   // fetch/WS with credentials therefore needs SameSite=None (+ Secure). Local dev on

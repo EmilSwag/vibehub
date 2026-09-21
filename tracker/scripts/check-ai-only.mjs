@@ -29,11 +29,19 @@ const config = { apiUrl: "https://tracker-fixture.invalid", deviceToken: "SYNTHE
 const results = [];
 const compilerOptions = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true };
 const sourceModules = ["privacy", "config", "paths", "projectAlias", "statusFile", "detector", "heartbeat",
-  "adapters/claudeCode", "adapters/codex", "adapters/jsonlTail", "adapters/processes", "adapters/quadcode", "queue"];
+  "adapters/claudeCode", "adapters/codex", "adapters/jsonlTail", "adapters/processes", "adapters/quadcode",
+  "adapters/attested", "queue"];
+const ATTESTED_INBOX = "attested.jsonl";
 const within = (root, file) => { const rel = path.relative(root, file); return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)); };
 const dump = (value) => JSON.stringify(value, (_key, v) => v instanceof Map || v instanceof Set ||
   Object.prototype.toString.call(v) === "[object Map]" || Object.prototype.toString.call(v) === "[object Set]" ? [...v] : typeof v === "bigint" ? String(v) : v);
 const plain = (v) => JSON.parse(JSON.stringify(v));
+// Quadcode writes a LOCAL ISO stamp with no zone. Fixtures must reproduce that exactly,
+// including the six-digit fraction, or they would be testing a shape that never occurs.
+const localStamp = (ms) => {
+  const d = new Date(ms), p = (n, w = 2) => String(n).padStart(w, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}000`;
+};
 const sourceCache = new Map();
 
 function typecheck() {
@@ -53,23 +61,48 @@ function createHarness() {
   let now = DATE;
   const requests = [], io = [], violations = [], logs = [], timers = new Map(), fds = new Map();
   let timerId = 1;
+  let attestedSeq = 0;
   const env = { HOME: home, USERPROFILE: home };
   const rootClaude = path.join(home, ".claude/projects");
   const rootCodex = path.join(home, ".codex/sessions");
+  // Round 4: Quadcode is collected natively, so its app-data root joins the allowlist
+  // DELIBERATELY and narrowly. This mirrors `adapters/quadcode.ts quadcodeRoot()` move
+  // for move, including the env base: APPDATA / XDG_CONFIG_HOME name the base when set,
+  // and a base outside HOME yields null - no root, so every read is denied. Computed per
+  // call so a fixture can change the env mid-test and see the same answer the adapter does.
+  const quadcodeRootNow = () => {
+    if (process.platform === "darwin") return path.join(home, "Library/Application Support/QuadcodeAI");
+    const windows = process.platform === "win32";
+    const override = env[windows ? "APPDATA" : "XDG_CONFIG_HOME"];
+    const base = windows ? path.join(home, "AppData/Roaming") : path.join(home, ".config");
+    if (!override) return path.join(base, "QuadcodeAI");
+    if (!path.isAbsolute(override) || !within(home, override)) return null;
+    return path.join(override, "QuadcodeAI");
+  };
+  const rootQuadcode = quadcodeRootNow();
   const own = path.join(home, ".vibehub");
   const deny = (name) => { violations.push(name); throw new Error(`Forbidden collector operation: ${name}`); };
   const allowed = (file, op) => {
     if (typeof file !== "string" && !Buffer.isBuffer(file)) return deny(`${op}: non-path`);
     const full = path.resolve(String(file));
     const ownFile = within(own, full) && path.dirname(full) === own &&
-      /^(?:config\.json|status\.json|tracker\.pid|stop\.request|\.(?:config\.json|status\.json|tracker\.pid|stop\.request)\.[a-f0-9-]+\.tmp)$/.test(path.basename(full));
-    const ai = within(rootClaude, full) || within(rootCodex, full);
+      /^(?:config\.json|status\.json|tracker\.pid|stop\.request|attested\.jsonl|\.(?:config\.json|status\.json|tracker\.pid|stop\.request)\.[a-f0-9-]+\.tmp)$/.test(path.basename(full));
+    // The opt-in receiver inbox belongs to a separate producer: we may look at it and
+    // open it for reading, and nothing more. Creating, writing, renaming, chmod-ing or
+    // deleting it would make this tracker a producer of its own evidence.
+    if (path.basename(full) === ATTESTED_INBOX && !["existsSync", "lstatSync", "realpathSync", "openSync"].includes(op)) {
+      deny(`${op}: receiver inbox is read-only`);
+    }
+    const liveQuadcode = quadcodeRootNow();
+    const ai = within(rootClaude, full) || within(rootCodex, full) ||
+      (liveQuadcode !== null && within(liveQuadcode, full));
     const metadataRoot = [home, own, path.join(home, ".claude"), path.join(home, ".codex")].includes(full);
     if (!(ownFile || ai || metadataRoot)) deny(`${op}: ${path.relative(home, full)}`);
     if (["openSync", "readFileSync", "opendirSync"].includes(op) && !ownFile && !ai) deny(`${op}: root enumeration/content`);
     if (["openSync", "readFileSync", "opendirSync"].includes(op) && fs.existsSync(full)) {
       const real = fs.realpathSync(full);
-      if (!(within(own, real) || within(rootClaude, real) || within(rootCodex, real))) deny(`${op}: linked escape`);
+      if (!(within(own, real) || within(rootClaude, real) || within(rootCodex, real) ||
+            (liveQuadcode !== null && within(liveQuadcode, real)))) deny(`${op}: linked escape`);
     }
     io.push({ op, path: path.relative(home, full) });
     return full;
@@ -174,6 +207,25 @@ function createHarness() {
     append: (file, ...records) => fs.appendFileSync(file, records.map((r) => typeof r === "string" ? r : JSON.stringify(r)).join("\n") + "\n"),
     claudeFile: (id = "one") => seed(`.claude/projects/-fixture-project/${id}.jsonl`),
     codexFile: (id = "one") => seed(`.codex/sessions/2026/06/09/rollout-${id}.jsonl`),
+    // Native Quadcode fixtures: the documented tree
+    // `<root>/apps/<Project>/.quadcodeai/.data/chats/<section>.files/chat_N.jsonl`.
+    quadcodeFile: (project = "fixture-project", section = "sec", n = 1) =>
+      seed(`${path.relative(home, quadcodeRootNow() ?? rootQuadcode)}/apps/${project}/.quadcodeai/.data/chats/${section}.files/chat_${n}.jsonl`),
+    // A completed assistant turn. `message` carries the canary: it must never leave.
+    quadcodeLlm: (overrides = {}) => ({ name: "Agent", method: "LLM", message: CANARY,
+      timestamp: localStamp(now), is_status_message: false, variation_index: 0,
+      variations: [{ model_name: "claude-fable-5-1", cluster_node_info: { id: 1 },
+        meta_info: { stop_reason: "end_turn", max_tokens: true } }], ...overrides }),
+    quadcodeUser: (overrides = {}) => ({ name: "PO", method: "USER", message: CANARY,
+      timestamp: localStamp(now), is_status_message: false, variations: [], ...overrides }),
+    // Opt-in receiver fixtures. `attestedInbox()` creates the producer's file empty,
+    // so the first tick primes at EOF exactly as a real install would.
+    attestedInbox: () => seed(`.vibehub/${ATTESTED_INBOX}`, ""),
+    attested: (overrides = {}) => ({ v: 1, tool: "quadcode", recordId: `rec-${++attestedSeq}`,
+      occurredAt: h.iso(), model: "claude-fable-5-1", projectHint: "vibehub",
+      measured: true, tokensInputDelta: 40, tokensOutputDelta: 10, ...overrides }),
+    optIn: (tools = ["quadcode"]) => writeConfig({ ...config, attestedMetadata: { enabled: true, tools } }),
+    optOut: () => writeConfig(config),
     claude: (overrides = {}) => ({ type: "assistant", timestamp: h.iso(), cwd: path.join(home, "UNRELATED_NEVER_OPEN", "private-project"),
       message: { id: "msg_one", role: "assistant", model: "claude-sonnet-4-5-20250929", content: [{ type: "text", text: CANARY }],
         usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 4, cache_creation_input_tokens: 6 } }, ...overrides }),
@@ -209,6 +261,85 @@ test("browser/history/editor/Quadcode/git fixtures are never scanned or inferred
   for (const file of [".cursor/logs/session.jsonl", ".quadcode/chats/session.jsonl", ".bash_history", "Library/Application Support/Chrome/History",
     "AppData/Roaming/Code/logs/session.jsonl", "UNRELATED_NEVER_OPEN/private-project/.git/config", ".config/quadcode/settings.json"]) h.seed(file, CANARY);
   await h.tick(); assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+});
+test("Quadcode first sight primes EOF: a turn that completed before the daemon is not replayed", async (h) => {
+  const file = h.quadcodeFile();
+  h.append(file, h.quadcodeLlm());
+  await h.tick(); await h.tick();
+  assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+});
+test("Quadcode: an appended LLM record is activity with a model and NO token fields", async (h) => {
+  const file = h.quadcodeFile(); await h.tick();
+  h.append(file, h.quadcodeLlm()); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.tool, "quadcode");
+  assert.equal(beat.model, "claude-fable-5-1");
+  assert.equal(beat.projectAlias, "unknown");
+  // Unknown usage is ABSENT, never a zero that would read as "measured nothing".
+  assert.deepEqual(beat.usage, []);
+  assert.equal(Object.hasOwn(beat, "tokensInputDelta"), false);
+  assert.equal(Object.hasOwn(beat, "tokensOutputDelta"), false);
+  assert.equal(h.status().tool, "quadcode");
+});
+test("Quadcode: user turns, status lines and unparseable records are not activity", async (h) => {
+  const file = h.quadcodeFile(); await h.tick();
+  h.append(file, h.quadcodeUser(), h.quadcodeLlm({ is_status_message: true }),
+    h.quadcodeLlm({ timestamp: "not-a-time" }), h.quadcodeLlm({ timestamp: h.iso() }), "{invalid-json");
+  await h.tick();
+  assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+});
+test("Quadcode: a turn whose start is older than a day is ignored however fresh the append", async (h) => {
+  const file = h.quadcodeFile(); await h.tick();
+  h.append(file, h.quadcodeLlm({ timestamp: localStamp(h.now() - 25 * 60 * 60 * 1000) }));
+  await h.tick();
+  assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+});
+test("Quadcode: an unreviewed model id stays null and is never invented from the tool", async (h) => {
+  const file = h.quadcodeFile(); await h.tick();
+  h.append(file, h.quadcodeLlm({ variations: [{ model_name: "grok-4.6" }] })); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.tool, "quadcode"); assert.equal(beat.model, null);
+});
+test("Quadcode: chat bodies and speaker names never leave, and unrelated subtrees stay unread", async (h) => {
+  h.seed(".quadcode/chats/session.jsonl", CANARY);
+  const file = h.quadcodeFile(); await h.tick();
+  h.append(file, h.quadcodeLlm()); await h.tick();
+  assert.ok(h.io.every((i) => !i.path.includes("UNRELATED_NEVER_OPEN")));
+  assert.ok(!JSON.stringify(h.posts()).includes("Agent"));
+});
+test("Quadcode honours a custom in-home app-data base instead of ignoring it", async (h) => {
+  // The PO layout puts the root under %APPDATA% / $XDG_CONFIG_HOME. A machine that
+  // moved its app data must still be found, not silently skipped.
+  if (process.platform !== "darwin") h.env[process.platform === "win32" ? "APPDATA" : "XDG_CONFIG_HOME"] = path.join(h.home, "CustomAppData");
+  const file = h.quadcodeFile(); await h.tick();
+  h.append(file, h.quadcodeLlm()); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.tool, "quadcode"); assert.equal(beat.model, "claude-fable-5-1");
+});
+test("an app-data base outside HOME fails closed: no root, no reads, no activity", async (h) => {
+  const file = h.quadcodeFile(); await h.tick();
+  // Exactly the sandbox hazard: HOME is redirected but the inherited base still names
+  // a real profile. The source must become unavailable, never follow it.
+  if (process.platform === "darwin") return;
+  h.env[process.platform === "win32" ? "APPDATA" : "XDG_CONFIG_HOME"] = path.join(h.home, "..", "ELSEWHERE_NEVER_OPEN");
+  h.append(file, h.quadcodeLlm()); await h.tick();
+  assert.equal(h.posts().length, 0);
+  assert.ok(h.io.every((i) => !i.path.includes("ELSEWHERE_NEVER_OPEN")));
+});
+test("a relative app-data base fails closed too", async (h) => {
+  const file = h.quadcodeFile(); await h.tick();
+  if (process.platform === "darwin") return;
+  h.env[process.platform === "win32" ? "APPDATA" : "XDG_CONFIG_HOME"] = "relative/app/data";
+  h.append(file, h.quadcodeLlm()); await h.tick();
+  assert.equal(h.posts().length, 0);
+});
+test("Quadcode usage cannot be attributed even by a well-formed adapter", async (h) => {
+  const d = new h.api.Detector(300000);
+  d.adapters = [{ name: "quadcode", poll: async () => [{ tool: "quadcode", cwd: null, projectHint: "vibehub",
+    model: "claude-fable-5-1", confidence: "activity", observedAt: h.now(), lastActivityAt: h.now(),
+    tokensInputDelta: 7, tokensOutputDelta: 3,
+    usage: [{ model: "claude-fable-5-1", tokensInputDelta: 7, tokensOutputDelta: 3 }] }] }];
+  assert.equal(await d.detect(h.now()), null);
 });
 test("first sight primes EOF without replaying historical AI records", async (h) => {
   const file = h.claudeFile(); h.append(file, h.claude()); await h.tick(); await h.tick();
@@ -400,11 +531,137 @@ test("a connection acknowledgment arriving during stop cannot revive the collect
   assert.equal(h.posts().length, 0); assert.ok(!h.io.some(i => i.path.startsWith(".claude")));
   assert.deepEqual(h.requests.map(r => r.method), ["POST", "DELETE"]);
 });
+const inboxPath = (h) => path.join(h.home, ".vibehub", ATTESTED_INBOX);
+const INBOX_READ_OPS = ["existsSync", "lstatSync", "realpathSync", "openSync", "readSync"];
+
+test("the opt-in receiver is off by default and its inbox is never opened", async (h) => {
+  const inbox = h.attestedInbox(); h.append(inbox, h.attested());
+  await h.tick(); h.time(30000); await h.tick();
+  assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+  assert.equal(h.status().attestedReceiver, false);
+  assert.ok(!h.io.some((i) => i.path.endsWith(ATTESTED_INBOX)));
+});
+test("a consented receiver reports dated, measured metadata as real activity", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  h.append(inbox, h.attested()); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.tool, "quadcode"); assert.equal(beat.model, "claude-fable-5-1");
+  assert.equal(beat.projectAlias, "unknown");
+  // Round 4: activity and model still arrive, but `quadcode` is now a TOKENLESS tool,
+  // so even a producer's measured claim is not attributed. The only consentable
+  // receiver tool is tokenless today, which means the receiver contributes activity
+  // and model only — the measured path stays implemented and stays unreachable until
+  // a tool with a real counter is added to ATTESTED_TOOLS.
+  assert.deepEqual(beat.usage, []);
+  assert.equal(Object.hasOwn(beat, "tokensInputDelta"), false);
+  assert.equal(Object.hasOwn(beat, "tokensOutputDelta"), false);
+  assert.equal(h.status().attestedReceiver, true);
+});
+test("a local timestamp with no timezone is rejected, never repaired with a host offset", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  // Exactly the shape Quadcode's own chat records carry: ISO text, no zone at all.
+  h.append(inbox, h.attested({ occurredAt: new Date(h.now()).toISOString().replace("Z", "") }),
+    h.attested({ occurredAt: h.now() }), h.attested({ occurredAt: "2026-06-09 12:00:00" }));
+  await h.tick(); assert.equal(h.posts().length, 0); assert.equal(h.status().status, "idle");
+});
+test("a derived count cannot enter the receiver under any spelling", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  h.append(inbox, h.attested({ estimated: true }), h.attested({ estimated: false }),
+    h.attested({ measured: "yes" }), h.attested({ measured: false }),
+    h.attested({ measured: true, tokensInputDelta: 1.5 }), h.attested({ measured: true, tokensOutputDelta: -1 }));
+  await h.tick(); assert.equal(h.posts().length, 0);
+});
+test("unmeasured receiver usage stays unknown instead of becoming a zero", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  const { tokensInputDelta, tokensOutputDelta, ...noCounts } = h.attested();
+  h.append(inbox, { ...noCounts, measured: false }); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.tool, "quadcode"); assert.equal(beat.model, "claude-fable-5-1");
+  assert.deepEqual(beat.usage, []);
+  // Unknown is now ABSENT on the wire rather than 0: a zero would be booked by an
+  // older server as a measurement that came back empty.
+  assert.equal(Object.hasOwn(beat, "tokensInputDelta"), false);
+  assert.equal(Object.hasOwn(beat, "tokensOutputDelta"), false);
+});
+test("an unknown model from the receiver stays null and is never invented", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  h.append(inbox, h.attested({ model: "grok-4.6" })); await h.tick();
+  const beat = h.beats().at(-1);
+  assert.equal(beat.tool, "quadcode"); assert.equal(beat.model, null);
+  assert.deepEqual(beat.usage, []);
+});
+test("the receiver never replays history and counts a repeated record id once", async (h) => {
+  const inbox = h.attestedInbox();
+  h.append(inbox, h.attested({ recordId: "written-before-we-looked" }));
+  h.optIn(); await h.tick();
+  assert.equal(h.posts().length, 0);
+  const once = h.attested({ recordId: "counted-once" });
+  h.append(inbox, once); await h.tick();
+  assert.equal(h.beats().at(-1).tool, "quadcode");
+  const beats = h.beats().length;
+  h.append(inbox, once); await h.tick();
+  assert.equal(h.beats().length, beats);
+  assert.equal(h.posts().at(-1).eventType, "session_end");
+});
+test("the receiver cannot assert activity for a natively supported tool", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  h.append(inbox, h.attested({ tool: "claude-code" }), h.attested({ tool: "codex" }), h.attested({ tool: "cursor" }));
+  await h.tick(); assert.equal(h.posts().length, 0);
+});
+test("consent for a natively supported tool is malformed config, not a wider receiver", async (h) => {
+  h.attestedInbox(); h.optIn(["claude-code"]);
+  await h.tick(); assert.equal(h.posts().length, 0); assert.equal(h.status().status, "offline");
+});
+test("withdrawing consent removes the receiver and stops reading its inbox", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  h.append(inbox, h.attested()); await h.tick();
+  assert.equal(h.beats().at(-1).tool, "quadcode");
+  h.optOut();
+  const before = h.io.length, posts = h.posts().length;
+  h.append(inbox, h.attested()); await h.tick();
+  // Withdrawal fences collected state exactly as an account change does: the open
+  // session is DROPPED, not closed with a session_end built from evidence the user
+  // has just revoked. Nothing is sent at all; the server's own idle timeout closes it.
+  assert.equal(h.posts().length, posts);
+  assert.equal(h.state.activeSession, null);
+  assert.equal(h.status().attestedReceiver, false);
+  assert.ok(!h.io.slice(before).some((i) => i.path.endsWith(ATTESTED_INBOX)));
+});
+test("the receiver inbox is read-only: never written, rotated, chmod-ed or deleted", async (h) => {
+  const inbox = h.attestedInbox(); h.optIn(); await h.tick();
+  h.append(inbox, h.attested()); await h.tick(); await h.tick();
+  const touched = h.io.filter((i) => i.path.endsWith(ATTESTED_INBOX));
+  assert.ok(touched.length > 0);
+  assert.ok(touched.every((i) => INBOX_READ_OPS.includes(i.op)));
+  assert.equal(inboxPath(h), inbox);
+});
+test("a native adapter cannot emit a receiver-only tool id", async (h) => {
+  const d = new h.api.Detector(300000);
+  d.adapters = [{ name: "fixture", poll: async () => [{ tool: "quadcode", cwd: null, projectHint: null,
+    model: "claude-opus-5", confidence: "activity", observedAt: h.now(), lastActivityAt: h.now(),
+    tokensInputDelta: 5, tokensOutputDelta: 5,
+    usage: [{ model: "claude-opus-5", tokensInputDelta: 5, tokensOutputDelta: 5 }] }] }];
+  assert.equal(await d.detect(h.now()), null);
+});
+
 if (!bundleMode) {
-  test("retired process/Quadcode exports are inert and never invoke discovery", async (h) => {
-    assert.deepEqual(plain(await new h.api.ProcessAdapter(1000).poll()), []); assert.deepEqual(plain(await new h.api.QuadcodeAdapter(1000).poll()), []);
-    assert.equal(h.api.estimateTokens(CANARY), 0); assert.equal(h.api.isRealWindowTitle(CANARY), false);
+  test("retired process exports stay inert; Quadcode discovers nothing without its tree", async (h) => {
+    // Round 4: the Quadcode adapter is no longer a stub, so this no longer asserts
+    // inertness-by-deletion. It asserts the live adapter finds nothing when the
+    // documented tree is absent — and that the retired CONTENT helpers are still
+    // dead, because a chat body must never become a token count or a window title.
+    assert.deepEqual(plain(await new h.api.ProcessAdapter(1000).poll()), []);
+    assert.deepEqual(plain(await new h.api.QuadcodeAdapter(1000).poll()), []);
+    assert.equal(h.api.estimateTokens(CANARY), 0); assert.equal(h.api.stripToolResults(CANARY), "");
+    assert.equal(h.api.isRealWindowTitle(CANARY), false);
     assert.equal(h.api.projectFromTitle(CANARY, ["Cursor"]), null);
+  });
+  test("Quadcode QUADCODE_HOME may name the real root, and nothing else", async (h) => {
+    const file = h.quadcodeFile(); await h.tick();
+    h.env.QUADCODE_HOME = path.join(h.home, "UNRELATED_NEVER_OPEN");
+    h.append(file, h.quadcodeLlm()); await h.tick();
+    assert.equal(h.posts().length, 0);
+    assert.ok(h.io.every((i) => !i.path.includes("UNRELATED_NEVER_OPEN")));
   });
   test("legacy offline queue is not opened, retried, rewritten, deleted or sent", async (h) => {
     const text = JSON.stringify([{ apiUrl: "https://unrelated.invalid", deviceToken: CANARY, payload: { prompt: CANARY } }]);
@@ -412,12 +669,14 @@ if (!bundleMode) {
     assert.equal(fs.readFileSync(file, "utf8"), text); assert.equal(h.requests.length, 0);
   });
 } else test("served bundle preserves CLI command registrations without executing install/start/status/stop", async (h) => {
-  assert.deepEqual(plain(h.api.commands), ["login", "set", "start", "status", "stop", "logout", "run-loop"]);
+  // `serve` is the supervisor entry point (lane B, mac app). It was missing here only
+  // because the served CJS predated it; regenerating the bundle surfaced the gap.
+  assert.deepEqual(plain(h.api.commands), ["login", "set", "start", "status", "stop", "logout", "run-loop", "serve"]);
 });
 
 try {
   typecheck();
-  const source = ["detector.ts", ...["processes", "quadcode", "claudeCode", "codex", "jsonlTail"].map((n) => `adapters/${n}.ts`)]
+  const source = ["detector.ts", ...["processes", "quadcode", "claudeCode", "codex", "jsonlTail", "attested"].map((n) => `adapters/${n}.ts`)]
     .map((file) => fs.readFileSync(path.join(tracker, "src", file), "utf8")).join("\n");
   const forbidden = /Get-CimInstance|Win32_Process|GetForegroundWindow|GetWindowText|GetLastInputInfo|CGWindowList|CGEventSource|osascript|ioreg|tasklist|wmic|xprintidle|xprop|xdotool|git rev-parse|file_versions/;
   assert.ok(!forbidden.test(source), "retired host/content probes must not remain in collector sources");

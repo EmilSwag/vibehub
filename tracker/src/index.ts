@@ -12,12 +12,12 @@ import * as path from "node:path";
 // explicit metadata allowlist survives. No process/window/OS-idle/git discovery.
 // Legacy public history is not erased or made trustworthy by this restriction.
 
-import { DEFAULT_API_URL, deleteConfig, readConfig, requireConfig, writeConfig } from "./config";
-import { daemonStatus, runForeground, startDaemon, stopDaemon } from "./daemon";
+import { attestedToolsFor, DEFAULT_API_URL, deleteConfig, readConfig, requireConfig, writeConfig } from "./config";
+import { daemonStatus, runForeground, serveForeground, startDaemon, stopDaemon } from "./daemon";
 import { HIDDEN } from "./projectAlias";
 import { MAX_EVENT_AGE_MS, safeApiOrigin, safeDeviceToken } from "./privacy";
 import { readStatus, writeOfflineStatus } from "./statusFile";
-import { describeSources } from "./toolLabels";
+import { describeSources, toolLabel } from "./toolLabels";
 import type { TrackerConfig } from "./types";
 
 const CONFIG_PATH_LABEL = "~/.vibehub/config.json";
@@ -58,11 +58,52 @@ async function verifyToken(apiUrl: string, deviceToken: string): Promise<{ ok: b
   }
 }
 
+/**
+ * FC4 (mac app): the token arrives on stdin, never in argv (readable by any local
+ * process via `ps`) and never in the environment. One line, trimmed; anything else
+ * is a usage error. Nothing read here is ever echoed back.
+ */
+async function readTokenFromStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of process.stdin) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    total += buf.length;
+    if (total > 4096) throw new Error("stdin token too long");
+    chunks.push(buf);
+  }
+  const firstLine = Buffer.concat(chunks).toString("utf8").split(/\r?\n/, 1)[0] ?? "";
+  return firstLine.trim();
+}
+
 program
-  .command("login <deviceToken>")
+  .command("login [deviceToken]")
   .description(`validate the token with the server, then write ${CONFIG_PATH_LABEL}`)
   .option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL)
-  .action(async (deviceToken: string, options: { apiUrl: string }) => {
+  .option("--token-stdin", "read the device token from stdin (one line) instead of an argument")
+  .action(async (deviceTokenArg: string | undefined, options: { apiUrl: string; tokenStdin?: boolean }) => {
+    let deviceToken: string;
+    if (options.tokenStdin) {
+      if (deviceTokenArg) {
+        console.error("Login failed: pass the token either as an argument or on stdin, not both.");
+        process.exit(1);
+      }
+      deviceToken = await readTokenFromStdin().catch((err: unknown) => {
+        console.error(`Login failed: ${err instanceof Error ? err.message : "could not read stdin"}.`);
+        process.exit(1);
+      });
+    } else if (deviceTokenArg) {
+      deviceToken = deviceTokenArg;
+    } else {
+      console.error("Login failed: missing device token. Pass it as an argument or use --token-stdin.");
+      process.exit(1);
+    }
+    if (!safeDeviceToken(deviceToken)) {
+      console.error("Login failed: the device token is empty or malformed.");
+      console.error("Create a new token in VibeHub > Settings > Tracker and try again.");
+      process.exit(1);
+    }
+
     const verified = await verifyToken(options.apiUrl, deviceToken);
     if (verified.rejected) {
       console.error(`Login failed: token rejected by the server (${verified.detail}).`);
@@ -78,6 +119,9 @@ program
       heartbeatIntervalMs: existing?.heartbeatIntervalMs,
       idleThresholdMs: existing?.idleThresholdMs,
       toolProcessNames: existing?.toolProcessNames,
+      // A device-level consent setting, like projectAliases: re-running `login`
+      // must not silently switch the receiver on or off behind the user's back.
+      attestedMetadata: existing?.attestedMetadata,
     };
     writeConfig(config);
 
@@ -144,7 +188,13 @@ program
     }
     console.log(`Updated: ${status.updatedAt}`);
 
+    const attested = attestedToolsFor(config);
     console.log("Scope:   supported AI-session activity only (Claude Code, Codex)");
+    if (attested.length > 0) {
+      console.log(`Receiver: on for ${attested.map(toolLabel).join(", ")} (opt-in, ~/.vibehub/attested.jsonl)`);
+      console.log("          Records come from a separate producer you installed; this tracker reads");
+      console.log("          no log, process or window for those tools, and never estimates their usage.");
+    }
     const seeingCutoff = Date.now() - MAX_EVENT_AGE_MS;
     const seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
     if (seeing.length > 0) {
@@ -194,6 +244,18 @@ program
   .action(() => {
     const config = requireConfig();
     runForeground(config);
+  });
+
+// Lane B (mac app): what the VibeHub app's LaunchAgent runs (`ProgramArguments: [node,
+// vibehub-tracker.cjs, serve]`). Foreground, owns tracker.pid, exits 0 when a healthy
+// supervised tracker already runs - see serveForeground in daemon.ts. Hidden because a
+// person wants `start`; a supervisor wants this.
+program
+  .command("serve", { hidden: true })
+  .description("internal: foreground daemon for a supervisor (launchd) - owns tracker.pid; exits 0 if a healthy supervised tracker already runs")
+  .action(async () => {
+    const config = requireConfig();
+    await serveForeground(config, path.resolve(__filename));
   });
 
 program.parseAsync().catch((err) => {

@@ -54,9 +54,11 @@ export interface RecentModelRow {
 }
 
 /**
- * Tools whose token figures are the tracker's estimate, not a measured count:
- * Quadcode AI's logs carry no token counts, so the tracker sends chars/4 and the
- * UI must mark it ("~") rather than pass it off as measured.
+ * Tools that report no measured token count. Quadcode AI's logs carry none: the
+ * current tracker sends activity and model only (tokens absent, never estimated), so
+ * a zero on such a row means "not reported", and the UI says so. A non-zero figure can
+ * only be history from the retired chars/4 estimate and stays marked ("~") rather than
+ * passed off as measured.
  */
 const ESTIMATED_TOOL_FAMILIES = new Set(["quadcode"]);
 

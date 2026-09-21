@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# Runs as root during pkg install (Apple's installer convention). Its only job is to
+# open the just-installed app as the person actually sitting at the Mac — a root
+# process can't just `open` a GUI app into a user's session, so this goes through the
+# console user's UID via `launchctl asuser`, the standard idiom for this exact case.
+#
+# Failure here must never fail the install: the app is on disk either way, and a
+# person can always open it themselves from /Applications or Spotlight.
+set -u
+
+CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" = "loginwindow" ]; then
+  exit 0
+fi
+
+CONSOLE_UID="$(id -u "$CONSOLE_USER" 2>/dev/null || true)"
+if [ -z "$CONSOLE_UID" ]; then
+  exit 0
+fi
+
+launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" open -a "/Applications/VibeHub.app" >/dev/null 2>&1 || true
+
+exit 0

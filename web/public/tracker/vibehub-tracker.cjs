@@ -718,7 +718,7 @@ var require_suggestSimilar = __commonJS({
 // ../node_modules/commander/lib/command.js
 var require_command = __commonJS({
   "../node_modules/commander/lib/command.js"(exports2) {
-    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path4 = require("node:path"), fs5 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
+    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path5 = require("node:path"), fs7 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
       /**
        * Initialize a new `Command`.
        *
@@ -1430,11 +1430,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         args = args.slice();
         let launchWithNode = !1, sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          let localBin = path4.resolve(baseDir, baseName);
-          if (fs5.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path4.extname(baseName))) return;
+          let localBin = path5.resolve(baseDir, baseName);
+          if (fs7.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path5.extname(baseName))) return;
           let foundExt = sourceExt.find(
-            (ext) => fs5.existsSync(`${localBin}${ext}`)
+            (ext) => fs7.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
         }
@@ -1443,21 +1443,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs5.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs7.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path4.resolve(
-            path4.dirname(resolvedScriptPath),
+          executableDir = path5.resolve(
+            path5.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            let legacyName = path4.basename(
+            let legacyName = path5.basename(
               this._scriptPath,
-              path4.extname(this._scriptPath)
+              path5.extname(this._scriptPath)
             );
             legacyName !== this._name && (localFile = findFile(
               executableDir,
@@ -1466,7 +1466,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path4.extname(executableFile));
+        launchWithNode = sourceExt.includes(path5.extname(executableFile));
         let proc;
         process2.platform !== "win32" ? launchWithNode ? (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.argv[0], args, { stdio: "inherit" })) : proc = childProcess.spawn(executableFile, args, { stdio: "inherit" }) : (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.execPath, args, { stdio: "inherit" })), proc.killed || ["SIGUSR1", "SIGUSR2", "SIGTERM", "SIGINT", "SIGHUP"].forEach((signal) => {
           process2.on(signal, () => {
@@ -2094,7 +2094,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        return this._name = path4.basename(filename, path4.extname(filename)), this;
+        return this._name = path5.basename(filename, path5.extname(filename)), this;
       }
       /**
        * Get or set the directory for searching for executable subcommands of this command.
@@ -2107,8 +2107,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path5) {
-        return path5 === void 0 ? this._executableDir : (this._executableDir = path5, this);
+      executableDir(path6) {
+        return path6 === void 0 ? this._executableDir : (this._executableDir = path6, this);
       }
       /**
        * Return program help documentation.
@@ -2274,13 +2274,16 @@ var import_index = __toESM(require_commander(), 1), {
 } = import_index.default;
 
 // src/index.ts
-var path3 = __toESM(require("node:path"));
+var path4 = __toESM(require("node:path"));
 
 // src/config.ts
 var import_node_crypto2 = require("node:crypto");
 
 // src/paths.ts
-var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), import_node_crypto = require("node:crypto"), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request"), JSON_PATHS = /* @__PURE__ */ new Set([CONFIG_PATH, STATUS_PATH, PID_PATH, STOP_REQUEST_PATH]), MAX_STATE_BYTES = 64 * 1024, normalized = (p) => process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p);
+var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), import_node_crypto = require("node:crypto"), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request"), ATTESTED_PATH = path.join(CONFIG_DIR, "attested.jsonl"), JSON_PATHS = /* @__PURE__ */ new Set([CONFIG_PATH, STATUS_PATH, PID_PATH, STOP_REQUEST_PATH]), MAX_STATE_BYTES = 64 * 1024, normalized = (p) => process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p);
+function configDirSafe() {
+  return safeDirectory();
+}
 function safeDirectory() {
   try {
     let s = fs.lstatSync(CONFIG_DIR);
@@ -2348,8 +2351,9 @@ function readJson(filePath) {
 }
 
 // src/privacy.ts
-var COLLECTION_POLICY = "ai-session-metadata-v1", SUPPORTED_TOOLS = ["claude-code", "codex"];
-var CLAUDE_MODELS = /* @__PURE__ */ new Set([
+var COLLECTION_POLICY = "ai-session-metadata-v1";
+var NATIVE_TOOLS = ["claude-code", "codex", "quadcode"], ATTESTED_TOOLS = ["quadcode"];
+var SUPPORTED_TOOLS = NATIVE_TOOLS, MAX_RECORD_AGE_MS = 1440 * 6e4, MAX_EVENT_AGE_MS = 5 * 6e4, MAX_FUTURE_SKEW_MS = 5e3, MAX_TOKEN_COUNT = 1e9, MAX_USAGE_ENTRIES = 30, CLAUDE_MODELS = /* @__PURE__ */ new Set([
   "claude-fable-5-1",
   "claude-fable-5",
   "claude-opus-5",
@@ -2408,18 +2412,24 @@ function objectRecord(value) {
   return value !== null && typeof value == "object" && !Array.isArray(value) ? value : null;
 }
 function isSupportedTool(tool) {
-  return tool === "claude-code" || tool === "codex";
+  return tool === "claude-code" || tool === "codex" || tool === "quadcode";
+}
+function isAttestedTool(tool) {
+  return tool === "quadcode";
+}
+function isTokenlessTool(tool) {
+  return tool === "quadcode";
 }
 function safeModel(value, tool) {
   return typeof value != "string" ? null : (tool === "claude-code" ? CLAUDE_MODELS.has(value) : tool === "codex" ? CODEX_MODELS.has(value) : CLAUDE_MODELS.has(value) || CODEX_MODELS.has(value)) ? value : null;
 }
-function isCount(value, maximum = 1e9) {
+function isCount(value, maximum = MAX_TOKEN_COUNT) {
   return typeof value == "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
-function eventTime(value, now, maxAgeMs = 3e5) {
+function eventTime(value, now, maxAgeMs = MAX_EVENT_AGE_MS) {
   if (typeof value != "string" || value.length > 35 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
   let at = Date.parse(value);
-  return Number.isFinite(at) && at <= now + 5e3 && at >= now - Math.min(maxAgeMs, 3e5) ? Math.min(at, now) : null;
+  return Number.isFinite(at) && at <= now + MAX_FUTURE_SKEW_MS && at >= now - Math.min(maxAgeMs, MAX_EVENT_AGE_MS) ? Math.min(at, now) : null;
 }
 function safeAlias(value) {
   return typeof value == "string" && value.length <= 64 && /^[A-Za-z0-9]/.test(value) && !/[^A-Za-z0-9_. -]/.test(value) && value.trim() === value && !value.includes("..") && !["__proto__", "prototype", "constructor"].includes(value) ? value : null;
@@ -2443,7 +2453,7 @@ function safeDeviceToken(value) {
 }
 function projectUsage(value) {
   let u = objectRecord(value);
-  return !u || !isSupportedTool(u.tool) || u.estimated === !0 || !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta) ? null : {
+  return !u || !isSupportedTool(u.tool) || u.estimated === !0 || isTokenlessTool(u.tool) || !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta) ? null : {
     tool: u.tool,
     model: safeModel(u.model, u.tool),
     tokensInputDelta: u.tokensInputDelta,
@@ -2463,7 +2473,7 @@ function projectHeartbeat(value, now = Date.now()) {
     occurredAt: new Date(at).toISOString()
   };
   if (result.eventType !== "heartbeat") return result;
-  if (!Array.isArray(p.usage) || p.usage.length > 30) return null;
+  if (!Array.isArray(p.usage) || p.usage.length > MAX_USAGE_ENTRIES) return null;
   let usage = [];
   for (let entry of p.usage) {
     let u = projectUsage(entry);
@@ -2472,7 +2482,7 @@ function projectHeartbeat(value, now = Date.now()) {
   }
   let input = usage.reduce((sum, u) => sum + u.tokensInputDelta, 0), output = usage.reduce((sum, u) => sum + u.tokensOutputDelta, 0);
   if (!isCount(input) || !isCount(output)) return null;
-  if (result.usage = usage, result.tokensInputDelta = input, result.tokensOutputDelta = output, p.tools !== void 0) {
+  if (result.usage = usage, (!isTokenlessTool(result.tool) || usage.length) && (result.tokensInputDelta = input, result.tokensOutputDelta = output), p.tools !== void 0) {
     if (!Array.isArray(p.tools) || p.tools.length > SUPPORTED_TOOLS.length) return null;
     result.tools = [];
     for (let entry of p.tools) {
@@ -2485,7 +2495,22 @@ function projectHeartbeat(value, now = Date.now()) {
 }
 
 // src/config.ts
-var DEFAULT_API_URL = process.env.VIBEHUB_API_URL ?? "https://server-production-cc06.up.railway.app", DEFAULT_HEARTBEAT_INTERVAL_MS = 3e4, DEFAULT_IDLE_THRESHOLD_MS = 3e5;
+function projectAttestedMetadata(value) {
+  if (value === void 0) return null;
+  let a = objectRecord(value);
+  if (!a || typeof a.enabled != "boolean" || !Array.isArray(a.tools) || a.tools.length > ATTESTED_TOOLS.length) return "invalid";
+  let tools = [];
+  for (let tool of a.tools) {
+    if (!isAttestedTool(tool) || tools.includes(tool)) return "invalid";
+    tools.push(tool);
+  }
+  return { enabled: a.enabled, tools };
+}
+function attestedToolsFor(config) {
+  let a = config.attestedMetadata;
+  return a?.enabled ? [...a.tools] : [];
+}
+var DEFAULT_API_URL = process.env.VIBEHUB_API_URL ?? "https://server-production-cc06.up.railway.app", DEFAULT_HEARTBEAT_INTERVAL_MS = 3e4, DEFAULT_IDLE_THRESHOLD_MS = MAX_EVENT_AGE_MS;
 function projectConfig(value) {
   let c = objectRecord(value), apiUrl = safeApiOrigin(c?.apiUrl);
   if (!c || !apiUrl || !safeDeviceToken(c.deviceToken)) return null;
@@ -2500,12 +2525,14 @@ function projectConfig(value) {
     let n = c[key];
     if (n !== void 0 && (typeof n != "number" || !Number.isSafeInteger(n) || n < 1 || n > 864e5)) return null;
   }
-  return {
+  let attested = projectAttestedMetadata(c.attestedMetadata);
+  return attested === "invalid" ? null : {
     apiUrl,
     deviceToken: c.deviceToken,
     projectAliases,
     ...c.heartbeatIntervalMs !== void 0 ? { heartbeatIntervalMs: c.heartbeatIntervalMs } : {},
-    ...c.idleThresholdMs !== void 0 ? { idleThresholdMs: c.idleThresholdMs } : {}
+    ...c.idleThresholdMs !== void 0 ? { idleThresholdMs: c.idleThresholdMs } : {},
+    ...attested ? { attestedMetadata: attested } : {}
   };
 }
 function configFingerprint(config) {
@@ -2513,6 +2540,9 @@ function configFingerprint(config) {
     apiUrl: config.apiUrl,
     deviceToken: config.deviceToken,
     aliases: Object.entries(config.projectAliases).sort(([a], [b]) => a.localeCompare(b)),
+    // Flipping the receiver switch (or its tool list) re-fences collected state, so
+    // records accepted under one consent setting cannot survive into another.
+    attested: attestedToolsFor(config).slice().sort(),
     idle: idleThresholdMs(config)
   })).digest("hex");
 }
@@ -2535,17 +2565,147 @@ function heartbeatIntervalMs(config) {
   return config.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 }
 function idleThresholdMs(config) {
-  return Math.min(config.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS, 3e5);
+  return Math.min(config.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS, MAX_EVENT_AGE_MS);
 }
 
 // src/daemon.ts
-var import_node_child_process = require("node:child_process"), import_node_console = require("node:console"), fs4 = __toESM(require("node:fs"));
+var import_node_child_process = require("node:child_process"), import_node_console = require("node:console"), fs6 = __toESM(require("node:fs"));
+
+// src/adapters/attested.ts
+var import_node_fs = __toESM(require("node:fs")), import_node_crypto3 = require("node:crypto"), import_node_util = require("node:util");
+var ATTESTED_RECORD_VERSION = 1, MAX_ATTESTED_FILE_BYTES = 32 * 1024 * 1024, MAX_ATTESTED_CHUNK_BYTES = 1024 * 1024, MAX_ATTESTED_LINE_BYTES = 64 * 1024, MAX_ATTESTED_RECORDS_PER_POLL = 128, MAX_SEEN_DIGESTS = 4096, utf8 = new import_node_util.TextDecoder("utf-8", { fatal: !0 }), regularFile = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_ATTESTED_FILE_BYTES), samePath = (a, b) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b, AttestedTailer = class {
+  cursor = null;
+  clear() {
+    this.cursor = null;
+  }
+  checked() {
+    if (!configDirSafe()) return null;
+    try {
+      let s = import_node_fs.default.lstatSync(ATTESTED_PATH, { bigint: !0 });
+      return regularFile(s) && samePath(import_node_fs.default.realpathSync(ATTESTED_PATH), ATTESTED_PATH) ? s : null;
+    } catch {
+      return null;
+    }
+  }
+  prime(fd, s) {
+    let size = Number(s.size), skipPartial = !1;
+    if (size > 0) {
+      let last = Buffer.alloc(1);
+      skipPartial = import_node_fs.default.readSync(fd, last, 0, 1, size - 1) !== 1 || last[0] !== 10;
+    }
+    return { dev: s.dev, ino: s.ino, offset: size, size, mtime: s.mtimeNs, skipPartial };
+  }
+  /** Emits only lines appended since the previous poll. First sight primes at EOF. */
+  readNewLines(visit, signal) {
+    if (signal?.aborted) return;
+    let fd;
+    try {
+      let before = this.checked();
+      if (!before) {
+        this.cursor = null;
+        return;
+      }
+      fd = import_node_fs.default.openSync(ATTESTED_PATH, import_node_fs.default.constants.O_RDONLY | (import_node_fs.default.constants.O_NOFOLLOW ?? 0) | (import_node_fs.default.constants.O_NONBLOCK ?? 0));
+      let s = import_node_fs.default.fstatSync(fd, { bigint: !0 }), after = this.checked();
+      if (!regularFile(s) || !after || s.dev !== before.dev || s.ino !== before.ino || s.dev !== after.dev || s.ino !== after.ino || signal?.aborted) {
+        this.cursor = null;
+        return;
+      }
+      let size = Number(s.size), cursor = this.cursor;
+      if (!cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_ATTESTED_CHUNK_BYTES) {
+        this.cursor = this.prime(fd, s);
+        return;
+      }
+      if (size <= cursor.offset) return;
+      let start = cursor.offset, buffer = Buffer.alloc(size - start), bytes = import_node_fs.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checked();
+      if (signal?.aborted || !current || current.dev !== s.dev || current.ino !== s.ino) {
+        this.cursor = null;
+        return;
+      }
+      cursor.size = size, cursor.mtime = s.mtimeNs;
+      let lineStart = 0, records = 0;
+      for (; lineStart < bytes && !signal?.aborted; ) {
+        let end = buffer.indexOf(10, lineStart);
+        if (end < 0 || end >= bytes) break;
+        if (!cursor.skipPartial && end - lineStart <= MAX_ATTESTED_LINE_BYTES && records++ < MAX_ATTESTED_RECORDS_PER_POLL)
+          try {
+            visit(JSON.parse(utf8.decode(buffer.subarray(lineStart, end))));
+          } catch {
+          }
+        cursor.skipPartial = !1, lineStart = end + 1;
+      }
+      cursor.offset = start + lineStart, (cursor.skipPartial || bytes - lineStart > MAX_ATTESTED_LINE_BYTES) && (cursor.offset = start + bytes, cursor.skipPartial = !0);
+    } catch {
+      this.cursor = null;
+    } finally {
+      if (fd !== void 0)
+        try {
+          import_node_fs.default.closeSync(fd);
+        } catch {
+        }
+    }
+  }
+};
+function projectAttestedRecord(value, now, windowMs, tools) {
+  let r = objectRecord(value);
+  if (!r || r.v !== ATTESTED_RECORD_VERSION) return null;
+  let tool = r.tool;
+  if (!isAttestedTool(tool) || !tools.includes(tool) || Object.hasOwn(r, "estimated") || typeof r.recordId != "string" || r.recordId.length < 1 || r.recordId.length > 128 || /[^A-Za-z0-9._-]/.test(r.recordId)) return null;
+  let at = eventTime(r.occurredAt, now, windowMs);
+  if (at === null) return null;
+  let model = safeModel(r.model, tool), projectHint = r.projectHint === null || r.projectHint === void 0 ? null : safeAlias(r.projectHint);
+  if (projectHint === null && typeof r.projectHint == "string") return null;
+  let hasInput = Object.hasOwn(r, "tokensInputDelta"), hasOutput = Object.hasOwn(r, "tokensOutputDelta"), tokensInputDelta = 0, tokensOutputDelta = 0, usage = [];
+  if (r.measured === !0) {
+    if (!isCount(r.tokensInputDelta) || !isCount(r.tokensOutputDelta)) return null;
+    isTokenlessTool(tool) || (tokensInputDelta = r.tokensInputDelta, tokensOutputDelta = r.tokensOutputDelta, (tokensInputDelta || tokensOutputDelta) && usage.push({ model, tokensInputDelta, tokensOutputDelta }));
+  } else if (r.measured === !1 || r.measured === void 0) {
+    if (hasInput || hasOutput) return null;
+  } else return null;
+  return {
+    tool,
+    cwd: null,
+    projectHint,
+    model,
+    confidence: "activity",
+    lastActivityAt: at,
+    observedAt: at,
+    tokensInputDelta,
+    tokensOutputDelta,
+    usage
+  };
+}
+var AttestedMetadataAdapter = class {
+  constructor(activeWindowMs, tools = []) {
+    this.activeWindowMs = activeWindowMs;
+    this.tools = [...tools].filter(isAttestedTool);
+  }
+  activeWindowMs;
+  name = "attested";
+  tailer = new AttestedTailer();
+  seen = /* @__PURE__ */ new Set();
+  tools;
+  /** Consent change, account change, pause and cancellation all land here. */
+  clear() {
+    this.tailer.clear(), this.seen.clear();
+  }
+  async poll(now = Date.now(), signal) {
+    if (!this.tools.length || signal?.aborted) return [];
+    let observations = [];
+    return this.tailer.readNewLines((record) => {
+      let observation = projectAttestedRecord(record, now, this.activeWindowMs, this.tools);
+      if (!observation) return;
+      let digest = (0, import_node_crypto3.createHash)("sha256").update(`${observation.tool}\0${record.recordId}`).digest("hex");
+      this.seen.has(digest) || (this.seen.size >= MAX_SEEN_DIGESTS && this.seen.delete(this.seen.values().next().value), this.seen.add(digest), observations.push(observation));
+    }, signal), signal?.aborted ? [] : observations;
+  }
+};
 
 // src/adapters/claudeCode.ts
-var import_node_crypto3 = require("node:crypto");
+var import_node_crypto4 = require("node:crypto");
 
 // src/adapters/jsonlTail.ts
-var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util = require("node:util"), MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 256, MAX_FILE_BYTES = 256 * 1024 * 1024, utf8 = new import_node_util.TextDecoder("utf-8", { fatal: !0 }), samePath = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
+var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util2 = require("node:util"), MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 256, MAX_FILE_BYTES = 256 * 1024 * 1024, utf82 = new import_node_util2.TextDecoder("utf-8", { fatal: !0 }), samePath2 = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile2 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
   constructor(source) {
     this.source = source;
     this.configRoot = import_node_path.default.join(this.home, source === "claude-code" ? ".claude" : ".codex"), this.root = import_node_path.default.join(this.configRoot, source === "claude-code" ? "projects" : "sessions"), this.overrideName = source === "claude-code" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
@@ -2566,12 +2726,12 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
   }
   rootsAllowed() {
     let override = process.env[this.overrideName];
-    return override && (!import_node_path.default.isAbsolute(override) || !samePath(override, this.configRoot)) || !import_node_path.default.isAbsolute(this.home) || /^(?:\\\\|\/\/)/.test(this.home) ? !1 : [this.home, this.configRoot, this.root].every((dir) => this.unlinkedDirectory(dir));
+    return override && (!import_node_path.default.isAbsolute(override) || !samePath2(override, this.configRoot)) || !import_node_path.default.isAbsolute(this.home) || /^(?:\\\\|\/\/)/.test(this.home) ? !1 : [this.home, this.configRoot, this.root].every((dir) => this.unlinkedDirectory(dir));
   }
   unlinkedDirectory(dir) {
     try {
-      let s = import_node_fs.default.lstatSync(dir);
-      return s.isDirectory() && !s.isSymbolicLink() && samePath(import_node_fs.default.realpathSync(dir), dir);
+      let s = import_node_fs2.default.lstatSync(dir);
+      return s.isDirectory() && !s.isSymbolicLink() && samePath2(import_node_fs2.default.realpathSync(dir), dir);
     } catch {
       return !1;
     }
@@ -2593,8 +2753,8 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
     for (let part of isDirectory ? parts : parts.slice(0, -1))
       if (current = import_node_path.default.join(current, part), !this.unlinkedDirectory(current)) return null;
     try {
-      let s = import_node_fs.default.lstatSync(file, { bigint: !0 });
-      return (isDirectory ? !s.isDirectory() || s.isSymbolicLink() : !regularFile(s)) ? null : samePath(import_node_fs.default.realpathSync(file), file) ? s : null;
+      let s = import_node_fs2.default.lstatSync(file, { bigint: !0 });
+      return (isDirectory ? !s.isDirectory() || s.isSymbolicLink() : !regularFile2(s)) ? null : samePath2(import_node_fs2.default.realpathSync(file), file) ? s : null;
     } catch {
       return null;
     }
@@ -2606,7 +2766,7 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
       if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
       let handle;
       try {
-        if (handle = import_node_fs.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return;
+        if (handle = import_node_fs2.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return;
         let entries = [], entry;
         for (; remaining-- > 0 && !signal?.aborted && (entry = handle.readSync()); ) entries.push(entry);
         entries.sort((a, b) => b.name.localeCompare(a.name));
@@ -2639,7 +2799,7 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
     let size = Number(s.size), skipPartial = !1;
     if (size > 0) {
       let last = Buffer.alloc(1);
-      skipPartial = import_node_fs.default.readSync(fd, last, 0, 1, size - 1) !== 1 || last[0] !== 10;
+      skipPartial = import_node_fs2.default.readSync(fd, last, 0, 1, size - 1) !== 1 || last[0] !== 10;
     }
     return {
       dev: s.dev,
@@ -2660,9 +2820,9 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
         this.states.delete(file);
         return;
       }
-      fd = import_node_fs.default.openSync(file, import_node_fs.default.constants.O_RDONLY | (import_node_fs.default.constants.O_NOFOLLOW ?? 0) | (import_node_fs.default.constants.O_NONBLOCK ?? 0));
-      let s = import_node_fs.default.fstatSync(fd, { bigint: !0 }), after = this.checkedPath(file, !1);
-      if (!regularFile(s) || !after || !sameFile(before, s) || !sameFile(s, after) || signal?.aborted) {
+      fd = import_node_fs2.default.openSync(file, import_node_fs2.default.constants.O_RDONLY | (import_node_fs2.default.constants.O_NOFOLLOW ?? 0) | (import_node_fs2.default.constants.O_NONBLOCK ?? 0));
+      let s = import_node_fs2.default.fstatSync(fd, { bigint: !0 }), after = this.checkedPath(file, !1);
+      if (!regularFile2(s) || !after || !sameFile(before, s) || !sameFile(s, after) || signal?.aborted) {
         this.states.delete(file);
         return;
       }
@@ -2672,7 +2832,7 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
         return;
       }
       if (size <= cursor.offset) return;
-      let start = cursor.offset, buffer = Buffer.alloc(size - start), bytes = import_node_fs.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checkedPath(file, !1);
+      let start = cursor.offset, buffer = Buffer.alloc(size - start), bytes = import_node_fs2.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checkedPath(file, !1);
       if (signal?.aborted || !current || !sameFile(s, current)) {
         this.states.delete(file);
         return;
@@ -2684,7 +2844,7 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
         if (end < 0 || end >= bytes) break;
         if (!cursor.skipPartial && end - lineStart <= MAX_LINE_BYTES && records++ < MAX_RECORDS_PER_FILE)
           try {
-            visit(JSON.parse(utf8.decode(buffer.subarray(lineStart, end))), cursor.generation);
+            visit(JSON.parse(utf82.decode(buffer.subarray(lineStart, end))), cursor.generation);
           } catch {
           }
         cursor.skipPartial = !1, lineStart = end + 1;
@@ -2695,7 +2855,7 @@ var import_node_fs = __toESM(require("node:fs")), import_node_os = __toESM(requi
     } finally {
       if (fd !== void 0)
         try {
-          import_node_fs.default.closeSync(fd);
+          import_node_fs2.default.closeSync(fd);
         } catch {
         }
     }
@@ -2708,7 +2868,7 @@ var UsageAccumulator = class {
   add(model, input, output, estimated = !1) {
     if (estimated || !isCount(input) || !isCount(output) || !isCount(this.totalInput + input) || !isCount(this.totalOutput + output)) return !1;
     let knownModel = safeModel(model), key = knownModel ?? "";
-    if (!this.buckets.has(key) && this.buckets.size >= 30) return !1;
+    if (!this.buckets.has(key) && this.buckets.size >= MAX_USAGE_ENTRIES) return !1;
     let previous = this.buckets.get(key);
     return this.buckets.set(key, {
       model: knownModel,
@@ -2743,7 +2903,7 @@ var ClaudeCodeAdapter = class {
   async poll(now = Date.now(), signal) {
     let files = this.tailer.files(signal), present = new Set(files);
     for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
-    for (let [id, receipt] of this.receipts) now - receipt.at > 3e5 && this.receipts.delete(id);
+    for (let [id, receipt] of this.receipts) now - receipt.at > MAX_EVENT_AGE_MS && this.receipts.delete(id);
     let out = [];
     for (let file of files) {
       if (signal?.aborted) break;
@@ -2757,7 +2917,7 @@ var ClaudeCodeAdapter = class {
         if (!isCount(input)) return;
         let projectHint = folderFromCwd(line.cwd);
         if (!projectHint || (meta?.generation === generation && meta.projectHint !== projectHint && (meta.invalidProject = !0), meta?.generation === generation && meta.invalidProject)) return;
-        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto3.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
+        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto4.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
         if (previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output)) return;
         let inputDelta = input - (previous?.input ?? 0), outputDelta = output - (previous?.output ?? 0);
         if (!(!(inputDelta || outputDelta) || !usage.add(model, inputDelta, outputDelta))) {
@@ -2768,7 +2928,7 @@ var ClaudeCodeAdapter = class {
         this.fileMeta.delete(file);
         continue;
       }
-      this.fileMeta.set(file, meta), !(meta.invalidProject || now - meta.lastActivityAt > Math.min(this.recentWindowMs, 3e5)) && out.push({
+      this.fileMeta.set(file, meta), !(meta.invalidProject || now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS)) && out.push({
         tool: this.name,
         cwd: null,
         projectHint: meta.projectHint,
@@ -2830,7 +2990,7 @@ var emptyMeta = (generation) => ({
         if (!total || !isCount(total.input_tokens, 1e12) || !isCount(total.output_tokens, 1e12) || ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.counterAt)) return;
         let input = total.input_tokens, output = total.output_tokens, baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output, inputDelta = baseline ? 0 : input - meta.input, outputDelta = baseline ? 0 : output - meta.output;
         if (meta.input = input, meta.output = output, meta.counterAt = at, baseline || meta.invalidProject || !(inputDelta || outputDelta)) return;
-        let hasContext = meta.contextProject !== null && now - meta.contextAt <= 3e5;
+        let hasContext = meta.contextProject !== null && now - meta.contextAt <= MAX_EVENT_AGE_MS;
         if (!hasContext) return;
         let model = meta.contextModel;
         usage.add(model, inputDelta, outputDelta) && (meta.model = model, meta.projectHint = hasContext ? meta.contextProject : null, meta.lastActivityAt = Math.max(meta.lastActivityAt, at));
@@ -2838,7 +2998,7 @@ var emptyMeta = (generation) => ({
         this.fileMeta.delete(file);
         continue;
       }
-      this.fileMeta.set(file, meta), !(meta.invalidProject || !meta.lastActivityAt || now - meta.lastActivityAt > Math.min(this.recentWindowMs, 3e5)) && out.push({
+      this.fileMeta.set(file, meta), !(meta.invalidProject || !meta.lastActivityAt || now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS)) && out.push({
         tool: this.name,
         cwd: null,
         projectHint: meta.projectHint,
@@ -2849,6 +3009,245 @@ var emptyMeta = (generation) => ({
         tokensOutputDelta: usage.totalOutput,
         usage: usage.toList(),
         confidence: "activity"
+      });
+    }
+    return signal?.aborted ? [] : out;
+  }
+};
+
+// src/adapters/quadcode.ts
+var import_node_fs3 = __toESM(require("node:fs")), import_node_os2 = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path")), import_node_crypto5 = require("node:crypto"), import_node_util3 = require("node:util");
+var MAX_QUADCODE_FILES = 64, MAX_QUADCODE_DIRECTORY_ENTRIES = 2048, MAX_QUADCODE_CHUNK_BYTES = 4 * 1024 * 1024, MAX_QUADCODE_LINE_BYTES = 1024 * 1024, MAX_QUADCODE_RECORDS_PER_FILE = 256, MAX_QUADCODE_FILE_BYTES = 256 * 1024 * 1024, MAX_SEEN_FINGERPRINTS = 4096, utf83 = new import_node_util3.TextDecoder("utf-8", { fatal: !0 }), samePath3 = (a, b) => process.platform === "win32" ? import_node_path2.default.resolve(a).toLowerCase() === import_node_path2.default.resolve(b).toLowerCase() : import_node_path2.default.resolve(a) === import_node_path2.default.resolve(b), regularFile3 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_QUADCODE_FILE_BYTES);
+function withinHome(home, dir) {
+  let a = process.platform === "win32" ? import_node_path2.default.resolve(home).toLowerCase() : import_node_path2.default.resolve(home), b = process.platform === "win32" ? import_node_path2.default.resolve(dir).toLowerCase() : import_node_path2.default.resolve(dir), rel = import_node_path2.default.relative(a, b);
+  return rel === "" || !rel.startsWith("..") && !import_node_path2.default.isAbsolute(rel);
+}
+function quadcodeRoot(home = import_node_os2.default.homedir()) {
+  if (process.platform === "darwin") return import_node_path2.default.join(home, "Library", "Application Support", "QuadcodeAI");
+  let windows = process.platform === "win32", override = process.env[windows ? "APPDATA" : "XDG_CONFIG_HOME"], base = windows ? import_node_path2.default.join(home, "AppData", "Roaming") : import_node_path2.default.join(home, ".config");
+  return override === void 0 || override === "" ? import_node_path2.default.join(base, "QuadcodeAI") : !import_node_path2.default.isAbsolute(override) || !withinHome(home, override) ? null : import_node_path2.default.join(override, "QuadcodeAI");
+}
+var safeComponent = (part) => part.length > 0 && part.length <= 200 && part !== "." && part !== ".." && !/[\x00-\x1f\x7f\\/:]/.test(part), LEVELS = [
+  (p) => p === "apps",
+  (p) => safeComponent(p) && safeAlias(p) !== null,
+  (p) => p === ".quadcodeai",
+  (p) => p === ".data",
+  (p) => p === "chats",
+  (p) => /^[A-Za-z0-9_-]+\.files$/.test(p)
+], CHAT_FILE = /^chat_[0-9]+\.jsonl$/, QuadcodeTailer = class {
+  home;
+  states = /* @__PURE__ */ new Map();
+  listed = /* @__PURE__ */ new Set();
+  constructor(home = import_node_os2.default.homedir()) {
+    this.home = home;
+  }
+  /**
+   * Resolved per call, not frozen at construction — the same discipline
+   * `rootsAllowed()` already applies to `QUADCODE_HOME`. An app-data base that
+   * changes under a running daemon must be re-judged, not trusted from start-up;
+   * `files()` re-lists every poll, so a root change simply re-primes at EOF.
+   */
+  currentRoot() {
+    return quadcodeRoot(this.home);
+  }
+  clear() {
+    this.states.clear(), this.listed.clear();
+  }
+  /**
+   * `QUADCODE_HOME` follows the `CLAUDE_CONFIG_DIR` rule exactly: it may be set, but
+   * only to the real root. Anything else makes the whole source unavailable rather
+   * than redirecting the reader somewhere it was never authorised to look.
+   */
+  rootsAllowed(root) {
+    if (root === null) return !1;
+    let override = process.env.QUADCODE_HOME;
+    return override && (!import_node_path2.default.isAbsolute(override) || !samePath3(override, root)) || !import_node_path2.default.isAbsolute(root) || /^(?:[\\]{2}|[/]{2})/.test(root) ? !1 : this.unlinkedDirectory(root);
+  }
+  unlinkedDirectory(dir) {
+    try {
+      let s = import_node_fs3.default.lstatSync(dir);
+      return s.isDirectory() && !s.isSymbolicLink() && samePath3(import_node_fs3.default.realpathSync(dir), dir);
+    } catch {
+      return !1;
+    }
+  }
+  layout(parts, isDirectory) {
+    return parts.every(safeComponent) ? isDirectory ? parts.length <= LEVELS.length && parts.every((p, i) => LEVELS[i](p)) : parts.length === LEVELS.length + 1 && parts.slice(0, LEVELS.length).every((p, i) => LEVELS[i](p)) && CHAT_FILE.test(parts[LEVELS.length]) : !1;
+  }
+  checkedPath(file, isDirectory) {
+    let root = this.currentRoot();
+    if (!this.rootsAllowed(root)) return null;
+    let relative = import_node_path2.default.relative(root, file);
+    if (relative.startsWith("..") || import_node_path2.default.isAbsolute(relative)) return null;
+    let parts = relative ? relative.split(import_node_path2.default.sep) : [];
+    if (!this.layout(parts, isDirectory)) return null;
+    let current = root;
+    for (let part of isDirectory ? parts : parts.slice(0, -1))
+      if (current = import_node_path2.default.join(current, part), !this.unlinkedDirectory(current)) return null;
+    try {
+      let s = import_node_fs3.default.lstatSync(file, { bigint: !0 });
+      return (isDirectory ? !s.isDirectory() || s.isSymbolicLink() : !regularFile3(s)) ? null : samePath3(import_node_fs3.default.realpathSync(file), file) ? s : null;
+    } catch {
+      return null;
+    }
+  }
+  /** The `<Project>` component of a listed chat file, already alias-safe, or null. */
+  projectOf(file) {
+    let root = this.currentRoot();
+    if (root === null) return null;
+    let parts = import_node_path2.default.relative(root, file).split(import_node_path2.default.sep);
+    return parts.length === LEVELS.length + 1 ? safeAlias(parts[1]) : null;
+  }
+  /** Bounded metadata enumeration strictly inside the documented layout. */
+  files(signal) {
+    this.listed.clear();
+    let remaining = MAX_QUADCODE_DIRECTORY_ENTRIES, candidates = [], walk = (dir, depth) => {
+      if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
+      let handle;
+      try {
+        if (handle = import_node_fs3.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return;
+        let entries = [], entry;
+        for (; remaining-- > 0 && !signal?.aborted && (entry = handle.readSync()); ) entries.push(entry);
+        for (let e of entries) {
+          if (signal?.aborted) break;
+          if (e.isSymbolicLink()) continue;
+          let file = import_node_path2.default.join(dir, e.name);
+          if (e.isDirectory() && depth < LEVELS.length) walk(file, depth + 1);
+          else if (e.isFile() && depth === LEVELS.length) {
+            let s = this.checkedPath(file, !1);
+            s && candidates.push({ file, mtime: Number(s.mtimeMs) });
+          }
+        }
+      } catch {
+      } finally {
+        try {
+          handle?.closeSync();
+        } catch {
+        }
+      }
+    }, root = this.currentRoot();
+    root !== null && walk(root, 0);
+    for (let { file } of candidates.sort((a, b) => b.mtime - a.mtime).slice(0, MAX_QUADCODE_FILES)) this.listed.add(file);
+    for (let file of this.states.keys()) this.listed.has(file) || this.states.delete(file);
+    return [...this.listed];
+  }
+  /** Emits only lines appended since the previous poll. First sight primes at EOF. */
+  readNewLines(file, visit, signal) {
+    if (signal?.aborted || !this.listed.has(file)) return;
+    let fd;
+    try {
+      let before = this.checkedPath(file, !1);
+      if (!before) {
+        this.states.delete(file);
+        return;
+      }
+      fd = import_node_fs3.default.openSync(file, import_node_fs3.default.constants.O_RDONLY | (import_node_fs3.default.constants.O_NOFOLLOW ?? 0) | (import_node_fs3.default.constants.O_NONBLOCK ?? 0));
+      let s = import_node_fs3.default.fstatSync(fd, { bigint: !0 }), after = this.checkedPath(file, !1);
+      if (!regularFile3(s) || !after || s.dev !== before.dev || s.ino !== before.ino || s.dev !== after.dev || s.ino !== after.ino || signal?.aborted) {
+        this.states.delete(file);
+        return;
+      }
+      let size = Number(s.size), cursor = this.states.get(file);
+      if (!cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_QUADCODE_CHUNK_BYTES) {
+        let skipPartial = !1;
+        if (size > 0) {
+          let last = Buffer.alloc(1);
+          skipPartial = import_node_fs3.default.readSync(fd, last, 0, 1, size - 1) !== 1 || last[0] !== 10;
+        }
+        this.states.set(file, { dev: s.dev, ino: s.ino, offset: size, size, mtime: s.mtimeNs, skipPartial });
+        return;
+      }
+      if (size <= cursor.offset) return;
+      let start = cursor.offset, buffer = Buffer.alloc(size - start), bytes = import_node_fs3.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checkedPath(file, !1);
+      if (signal?.aborted || !current || current.dev !== s.dev || current.ino !== s.ino) {
+        this.states.delete(file);
+        return;
+      }
+      cursor.size = size, cursor.mtime = s.mtimeNs;
+      let lineStart = 0, records = 0;
+      for (; lineStart < bytes && !signal?.aborted; ) {
+        let end = buffer.indexOf(10, lineStart);
+        if (end < 0 || end >= bytes) break;
+        if (!cursor.skipPartial && end - lineStart <= MAX_QUADCODE_LINE_BYTES && records++ < MAX_QUADCODE_RECORDS_PER_FILE)
+          try {
+            visit(JSON.parse(utf83.decode(buffer.subarray(lineStart, end))));
+          } catch {
+          }
+        cursor.skipPartial = !1, lineStart = end + 1;
+      }
+      cursor.offset = start + lineStart, (cursor.skipPartial || bytes - lineStart > MAX_QUADCODE_LINE_BYTES) && (cursor.offset = start + bytes, cursor.skipPartial = !0);
+    } catch {
+      this.states.delete(file);
+    } finally {
+      if (fd !== void 0)
+        try {
+          import_node_fs3.default.closeSync(fd);
+        } catch {
+        }
+    }
+  }
+};
+function turnStartedAt(value) {
+  if (typeof value != "string" || value.length > 32 || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/.test(value)) return null;
+  let at = Date.parse(value.replace(" ", "T").slice(0, 23));
+  return Number.isFinite(at) ? at : null;
+}
+function projectChatRecord(value, now) {
+  let r = objectRecord(value);
+  if (!r || r.method !== "LLM" || r.is_status_message === !0) return null;
+  let startedAt = turnStartedAt(r.timestamp);
+  if (startedAt === null || now - startedAt > MAX_RECORD_AGE_MS || startedAt > now + MAX_RECORD_AGE_MS) return null;
+  let variation = Number.isSafeInteger(r.variation_index) && r.variation_index >= 0 && r.variation_index < 64 ? r.variation_index : 0, variations = Array.isArray(r.variations) ? r.variations : [];
+  if (variations.length > 64) return null;
+  let chosen = objectRecord(variations[variation]) ?? objectRecord(variations[0]);
+  return { startedAt, model: safeModel(chosen?.model_name, "quadcode"), variation };
+}
+var QuadcodeAdapter = class {
+  name = "quadcode";
+  tailer;
+  seen = /* @__PURE__ */ new Set();
+  /**
+   * `_recentWindowMs` is accepted for symmetry with the other adapters but is not
+   * used: freshness here is the append observation itself, which is always `now`.
+   */
+  constructor(_recentWindowMs, home) {
+    this.tailer = new QuadcodeTailer(home);
+  }
+  clear() {
+    this.tailer.clear(), this.seen.clear();
+  }
+  /**
+   * The format carries no record id, so de-duplication uses a fingerprint over bounded
+   * metadata plus the record's position in the tree. This is weaker than Claude's
+   * `message.id` digest and is documented as such: two LLM records in one chat sharing
+   * a microsecond timestamp, model and variation index would be counted once. It
+   * exists to make a re-prime or a double read idempotent, not to identify a turn.
+   */
+  fingerprint(file, project, turn) {
+    return (0, import_node_crypto5.createHash)("sha256").update(`${project ?? ""}\0${import_node_path2.default.basename(file)}\0${turn.startedAt}\0${turn.model ?? ""}\0${turn.variation}`).digest("hex");
+  }
+  async poll(now = Date.now(), signal) {
+    if (signal?.aborted) return [];
+    let out = [];
+    for (let file of this.tailer.files(signal)) {
+      if (signal?.aborted) break;
+      let project = this.tailer.projectOf(file), model = null, fresh = !1;
+      this.tailer.readNewLines(file, (raw) => {
+        let turn = projectChatRecord(raw, now);
+        if (!turn) return;
+        let digest = this.fingerprint(file, project, turn);
+        this.seen.has(digest) || (this.seen.size >= MAX_SEEN_FINGERPRINTS && this.seen.delete(this.seen.values().next().value), this.seen.add(digest), fresh = !0, model = turn.model);
+      }, signal), !(!fresh || signal?.aborted) && out.push({
+        tool: this.name,
+        cwd: null,
+        projectHint: project,
+        model,
+        confidence: "activity",
+        lastActivityAt: now,
+        observedAt: now,
+        tokensInputDelta: 0,
+        tokensOutputDelta: 0,
+        usage: []
       });
     }
     return signal?.aborted ? [] : out;
@@ -2880,7 +3279,7 @@ async function pollAdapter(adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS, now = D
   }
 }
 function projectObservation(o, now, windowMs) {
-  if (!o || !isSupportedTool(o.tool) || o.confidence !== "activity" || o.cwd !== null || !Number.isSafeInteger(o.lastActivityAt) || o.lastActivityAt < now - windowMs || o.lastActivityAt > now + 5e3 || !Array.isArray(o.usage) || o.usage.length > 30) return null;
+  if (!o || !isSupportedTool(o.tool) || o.confidence !== "activity" || o.cwd !== null || !Number.isSafeInteger(o.lastActivityAt) || o.lastActivityAt < now - windowMs || o.lastActivityAt > now + MAX_FUTURE_SKEW_MS || !Array.isArray(o.usage) || o.usage.length > MAX_USAGE_ENTRIES) return null;
   let usage = [];
   for (let entry of o.usage) {
     let u = projectUsage({
@@ -2908,12 +3307,34 @@ function projectObservation(o, now, windowMs) {
   };
 }
 var Detector = class {
-  constructor(activeWindowMs, adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS) {
+  constructor(activeWindowMs, adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS, attestedTools = []) {
     this.adapterTimeoutMs = adapterTimeoutMs;
-    this.activeWindowMs = Math.min(Math.max(1, activeWindowMs), 3e5), this.adapters = [new ClaudeCodeAdapter(this.activeWindowMs), new CodexAdapter(this.activeWindowMs)];
+    this.activeWindowMs = Math.min(Math.max(1, activeWindowMs), MAX_EVENT_AGE_MS), this.adapters = [
+      new ClaudeCodeAdapter(this.activeWindowMs),
+      new CodexAdapter(this.activeWindowMs),
+      new QuadcodeAdapter(this.activeWindowMs)
+    ];
+    for (let adapter of this.adapters) this.origin.set(adapter, (tool) => tool === adapter.name);
+    let accepted = attestedTools.filter(isAttestedTool);
+    if (accepted.length) {
+      let receiver = new AttestedMetadataAdapter(this.activeWindowMs, accepted);
+      this.origin.set(receiver, isAttestedTool), this.adapters.push(receiver);
+    }
   }
   adapterTimeoutMs;
   adapters;
+  /**
+   * Which tool ids each adapter is permitted to speak for.
+   *
+   * Round 4 tightened this from a category rule to an exact one. `quadcode` is now
+   * both natively collected and receiver-eligible, so "is it a native tool" no longer
+   * distinguishes anything: a category check would have let the Claude adapter speak
+   * for Quadcode. Each log adapter may therefore emit ONLY its own `name`, and the
+   * receiver only `ATTESTED_TOOLS`. The default for an adapter injected later
+   * (fixtures, tests) is the same exact-name rule, which is strictly narrower than
+   * the category default it replaces.
+   */
+  origin = /* @__PURE__ */ new WeakMap();
   cancellation = null;
   generation = 0;
   activeWindowMs;
@@ -2926,20 +3347,23 @@ var Detector = class {
     this.cancellation?.abort(), this.cancellation = controller;
     let cancel = () => controller.abort();
     signal?.addEventListener("abort", cancel, { once: !0 }), signal?.aborted && cancel();
-    let results;
+    let adapters = [...this.adapters], results;
     try {
-      results = await Promise.all(this.adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs, now, controller.signal)));
+      results = await Promise.all(adapters.map((a) => pollAdapter(a, this.adapterTimeoutMs, now, controller.signal)));
     } finally {
       signal?.removeEventListener("abort", cancel);
     }
     if (controller.signal.aborted || generation !== this.generation) return null;
-    let all = results.flat().map((o) => projectObservation(o, now, this.activeWindowMs)).filter((o) => o !== null).filter(allowed);
+    let all = results.flatMap((list, index) => {
+      let adapter = adapters[index], mayEmit = this.origin.get(adapter) ?? ((tool) => tool === adapter.name);
+      return list.filter((o) => mayEmit(o?.tool));
+    }).map((o) => projectObservation(o, now, this.activeWindowMs)).filter((o) => o !== null).filter(allowed);
     if (!all.length) return null;
     let usage = /* @__PURE__ */ new Map(), input = 0, output = 0;
     for (let o of all) for (let u of o.usage) {
       if (!(u.tokensInputDelta || u.tokensOutputDelta)) continue;
       let key = usageKey(o.tool, u.model);
-      if (!usage.has(key) && usage.size >= 30 || !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta)) continue;
+      if (!usage.has(key) && usage.size >= MAX_USAGE_ENTRIES || !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta)) continue;
       let previous = usage.get(key);
       usage.set(key, {
         tool: o.tool,
@@ -2969,7 +3393,7 @@ var Detector = class {
       tokensInputDelta: input,
       tokensOutputDelta: output,
       usage: [...usage.values()],
-      seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, 30)
+      seen: [...seen.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, MAX_USAGE_ENTRIES)
     } : null;
   }
 };
@@ -3002,13 +3426,15 @@ function projectStatus(value) {
   let s = objectRecord(value);
   if (!s) return { ...OFFLINE_STATUS };
   let active = s.status === "active" && isSupportedTool(s.tool) && safeAlias(s.projectAlias) !== null, sources = [];
-  if (active && Array.isArray(s.sources)) for (let raw of s.sources.slice(0, 30)) {
+  if (active && Array.isArray(s.sources)) for (let raw of s.sources.slice(0, MAX_USAGE_ENTRIES)) {
     let source = objectRecord(raw);
-    !source || !isSupportedTool(source.tool) || eventTime(source.lastSeenAt, Date.now(), 3e5) === null || sources.push({ tool: source.tool, model: safeModel(source.model, source.tool), lastSeenAt: new Date(eventTime(source.lastSeenAt, Date.now(), 3e5)).toISOString() });
+    !source || !isSupportedTool(source.tool) || eventTime(source.lastSeenAt, Date.now(), MAX_EVENT_AGE_MS) === null || sources.push({ tool: source.tool, model: safeModel(source.model, source.tool), lastSeenAt: new Date(eventTime(source.lastSeenAt, Date.now(), MAX_EVENT_AGE_MS)).toISOString() });
   }
   return {
     collectionPolicy: COLLECTION_POLICY,
     ...typeof s.configFingerprint == "string" && /^[a-f0-9]{64}$/.test(s.configFingerprint) ? { configFingerprint: s.configFingerprint } : {},
+    // Constructed, never spread: a stale file cannot claim the receiver is on.
+    ...typeof s.attestedReceiver == "boolean" ? { attestedReceiver: s.attestedReceiver } : {},
     connected: s.connected === !0 && iso(s.lastConnectionSeenAt) !== null && eventTime(s.lastConnectionSeenAt, Date.now(), 9e4) !== null,
     ...iso(s.lastConnectionCheckAt) ? { lastConnectionCheckAt: iso(s.lastConnectionCheckAt) } : {},
     ...iso(s.lastConnectionSeenAt) ? { lastConnectionSeenAt: iso(s.lastConnectionSeenAt) } : {},
@@ -3047,12 +3473,12 @@ function markAuthRejected(rejected) {
 }
 
 // src/stopRequest.ts
-var fs3 = __toESM(require("node:fs"));
+var fs5 = __toESM(require("node:fs"));
 function requestStop() {
   writeJsonAtomic(STOP_REQUEST_PATH, { requestedAt: (/* @__PURE__ */ new Date()).toISOString(), byPid: process.pid });
 }
 function isStopRequested() {
-  return fs3.existsSync(STOP_REQUEST_PATH);
+  return fs5.existsSync(STOP_REQUEST_PATH);
 }
 function clearStopRequest() {
   removeFile(STOP_REQUEST_PATH);
@@ -3061,15 +3487,16 @@ function clearStopRequest() {
 // src/heartbeat.ts
 var STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3;
 function createLoopState(config) {
-  let valid = projectConfig(config), activeWindowMs = valid ? idleThresholdMs(valid) : 3e5;
+  let valid = projectConfig(config), activeWindowMs = valid ? idleThresholdMs(valid) : 3e5, attestedTools = valid ? attestedToolsFor(valid) : [];
   return {
     activeSession: null,
     lastActivityAt: null,
-    detector: new Detector(activeWindowMs),
+    detector: new Detector(activeWindowMs, void 0, attestedTools),
     pendingUsage: /* @__PURE__ */ new Map(),
     sourcesSeen: /* @__PURE__ */ new Map(),
     modelChallenger: null,
     activeWindowMs,
+    attestedTools,
     stopping: !1,
     epoch: 0,
     binding: valid ? configFingerprint(valid) : null,
@@ -3078,7 +3505,9 @@ function createLoopState(config) {
   };
 }
 function clearCollectedState(state, config) {
-  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.sourcesSeen.clear(), state.modelChallenger = null, state.binding = config ? configFingerprint(config) : null, config && idleThresholdMs(config) !== state.activeWindowMs && (state.activeWindowMs = idleThresholdMs(config), state.detector = new Detector(state.activeWindowMs));
+  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.sourcesSeen.clear(), state.modelChallenger = null, state.binding = config ? configFingerprint(config) : null;
+  let nextTools = config ? attestedToolsFor(config) : [], consentChanged = nextTools.join("\0") !== state.attestedTools.join("\0");
+  config && (idleThresholdMs(config) !== state.activeWindowMs || consentChanged) ? (state.activeWindowMs = idleThresholdMs(config), state.attestedTools = nextTools, state.detector = new Detector(state.activeWindowMs, void 0, nextTools)) : !config && state.attestedTools.length && (state.attestedTools = [], state.detector = new Detector(state.activeWindowMs));
 }
 function sameConfig(config, load) {
   try {
@@ -3160,6 +3589,7 @@ function writeSnapshot(state, config, connected, rejected = !1, receipt) {
   writeStatus({
     configFingerprint: config ? configFingerprint(config) : void 0,
     connected,
+    attestedReceiver: config ? attestedToolsFor(config).length > 0 : !1,
     lastConnectionCheckAt: now,
     lastConnectionSeenAt: connected ? receipt : void 0,
     status: connected ? session ? "active" : "idle" : "offline",
@@ -3259,11 +3689,11 @@ function settleWithin(promise, ms) {
     promise.then(done, done);
   });
 }
-var MIN_TICK_WATCHDOG_MS = 9e4, tickWatchdogMs = (intervalMs) => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS), LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"];
+var MIN_TICK_WATCHDOG_MS = 9e4, tickWatchdogMs = (intervalMs) => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS), LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs", "attestedMetadata"];
 function refreshConfig(active, loaded) {
   let next = projectConfig(loaded);
   if (!next) return { config: active, changed: [], paused: !0 };
-  let changed = LIVE_FIELDS.filter((field) => field === "projectAliases" ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {}) : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : next[field] !== active[field]);
+  let changed = LIVE_FIELDS.filter((field) => field === "projectAliases" ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {}) : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : field === "attestedMetadata" ? attestedToolsFor(next).join("\0") !== attestedToolsFor(active).join("\0") : next[field] !== active[field]);
   return { config: changed.length ? next : active, changed: [...changed], paused: !1 };
 }
 function runLoop(initialConfig, options = {}) {
@@ -3312,9 +3742,17 @@ var STALE_DAEMON_EXPLANATION = {
   "older-build": "it was started before the tracker was last installed on this machine",
   "revoked-token": "the server is rejecting its token and it has never read the newer one in config.json"
 };
+function serveTakeoverReason(inputs) {
+  let stale = isStaleDaemon(inputs);
+  return stale || (inputs.mode === "serve" ? null : "manual");
+}
+var SERVE_TAKEOVER_EXPLANATION = {
+  ...STALE_DAEMON_EXPLANATION,
+  manual: "it was started by hand and nothing would restart it after a crash or a reboot"
+};
 
 // src/daemon.ts
-var STOP_WAIT_MS = 8e3, STOP_POLL_MS = 200, sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+var STOP_WAIT_MS = 8e3, STOP_POLL_MS = 200, SERVE_CLAIM_SETTLE_MS = 300, sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
 function readPid() {
   return readJson(PID_PATH)?.pid ?? null;
 }
@@ -3331,7 +3769,7 @@ function daemonStatus() {
 }
 function fileMtimeMs(filePath) {
   try {
-    return fs4.statSync(filePath).mtimeMs;
+    return fs6.statSync(filePath).mtimeMs;
   } catch {
     return null;
   }
@@ -3372,7 +3810,7 @@ async function startDaemon(entryPath) {
   writeJsonAtomic(PID_PATH, { pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() }), console.log(`Tracker started (pid ${pid}). Logs: ${LOG_PATH}`);
 }
 function spawnDetachedDirect(entryPath) {
-  let logFd = fs4.openSync(LOG_PATH, "a"), child = (0, import_node_child_process.spawn)(process.execPath, [entryPath, "run-loop"], {
+  let logFd = fs6.openSync(LOG_PATH, "a"), child = (0, import_node_child_process.spawn)(process.execPath, [entryPath, "run-loop"], {
     detached: !0,
     stdio: ["ignore", logFd, logFd],
     windowsHide: !0
@@ -3394,7 +3832,7 @@ function spawnDetachedWindows(entryPath) {
 }
 function redirectConsoleToLog() {
   ensureConfigDir();
-  let out = fs4.createWriteStream(LOG_PATH, { flags: "a" });
+  let out = fs6.createWriteStream(LOG_PATH, { flags: "a" });
   globalThis.console = new import_node_console.Console({ stdout: out, stderr: out });
 }
 async function endLingeringSession() {
@@ -3419,6 +3857,7 @@ async function stopDaemon() {
     console.log("Tracker is not running."), removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
     return;
   }
+  let supervised = readJson(PID_PATH)?.mode === "serve";
   requestStop();
   let deadline = Date.now() + STOP_WAIT_MS;
   for (; isProcessAlive(pid) && Date.now() < deadline; ) await sleep(STOP_POLL_MS);
@@ -3430,16 +3869,42 @@ async function stopDaemon() {
     }
   else
     console.log(`Tracker stopped (pid ${pid}).`);
-  removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
+  supervised && (console.log("It was running under a supervisor (VibeHub app / launchd), which restarts it within about 30 s."), console.log("To keep it stopped: turn off Track at login in VibeHub, or run `launchctl bootout gui/$(id -u)/com.vibehub.tracker`.")), removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
 }
 function runForeground(config) {
-  redirectConsoleToLog(), clearStopRequest();
+  redirectConsoleToLog();
   let shuttingDown = !1, stopLoop = null, shutdown = (reason) => {
     shuttingDown || (shuttingDown = !0, console.log(`tracker: shutting down (${reason})`), (stopLoop ? stopLoop() : Promise.resolve()).catch((err) => console.error("tracker: error during shutdown:", err)).finally(() => {
       removeFile(PID_PATH), clearStopRequest(), process.exit(0);
     }));
   };
   stopLoop = runLoop(config, { onStopRequest: () => shutdown("stop.request") }).stop, process.on("SIGTERM", () => shutdown("SIGTERM")), process.on("SIGINT", () => shutdown("SIGINT"));
+}
+function serveInputs(entryPath) {
+  return { ...staleDaemonInputs(entryPath), mode: readJson(PID_PATH)?.mode };
+}
+async function serveForeground(config, entryPath) {
+  let existing = daemonStatus();
+  if (existing.running && existing.pid !== null) {
+    let reason = serveTakeoverReason(serveInputs(entryPath));
+    if (!reason) {
+      console.log(`Tracker is already running under a supervisor (pid ${existing.pid}); nothing to do.`);
+      return;
+    }
+    console.log(`Tracker is running (pid ${existing.pid}), but ${SERVE_TAKEOVER_EXPLANATION[reason]}.`), console.log("Taking it over."), await stopDaemon();
+    let after = daemonStatus();
+    if (after.running) {
+      console.error(`Could not stop the old tracker (pid ${after.pid}); it is still running. Exiting so the supervisor can retry.`), process.exitCode = 1;
+      return;
+    }
+  }
+  ensureConfigDir(), clearStopRequest(), writeJsonAtomic(PID_PATH, { pid: process.pid, startedAt: (/* @__PURE__ */ new Date()).toISOString(), mode: "serve" }), await sleep(SERVE_CLAIM_SETTLE_MS);
+  let claimed = readJson(PID_PATH);
+  if (claimed?.pid !== process.pid) {
+    console.log(`Another tracker claimed tracker.pid (pid ${claimed?.pid ?? "unknown"}) while this one was starting; deferring to it.`);
+    return;
+  }
+  console.log(`Tracker serving in the foreground (pid ${process.pid}). Loop log: ${LOG_PATH}`), runForeground(config);
 }
 
 // src/toolLabels.ts
@@ -3487,7 +3952,20 @@ async function verifyToken(apiUrl, deviceToken) {
     return { ok: !1, rejected: !1, detail: err instanceof Error ? err.message : "network error" };
   }
 }
-program2.command("login <deviceToken>").description(`validate the token with the server, then write ${CONFIG_PATH_LABEL}`).option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL).action(async (deviceToken, options) => {
+async function readTokenFromStdin() {
+  let chunks = [], total = 0;
+  for await (let chunk of process.stdin) {
+    let buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    if (total += buf.length, total > 4096) throw new Error("stdin token too long");
+    chunks.push(buf);
+  }
+  return (Buffer.concat(chunks).toString("utf8").split(/\r?\n/, 1)[0] ?? "").trim();
+}
+program2.command("login [deviceToken]").description(`validate the token with the server, then write ${CONFIG_PATH_LABEL}`).option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL).option("--token-stdin", "read the device token from stdin (one line) instead of an argument").action(async (deviceTokenArg, options) => {
+  let deviceToken;
+  options.tokenStdin ? (deviceTokenArg && (console.error("Login failed: pass the token either as an argument or on stdin, not both."), process.exit(1)), deviceToken = await readTokenFromStdin().catch((err) => {
+    console.error(`Login failed: ${err instanceof Error ? err.message : "could not read stdin"}.`), process.exit(1);
+  })) : deviceTokenArg ? deviceToken = deviceTokenArg : (console.error("Login failed: missing device token. Pass it as an argument or use --token-stdin."), process.exit(1)), safeDeviceToken(deviceToken) || (console.error("Login failed: the device token is empty or malformed."), console.error("Create a new token in VibeHub > Settings > Tracker and try again."), process.exit(1));
   let verified = await verifyToken(options.apiUrl, deviceToken);
   verified.rejected && (console.error(`Login failed: token rejected by the server (${verified.detail}).`), console.error("Create a new token in VibeHub > Settings > Tracker and try again."), process.exit(1));
   let existing = readConfig(), config = {
@@ -3496,7 +3974,10 @@ program2.command("login <deviceToken>").description(`validate the token with the
     projectAliases: existing?.projectAliases ?? {},
     heartbeatIntervalMs: existing?.heartbeatIntervalMs,
     idleThresholdMs: existing?.idleThresholdMs,
-    toolProcessNames: existing?.toolProcessNames
+    toolProcessNames: existing?.toolProcessNames,
+    // A device-level consent setting, like projectAliases: re-running `login`
+    // must not silently switch the receiver on or off behind the user's back.
+    attestedMetadata: existing?.attestedMetadata
   };
   writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) - saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
   let daemon = daemonStatus();
@@ -3509,7 +3990,7 @@ program2.command("set <projectFolder> <alias>").description(`remap a project fol
   );
 });
 program2.command("start").description("track supported Claude Code / Codex session-log metadata and send heartbeats").action(async () => {
-  requireConfig(), await startDaemon(path3.resolve(__filename));
+  requireConfig(), await startDaemon(path4.resolve(__filename));
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {
   let config = readConfig();
@@ -3518,8 +3999,10 @@ program2.command("status").description(`pretty-print the current ${STATUS_PATH_L
     return;
   }
   let status = readStatus(), { running, pid } = daemonStatus();
-  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status === "active" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`), console.log("Scope:   supported AI-session activity only (Claude Code, Codex)");
-  let seeingCutoff = Date.now() - 3e5, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
+  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status === "active" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
+  let attested = attestedToolsFor(config);
+  console.log("Scope:   supported AI-session activity only (Claude Code, Codex)"), attested.length > 0 && (console.log(`Receiver: on for ${attested.map(toolLabel).join(", ")} (opt-in, ~/.vibehub/attested.jsonl)`), console.log("          Records come from a separate producer you installed; this tracker reads"), console.log("          no log, process or window for those tools, and never estimates their usage."));
+  let seeingCutoff = Date.now() - MAX_EVENT_AGE_MS, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
   seeing.length > 0 ? console.log(`Seeing:  ${describeSources(seeing)}`) : running && console.log("Seeing:  no recent supported AI usage records (AI-only idle; other apps are not observed)");
   let freshCheck = Date.parse(status.lastConnectionCheckAt ?? "") >= Date.now() - Math.max(9e4, 3 * (config.heartbeatIntervalMs ?? 3e4));
   status.authRejected ? (console.log("Connected: no - token rejected by the server."), console.log("  Create a new token in VibeHub > Settings > Tracker, then run:"), console.log("  vibehub-tracker login <newToken>")) : running ? status.connected && freshCheck ? (console.log("Connected: yes"), console.log("  Recent server-accepted daemon connection; does not imply an active AI session.")) : console.log("Connected: not yet - waiting for a successful daemon connection check; no AI activity is required.") : console.log("Connected: no - daemon isn't running. Run `vibehub-tracker start`.");
@@ -3533,6 +4016,10 @@ program2.command("logout").description(`stop the daemon and remove ${CONFIG_PATH
 program2.command("run-loop", { hidden: !0 }).description("internal: runs the heartbeat loop in the foreground (spawned by `start`)").action(() => {
   let config = requireConfig();
   runForeground(config);
+});
+program2.command("serve", { hidden: !0 }).description("internal: foreground daemon for a supervisor (launchd) - owns tracker.pid; exits 0 if a healthy supervised tracker already runs").action(async () => {
+  let config = requireConfig();
+  await serveForeground(config, path4.resolve(__filename));
 });
 program2.parseAsync().catch((err) => {
   console.error(err instanceof Error ? err.message : err), process.exit(1);

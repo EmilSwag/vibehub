@@ -1,4 +1,4 @@
-import { configFingerprint, heartbeatIntervalMs, idleThresholdMs, projectConfig, readConfig } from "./config";
+import { attestedToolsFor, configFingerprint, heartbeatIntervalMs, idleThresholdMs, projectConfig, readConfig } from "./config";
 import { Detector } from "./detector";
 import type { SeenSource } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
@@ -30,6 +30,8 @@ export interface LoopState {
   sourcesSeen: Map<string, SeenSource>;
   modelChallenger: { model: string; polls: number } | null;
   activeWindowMs: number;
+  /** Tool ids the user explicitly consented to receive; `[]` means the receiver is off. */
+  attestedTools: string[];
   stopping: boolean;
   epoch: number;
   binding: string | null;
@@ -40,9 +42,12 @@ export interface LoopState {
 export function createLoopState(config?: TrackerConfig): LoopState {
   const valid = projectConfig(config);
   const activeWindowMs = valid ? idleThresholdMs(valid) : 300000;
-  return { activeSession: null, lastActivityAt: null, detector: new Detector(activeWindowMs),
+  const attestedTools = valid ? attestedToolsFor(valid) : [];
+  return { activeSession: null, lastActivityAt: null,
+    detector: new Detector(activeWindowMs, undefined, attestedTools),
     pendingUsage: new Map(), sourcesSeen: new Map(), modelChallenger: null,
-    activeWindowMs, stopping: false, epoch: 0, binding: valid ? configFingerprint(valid) : null,
+    activeWindowMs, attestedTools, stopping: false, epoch: 0,
+    binding: valid ? configFingerprint(valid) : null,
     requestAbort: null, loadConfig: readConfig };
 }
 
@@ -58,8 +63,16 @@ export function clearCollectedState(state: LoopState, config?: TrackerConfig): v
   state.sourcesSeen.clear();
   state.modelChallenger = null;
   state.binding = config ? configFingerprint(config) : null;
-  if (config && idleThresholdMs(config) !== state.activeWindowMs) {
+  // Withdrawing consent must take the receiver away, not merely stop using it, so a
+  // detector built under the old setting is replaced rather than reused.
+  const nextTools = config ? attestedToolsFor(config) : [];
+  const consentChanged = nextTools.join("\u0000") !== state.attestedTools.join("\u0000");
+  if (config && (idleThresholdMs(config) !== state.activeWindowMs || consentChanged)) {
     state.activeWindowMs = idleThresholdMs(config);
+    state.attestedTools = nextTools;
+    state.detector = new Detector(state.activeWindowMs, undefined, nextTools);
+  } else if (!config && state.attestedTools.length) {
+    state.attestedTools = [];
     state.detector = new Detector(state.activeWindowMs);
   }
 }
@@ -155,6 +168,7 @@ function writeSnapshot(state: LoopState, config: TrackerConfig | undefined, conn
   const now = new Date().toISOString();
   const session = connected ? state.activeSession : null;
   writeStatus({ configFingerprint: config ? configFingerprint(config) : undefined, connected,
+    attestedReceiver: config ? attestedToolsFor(config).length > 0 : false,
     lastConnectionCheckAt: now, lastConnectionSeenAt: connected ? receipt : undefined,
     status: connected ? session ? "active" : "idle" : "offline",
     projectAlias: session?.projectAlias ?? null, tool: session?.tool ?? null, model: session?.model ?? null,
@@ -254,7 +268,7 @@ export const MIN_TICK_WATCHDOG_MS = 90_000;
 export const tickWatchdogMs = (intervalMs: number): number => Math.max(3 * intervalMs, MIN_TICK_WATCHDOG_MS);
 interface InFlightTick { seq: number; startedAt: number; done: Promise<void> }
 export interface ConfigRefresh { config: TrackerConfig; changed: string[]; paused: boolean }
-const LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs"] as const;
+const LIVE_FIELDS = ["apiUrl", "deviceToken", "projectAliases", "idleThresholdMs", "attestedMetadata"] as const;
 
 /** Missing/invalid config pauses collection; retaining a comparison value is NOT permission to send. */
 export function refreshConfig(active: TrackerConfig, loaded: TrackerConfig | null): ConfigRefresh {
@@ -262,7 +276,11 @@ export function refreshConfig(active: TrackerConfig, loaded: TrackerConfig | nul
   if (!next) return { config: active, changed: [], paused: true };
   const changed = LIVE_FIELDS.filter((field) => field === "projectAliases"
     ? JSON.stringify(next.projectAliases) !== JSON.stringify(active.projectAliases ?? {})
-    : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active) : next[field] !== active[field]);
+    : field === "idleThresholdMs" ? idleThresholdMs(next) !== idleThresholdMs(active)
+    // Consent is compared by value, not identity, so granting or withdrawing it is
+    // picked up on the next tick instead of waiting for a daemon restart.
+    : field === "attestedMetadata" ? attestedToolsFor(next).join("\u0000") !== attestedToolsFor(active).join("\u0000")
+    : next[field] !== active[field]);
   return { config: changed.length ? next : active, changed: [...changed], paused: false };
 }
 

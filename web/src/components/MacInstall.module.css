@@ -1,0 +1,210 @@
+/*
+ * macOS tab of the tracker install picker. Lives inside the same ui/Card frame as the
+ * script tabs, so it adds no border of its own — one border per block, never a card
+ * inside a card. Two text sizes: 13px body, 12px mono for the command.
+ *
+ * The one primary action is Download. It is an <a>, not a <Button>, because it navigates
+ * to a file; it therefore restates ui/Button's `.primary` tokens rather than inventing a
+ * second look. Keep the two in step if Button's palette changes.
+ *
+ * Strictly monochrome: every value below is an ink/surface token. No hue, including on
+ * the release states — "not released yet" and "could not check" are told by wording and
+ * lightness, never by colour.
+ */
+
+.mac {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lead {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--vh-text);
+}
+
+.sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-dim);
+}
+
+.consent,
+.details,
+.release {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.consent {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-dim);
+}
+
+.consent p {
+  margin: 0;
+}
+
+/* ---- the one primary action ---- */
+
+.download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-accent);
+  color: var(--vh-on-accent);
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.download:hover {
+  background: var(--vh-accent-hover);
+}
+
+.download:active {
+  transform: scale(0.98);
+}
+
+.download:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Version · date · requirements. Faint: it explains the button, it is not a heading. */
+.meta {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-faint);
+}
+
+/* Release states and inline errors. Plain ink, stated near the control they belong to. */
+.state {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text);
+}
+
+.action {
+  width: 100%;
+  min-height: 44px;
+}
+
+/* ---- command ---- */
+
+.cmd {
+  margin: 0;
+  min-width: 0;
+  max-height: 200px;
+  padding: 9px 11px;
+  overflow: auto;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
+  color: var(--vh-text-dim);
+  font-family: var(--vh-font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: all;
+}
+
+.cmd:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- device key ----
+ * Separated by a rule, not a border box: the key belongs to the app you just installed,
+ * but it is a different action from downloading, and one border per block still holds.
+ * The key itself never reaches storage — it is component state only. */
+
+.keyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--vh-border);
+}
+
+.keyTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--vh-text);
+}
+
+/* Full ink, unlike the dimmed command well: this is the one string to be read and
+ * retyped if the clipboard fails, and it is shown exactly once. */
+.token {
+  margin: 0;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
+  color: var(--vh-text);
+  font-family: var(--vh-font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+.token:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- disclosure ---- */
+
+.link {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vh-text-dim);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--vh-text-faint);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out);
+}
+
+.link:hover {
+  color: var(--vh-text);
+  text-decoration-color: currentColor;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}

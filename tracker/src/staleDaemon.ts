@@ -74,3 +74,34 @@ export const STALE_DAEMON_EXPLANATION: Record<StaleDaemonReason, string> = {
   "older-build": "it was started before the tracker was last installed on this machine",
   "revoked-token": "the server is rejecting its token and it has never read the newer one in config.json",
 };
+
+/**
+ * Lane B (mac app): the same judgement for the hidden `serve` command, which runs the
+ * loop in the foreground for a supervisor (the VibeHub app's launchd LaunchAgent).
+ *
+ * `serve` finds a daemon already running and must decide between deferring to it
+ * (exit 0 - the supervisor's KeepAlive relaunch then costs nothing) and replacing it.
+ * A stale daemon is replaced for exactly the reasons `start` replaces one. A *healthy*
+ * daemon is replaced only when it was started by hand (`start`'s detached run-loop,
+ * recognisable by a tracker.pid with no `mode`): once a supervisor exists it should own
+ * the tracker, because a detached daemon has nobody to restart it after a crash or a
+ * reboot. A healthy daemon that is itself a `serve` is left strictly alone.
+ */
+export type ServeTakeoverReason = StaleDaemonReason | "manual";
+
+export interface ServeInputs extends StaleDaemonInputs {
+  /** `mode` from ~/.vibehub/tracker.pid: "serve" for a supervised daemon; undefined for one `start` spawned (or a build before `serve` existed). */
+  mode: string | undefined;
+}
+
+export function serveTakeoverReason(inputs: ServeInputs): ServeTakeoverReason | null {
+  const stale = isStaleDaemon(inputs);
+  if (stale) return stale;
+  return inputs.mode === "serve" ? null : "manual";
+}
+
+/** Same sentence shape as STALE_DAEMON_EXPLANATION: completes "Tracker is running (pid N), but ...". */
+export const SERVE_TAKEOVER_EXPLANATION: Record<ServeTakeoverReason, string> = {
+  ...STALE_DAEMON_EXPLANATION,
+  manual: "it was started by hand and nothing would restart it after a crash or a reboot",
+};

@@ -1,8 +1,10 @@
 import type { PresenceSnapshot, PresenceStatus } from "./sessions";
+import { foldEstimatedUsd, type PricedUsage } from "./token-pricing";
+import { isTokenlessTool } from "./tools";
 
 /**
- * Payload builder for `GET /api/v1/tracker/me` (ARCHITECTURE.md §5.9) — the single
- * request the macOS menu-bar companion (`menubar-mac/`) makes.
+ * Payload builder for `GET /api/v1/tracker/me` (ARCHITECTURE.md §5.8) — the single
+ * request the macOS companion (`mac/`, VibeHub.app: menu bar + Island) makes.
  *
  * Deliberately pure and Prisma-free: the route fetches rows, this file shapes them.
  * That seam is what makes the contract assertable without a database — see
@@ -20,6 +22,12 @@ export interface TrackerMeActivity {
   tool: string;
   /** null when the tool exposes no model — the app drops the segment, never prints "unknown". */
   model: string | null;
+  /**
+   * Tokens measured for the open session, or `null` when this tool has no counter in
+   * any source (Quadcode). The app must render nothing for null — never "0 tokens",
+   * which would state that a measurement was taken and came back empty.
+   */
+  tokens: number | null;
   since: string;
 }
 
@@ -49,7 +57,12 @@ export interface TrackerMePayload {
   };
   today: {
     activeSeconds: number;
-    tokens: number;
+    /**
+     * Tokens measured today, or `null` when the day had activity but no measured
+     * source produced a count (a Quadcode-only day). Never 0-as-unknown: a `0` here
+     * means a measuring tool really did measure nothing, and an empty day is 0 too.
+     */
+    tokens: number | null;
     /**
      * Start of the session that is open right now, or null when nothing is open.
      * The app ticks "Today" forward from this only while `presence.status` is
@@ -57,6 +70,17 @@ export interface TrackerMePayload {
      * heartbeat, so adding elapsed-since-`sessionStartedAt` on top would double count.
      */
     sessionStartedAt: string | null;
+    /**
+     * Lane B (mac app): today's `tokens` at standard API prices (lib/token-pricing.ts) —
+     * an approximation for the Island's "≈$" pill, not money paid. `null` when today's
+     * tokens exist but none belong to a model with a verified price; `0` for an empty
+     * day. Mixed days (some models priced, some not) report the priced part only.
+     * A day whose only work was on a TOKENLESS tool (Quadcode) also reports `null`:
+     * nothing was measured, so the cost is unknown rather than zero.
+     */
+    estimatedUsd: number | null;
+    /** The same amount split per model id, priced models only — `{}` when nothing is priced. */
+    byModel: Record<string, number>;
   };
   tracker: {
     connected: boolean;
@@ -86,6 +110,7 @@ function toActivity(activity: PresenceSnapshot["activity"]): TrackerMeActivity |
     project: activity.projectAlias,
     tool: activity.tool,
     model: activity.model,
+    tokens: activity.tokens,
     since: activity.startedAt,
   };
 }
@@ -94,7 +119,7 @@ export interface TrackerMeInput {
   user: { id: string; username: string; displayName: string | null; avatarUrl: string | null };
   level: number;
   presence: PresenceSnapshot;
-  today: { activeSeconds: number; tokens: number; sessionStartedAt: Date | null };
+  today: { activeSeconds: number; tokens: number | null; sessionStartedAt: Date | null; estimatedUsd: number | null; byModel: Record<string, number> };
   /**
    * Latest actual AI heartbeat or accepted connection receipt, never token use.
    * `/tracker/verify` and this route's middleware update `TrackerToken.lastUsedAt`;
@@ -128,6 +153,8 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
       activeSeconds: input.today.activeSeconds,
       tokens: input.today.tokens,
       sessionStartedAt: iso(input.today.sessionStartedAt),
+      estimatedUsd: input.today.estimatedUsd,
+      byModel: input.today.byModel,
     },
     tracker: {
       connected: input.presence.status !== "offline",
@@ -159,19 +186,32 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
  *
  * Elapsed is measured to `lastHeartbeatAt`, never to `now`: a tracker that died mid
  * session must not keep accruing time.
+ *
+ * Lane B (mac app): the same rows, priced. Every row that contributes tokens also
+ * contributes a `(model, tokens)` line to the cost fold — DailyStat rows carry the
+ * `"unknown"` bucket literal and open sessions a `null` model for presence-only tools,
+ * and neither has a price, so both simply make the estimate partial (or null).
  */
 export function foldToday(
-  dailyStats: { date: Date; tokensInput: number; tokensOutput: number; activeSeconds: number }[],
-  openSessions: { startedAt: Date; lastHeartbeatAt: Date; tokensInput: number; tokensOutput: number }[],
+  dailyStats: { date: Date; model: string; tokensInput: number; tokensOutput: number; activeSeconds: number }[],
+  openSessions: { startedAt: Date; lastHeartbeatAt: Date; tool?: string | null; model: string | null; tokensInput: number; tokensOutput: number }[],
   today: Date
-): { activeSeconds: number; tokens: number; sessionStartedAt: Date | null } {
+): { activeSeconds: number; tokens: number | null; sessionStartedAt: Date | null; estimatedUsd: number | null; byModel: Record<string, number> } {
   let activeSeconds = 0;
   let tokens = 0;
+  // A measured source is one that actually reports counts: any DailyStat row (closed
+  // work is only ever folded from measuring tools) or any open session on a tool that
+  // is not tokenless. Its presence is what separates a real 0 from an unknown.
+  let hasMeasuredSource = false;
+  let hasTokenlessSource = false;
+  const priced: PricedUsage[] = [];
 
   for (const row of dailyStats) {
     if (row.date.getTime() !== today.getTime()) continue;
     activeSeconds += row.activeSeconds;
+    hasMeasuredSource = true;
     tokens += row.tokensInput + row.tokensOutput;
+    priced.push({ model: row.model, tokensInput: row.tokensInput, tokensOutput: row.tokensOutput });
   }
 
   // Newest first, so the freshest open session is the one the menu bar ticks from.
@@ -179,10 +219,29 @@ export function foldToday(
   for (const session of sorted) {
     if (utcMidnight(session.startedAt).getTime() !== today.getTime()) continue;
     activeSeconds += Math.max(0, Math.round((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 1000));
+    if (isTokenlessTool(session.tool)) {
+      // A tokenless tool measured nothing, so it contributes no tokens AND no price.
+      // It is pushed as an unpriceable row rather than skipped: that makes the fold
+      // report `estimatedUsd: null` (unknown) for a day of Quadcode-only work,
+      // instead of the 0 a zero-token priced row would produce - which would state
+      // that nothing was spent. An empty day still reports 0, and a mixed day still
+      // reports the priced part.
+      hasTokenlessSource = true;
+      priced.push({ model: null, tokensInput: 0, tokensOutput: 0 });
+      continue;
+    }
+    hasMeasuredSource = true;
     tokens += session.tokensInput + session.tokensOutput;
+    priced.push({ model: session.model, tokensInput: session.tokensInput, tokensOutput: session.tokensOutput });
   }
 
-  return { activeSeconds, tokens, sessionStartedAt: sorted[0]?.startedAt ?? null };
+  const cost = foldEstimatedUsd(priced);
+  // Unknown, not zero: a day whose only work was on a tokenless tool measured nothing,
+  // so the count is unknown. A day with ANY measured source keeps its real number -
+  // including a genuine 0 from a measuring tool that simply used nothing - and an
+  // empty day stays 0, because there is nothing to be unknown about.
+  const measured = hasMeasuredSource || !hasTokenlessSource ? tokens : null;
+  return { activeSeconds, tokens: measured, sessionStartedAt: sorted[0]?.startedAt ?? null, estimatedUsd: cost.estimatedUsd, byModel: cost.byModel };
 }
 
 /** Local mirror of `utcDay()` so this module stays free of the db-importing sessions.ts. */

@@ -4,8 +4,8 @@ import * as fs from "node:fs";
 import { readConfig } from "./config";
 import { runLoop, sendOrQueue } from "./heartbeat";
 import { CONFIG_PATH, ensureConfigDir, LOG_PATH, PID_PATH, readJson, removeFile, writeJsonAtomic } from "./paths";
-import { isStaleDaemon, STALE_DAEMON_EXPLANATION } from "./staleDaemon";
-import type { StaleDaemonInputs } from "./staleDaemon";
+import { isStaleDaemon, serveTakeoverReason, SERVE_TAKEOVER_EXPLANATION, STALE_DAEMON_EXPLANATION } from "./staleDaemon";
+import type { ServeInputs, StaleDaemonInputs } from "./staleDaemon";
 import { readStatus, writeOfflineStatus } from "./statusFile";
 import { clearStopRequest, requestStop } from "./stopRequest";
 import type { TrackerConfig } from "./types";
@@ -13,11 +13,19 @@ import type { TrackerConfig } from "./types";
 interface PidFile {
   pid: number;
   startedAt: string;
+  /**
+   * Lane B (mac app): "serve" when the daemon is the foreground `serve` command run by
+   * a supervisor (launchd). Absent for `start`'s detached daemon - which is how `serve`
+   * tells a daemon it should take over from one it should leave alone (staleDaemon.ts).
+   */
+  mode?: string;
 }
 
 /** How long `stop` gives the daemon to shut down cooperatively before killing it. */
 const STOP_WAIT_MS = 8000;
 const STOP_POLL_MS = 200;
+/** How long `serve` waits after writing tracker.pid before checking its claim stuck. */
+const SERVE_CLAIM_SETTLE_MS = 300;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -221,6 +229,8 @@ export async function stopDaemon(): Promise<void> {
     return;
   }
 
+  // Read before the daemon removes its own pid file on the way out.
+  const supervised = readJson<PidFile>(PID_PATH)?.mode === "serve";
   requestStop();
   const deadline = Date.now() + STOP_WAIT_MS;
   while (isProcessAlive(pid) && Date.now() < deadline) await sleep(STOP_POLL_MS);
@@ -234,6 +244,12 @@ export async function stopDaemon(): Promise<void> {
     }
   } else {
     console.log(`Tracker stopped (pid ${pid}).`);
+  }
+  if (supervised) {
+    // A KeepAlive supervisor treats this exit as a crash and relaunches `serve` after
+    // its throttle interval. Say so, or the user watches it come back and blames `stop`.
+    console.log("It was running under a supervisor (VibeHub app / launchd), which restarts it within about 30 s.");
+    console.log("To keep it stopped: turn off Track at login in VibeHub, or run `launchctl bootout gui/$(id -u)/com.vibehub.tracker`.");
   }
   removeFile(PID_PATH);
   clearStopRequest();
@@ -251,10 +267,16 @@ export async function stopDaemon(): Promise<void> {
  */
 export function runForeground(config: TrackerConfig): void {
   redirectConsoleToLog();
-  // A request left behind by an interrupted `stop` must not end this daemon on
-  // its very first check.
-  clearStopRequest();
-
+  // NOTE: stop.request is deliberately NOT cleared here.
+  //
+  // A leftover request from an interrupted `stop` must not end this daemon, which is
+  // why both callers clear it — but they do so BEFORE publishing tracker.pid
+  // (`startDaemon` before spawning, `serveForeground` before its atomic claim).
+  // Clearing again here is strictly worse than redundant: by this point the pid file
+  // has been visible for the claim settle plus process start-up, so anyone who read
+  // it and asked the daemon to stop in that window would have their request deleted
+  // and silently ignored, leaving a tracker running that the user believes they
+  // stopped. Once tracker.pid names us, every stop.request is real and is honoured.
   let shuttingDown = false;
   let stopLoop: (() => Promise<void>) | null = null;
 
@@ -276,4 +298,64 @@ export function runForeground(config: TrackerConfig): void {
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
+/** Everything `serveTakeoverReason` judges a running daemon by, read off this machine. */
+function serveInputs(entryPath: string): ServeInputs {
+  return { ...staleDaemonInputs(entryPath), mode: readJson<PidFile>(PID_PATH)?.mode };
+}
+
+/**
+ * Lane B (mac app): entry point for the hidden `serve` command - the daemon as a
+ * supervisor wants it. `start` self-detaches and returns, which is right for a shell
+ * and wrong for launchd: a KeepAlive job whose process exits immediately is a crash
+ * loop, and a detached grandchild is a process launchd cannot see, stop or restart.
+ * `serve` therefore runs the loop in *this* process, in the foreground, and owns
+ * `tracker.pid` itself (`mode: "serve"`) so `status`/`stop` and the VibeHub app read
+ * it exactly as they would a `start`ed daemon.
+ *
+ * With a daemon already running it does one of two things and never a third:
+ *   - a healthy supervised daemon -> print one line and exit 0. Under launchd that
+ *     exit is cheap (ThrottleInterval keeps the relaunch to once per 30 s) and correct:
+ *     there is exactly one tracker per machine, and it is not this process.
+ *   - a stale daemon, or a healthy one started by hand -> stop it cooperatively (the
+ *     same `stop` the user would type, session_end and all) and take its place. If it
+ *     will not die, exit 1 and let the supervisor try again later.
+ *
+ * Two `serve`s racing for an empty pid file is closed off by re-reading the claim after
+ * a short settle: whoever wrote last owns it, the other exits 0. Everything printed here
+ * goes to the supervisor's log (`~/.vibehub/launchd.log` for the LaunchAgent); the loop
+ * itself then logs to `daemon.log` like every other daemon, via runForeground.
+ */
+export async function serveForeground(config: TrackerConfig, entryPath: string): Promise<void> {
+  const existing = daemonStatus();
+  if (existing.running && existing.pid !== null) {
+    const reason = serveTakeoverReason(serveInputs(entryPath));
+    if (!reason) {
+      console.log(`Tracker is already running under a supervisor (pid ${existing.pid}); nothing to do.`);
+      return;
+    }
+    console.log(`Tracker is running (pid ${existing.pid}), but ${SERVE_TAKEOVER_EXPLANATION[reason]}.`);
+    console.log("Taking it over.");
+    await stopDaemon();
+    const after = daemonStatus();
+    if (after.running) {
+      console.error(`Could not stop the old tracker (pid ${after.pid}); it is still running. Exiting so the supervisor can retry.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  ensureConfigDir();
+  clearStopRequest(); // a leftover request must not stop the daemon we are about to become
+  writeJsonAtomic(PID_PATH, { pid: process.pid, startedAt: new Date().toISOString(), mode: "serve" });
+  await sleep(SERVE_CLAIM_SETTLE_MS);
+  const claimed = readJson<PidFile>(PID_PATH);
+  if (claimed?.pid !== process.pid) {
+    console.log(`Another tracker claimed tracker.pid (pid ${claimed?.pid ?? "unknown"}) while this one was starting; deferring to it.`);
+    return;
+  }
+
+  console.log(`Tracker serving in the foreground (pid ${process.pid}). Loop log: ${LOG_PATH}`);
+  runForeground(config);
 }

@@ -312,8 +312,9 @@ agent — packaging that is out of scope for this scaffold).
 
 | Path | Written by | Read by | Purpose |
 |---|---|---|---|
-| `~/.vibehub/config.json` | user / `vibehub-tracker login` | tracker | `{ apiUrl, deviceToken, projectAliases }` |
+| `~/.vibehub/config.json` | user / `vibehub-tracker login` | tracker | `{ apiUrl, deviceToken, projectAliases, attestedMetadata? }` |
 | `~/.vibehub/status.json` | tracker | **vibehub/macos** (and anything else local) | current status snapshot, see §4.4 |
+| `~/.vibehub/attested.jsonl` | a separate, user-installed producer | tracker (read-only, and only while opted in) | attested metadata inbox, see §4.6 |
 
 `~/.vibehub/` is `0700`; `status.json` and `config.json` are `0600`.
 
@@ -333,10 +334,25 @@ string `"unknown"`.
 
 No supported-source activity for `IDLE_THRESHOLD_MS` (default 300000 = 5 min) → tracker
 marks itself idle locally and stops sending heartbeats (server-side session then times
-out per §2.8 after its own longer `SESSION_IDLE_TIMEOUT_MS`). A host-process adapter and
-a Quadcode chat-log adapter exist in source (`tracker/src/adapters/processes.ts`,
-`quadcode.ts`) but are not constructed by the active detector, so neither contributes to
-detection today; see §4.5.
+out per §2.8 after its own longer `SESSION_IDLE_TIMEOUT_MS`).
+
+`tracker/src/adapters/processes.ts` still exists, but **only as an inert compatibility
+stub** — `poll()` returns `[]` and it performs no filesystem or process operation at
+all. The host-inventory adapter that filename once held was **removed**, not merely
+unwired: there is no window/title reader anywhere in `tracker/src`, and the retired
+content helpers `estimateTokens()` / `stripToolResults()` still return `0` and `""` so
+a chat body can never become a token count.
+
+`adapters/quadcode.ts` is **no longer a stub**: as of Round 4 it is a live log adapter
+reporting activity and model with tokens permanently unknown (§4.5). It brings its own
+bounded reader — `JsonlTailer` stays pinned to the two `~/.claude` / `~/.codex` layouts,
+whose path rules reject the dots in `.quadcodeai` by design. §4.6 covers the separate,
+explicitly opt-in receiver.
+
+Each adapter may speak only for its own tool id. The origin fence is an exact
+`tool === adapter.name` match rather than a category test, because `quadcode` is both
+natively collected and receiver-eligible, so "is it a native tool" no longer separates
+anything — a category rule would have let the Claude adapter assert Quadcode activity.
 
 ### 4.3 Wire format — `POST /api/v1/tracker/heartbeat`
 
@@ -403,11 +419,14 @@ as the sum across all sources so servers that predate `usage` keep working. When
   `projectAlias`/`tool`/`model`.
 
 Each `usage[]` entry may also carry `estimated: true` — the counts were derived, not
-reported. Quadcode chat logs contain no token numbers anywhere, so its adapter
-estimates from character counts (§4.5). The server accepts the flag and echoes it into
-the `ActivityEvent` payload; it does **not** change accounting. Anywhere those numbers
-are shown — profile, `tracker status` — they must be labelled "est.". An estimate is
-never presented as measured.
+reported. **No current tracker ever sets it.** It existed for the Quadcode
+character-count estimator, which has been removed (§4.5); the tracker's outgoing
+projection now *rejects* any usage entry carrying the flag, and the opt-in receiver
+(§4.6) refuses a record that so much as mentions it. The server still accepts and
+echoes the flag so an older tracker is not rejected mid-heartbeat, and it has never
+changed accounting. Anywhere such numbers are shown — profile, `tracker status` — they
+must be labelled "est.". An estimate is never presented as measured, and usage that
+cannot be measured is reported as unknown rather than estimated or zeroed.
 
 **Multi-tool presence — `tools[]`** (round 6, optional, backward compatible). People sit
 in several terminals and IDEs at once, so a single "current activity" understates what
@@ -486,13 +505,72 @@ the **only** interface `vibehub/macos` depends on; it never calls the server dir
 `null` except `updatedAt`. The macOS app computes the human string itself, e.g.
 `"in project neon-app · Claude Code · 1h 42m"`, from `sessionStartedAt`.
 
-### 4.5 Quadcode AI adapter (estimated tokens) — currently unavailable
+### 4.5 Quadcode AI — native activity and model, never tokens
 
-**Not wired into the active detector.** `tracker/src/detector.ts` constructs only
-`ClaudeCodeAdapter` and `CodexAdapter` (§4.2); Quadcode activity is unavailable until
-this adapter is explicitly re-enabled, and no Quadcode chat content is read by the
-current collector. The format and estimation notes below describe the existing adapter
-source for if/when that happens; they are not a claim about what ships today.
+**Round 4 (PO decision): Quadcode is collected natively.** `tracker/src/detector.ts`
+constructs `QuadcodeAdapter` alongside `ClaudeCodeAdapter` and `CodexAdapter`, under the
+same local-read contract: transcript bytes are parsed locally, and only bounded metadata
+leaves. It reports **activity and model. It never reports tokens.**
+
+What changed is *not* the evidence — the two dating failures below are unchanged and
+still decisive — but what the tracker does about them. Rather than derive an instant
+from an undateable record, the adapter **observes the append**: the daemon is running,
+holds a byte offset into the chat file, and a complete LLM line appears past that
+offset. The moment it is seen is the moment reported, bounded by the poll interval.
+This is tied to a specific completed assistant record, not to a file being touched, and
+it is what §4.2's ban on mtime-as-activity excludes. First sight primes at EOF, so a
+turn that finished while the tracker was not running is never counted or re-billed.
+
+The record's own `timestamp` is still read, for exactly one purpose: discarding turns
+whose start is more than 24 h old. For that day-scale filter the log's local time is
+read as this host's local time, which is sound because the same machine wrote it. It
+never becomes a reported instant, so no UTC offset is ever guessed for anything that
+leaves the machine.
+
+Roots are the platform app-data directory only, derived from the home directory:
+`%USERPROFILE%\AppData\Roaming\QuadcodeAI` (Windows),
+`~/Library/Application Support/QuadcodeAI` (macOS), `~/.config/QuadcodeAI` (Linux).
+`APPDATA`/`XDG_CONFIG_HOME` are deliberately **not** consulted — an environment variable
+that relocates a collector is an unreviewed escape hatch, and in a sandboxed child it can
+still point at a real profile after HOME was redirected. `QUADCODE_HOME` follows the
+`CLAUDE_CONFIG_DIR` rule: it may name the real root and nothing else, or the source is
+unavailable. A non-default install is simply not found, which is the safe failure.
+
+De-duplication is a **local fingerprint** over bounded metadata (project, chat file,
+turn-start stamp, model, variation index), not a record id — the format has none. It is
+weaker than Claude's `message.id` digest and is documented as such: two LLM records in
+one chat sharing a microsecond stamp, model and variation index would count once. It
+exists to make a re-prime idempotent, not to identify a turn.
+
+The dating evidence that forced this design, unchanged:
+
+The decisive test is narrow: **does the documented schema prove a dated AI request or
+response?** It does not, for two independent reasons, and everything else follows.
+
+1. **The timestamps carry no timezone.** They are local ISO strings
+   (`2026-09-05T21:18:11.752000`). That is not an instant until someone assumes the
+   host's current UTC offset — an assumption that is simply wrong across a DST
+   boundary or for a log written in another zone. `tracker/src/privacy.ts`'s
+   `eventTime()` requires a `Z` or `±HH:MM` suffix and rejects these outright rather
+   than repairing them.
+2. **An LLM record's timestamp is the turn start, not the reply.** The line is
+   appended only once the turn ends, and one measured record spanned 3h47m. So nothing
+   *inside* the file dates the response; the only thing that would is the moment the
+   line was appended — a filesystem mtime signal, which this collector does not treat
+   as AI evidence (§4.2). The USER record's own stamp is appended at send time, but a
+   request is not a response, and its trustworthiness is an inference about write
+   ordering rather than something the content sweep measured.
+
+Consequently the tracker reports **Quadcode activity and model, and no Quadcode usage
+whatsoever**. `quadcode` is listed in `TOKENLESS_TOOLS`, so `projectUsage()` rejects any
+usage entry naming it rather than zeroing it, the server's `usageEntrySchema` refuses
+one too, and a heartbeat whose only source is Quadcode **omits** `tokensInputDelta` /
+`tokensOutputDelta` entirely — absent, not `0`, because a zero would be booked as a
+measurement that came back empty. `/users/me/tracker` carries `activity.tokens: null`
+for the same reason. The opt-in receiver (§4.6) remains available for a producer that
+genuinely measured a turn; today `quadcode` is its only consentable tool and is
+tokenless, so that measured path is implemented and unreachable until a tool with a
+real counter joins `ATTESTED_TOOLS`.
 
 Quadcode writes one JSONL per chat section, per project:
 
@@ -500,41 +578,119 @@ Quadcode writes one JSONL per chat section, per project:
 <QuadcodeAI root>/apps/<Project>/.quadcodeai/.data/chats/<section>.files/chat_N.jsonl
 ```
 
-Roots: `%APPDATA%\QuadcodeAI` (Windows), `~/Library/Application Support/QuadcodeAI`
-(macOS), `~/.config/QuadcodeAI` (Linux), plus `~/.quadcodeai`; `QUADCODE_HOME`
-overrides. One JSON record per line: `method` `"USER"|"LLM"`, `message`, `timestamp`,
-and `variations[].model_name` on LLM replies.
+One JSON record per line: `method` `"USER"|"LLM"`, `message`, `timestamp`, and
+`variations[].model_name` on LLM replies. Only `method`, `timestamp`,
+`is_status_message`, `variation_index` and `variations[].model_name` are consulted;
+`message` and `name` are never read out of the parsed line, stored or forwarded. Only an
+LLM record that is not a status message counts — a USER line is a request, not a reply.
 
-Three measured properties of that format shape the adapter (verified over 44 logs /
-341 LLM records; full evidence in the round 6 plan's Amendment 1):
+> **Unverified against a live install.** This path layout comes from the round-6 sweep
+> recorded in prose, and the surviving fixture
+> (`tracker/scripts/local-quadcode-check.ts`) pins only the *record shape*, not the
+> directory tree. The adapter is written to the documented layout and is exercised
+> against synthetic fixtures; it has not been confirmed to match a real Quadcode
+> installation, and if the tree differs it will simply find nothing.
+
+Three properties of that format were measured over 44 logs / 341 LLM records (full
+evidence in the round 6 plan's Amendment 1). They are recorded here as findings about
+the file, not as a description of any shipped behaviour:
 
 - **No token counts exist anywhere** — not in the record, not in `meta_info` (RAG
-  metadata, whose `max_tokens` is a *boolean*), not in `cluster_node_info` (a node id).
-  Tokens are therefore estimated at ~4 characters each and always carry
-  `estimated: true` (§4.3).
+  metadata, whose `max_tokens` is a *boolean flag*), not in `cluster_node_info` (a node
+  id). There is therefore no measured Quadcode usage to read. The round-6 answer was a
+  ~4-characters-per-token estimate flagged `estimated: true`; that estimator has been
+  **removed**, and derived counts are now rejected by the outgoing projection (§4.3).
+  Quadcode usage is unknown, and unknown is what gets reported — never an estimate, and
+  never a zero standing in for one.
 - **The LLM record's `timestamp` is the turn start, not its end**, and the line is only
-  appended when the turn finishes — one observed record spanned 3h47m. The *append* is
-  the activity signal (the file's mtime), never the embedded timestamp. During a long
-  turn nothing is appended, and the process adapter's presence-only observation
-  (`genui.exe` / "Quadcode AI") carries presence instead.
-- **`message` is ~99% embedded tool transcript** (`message_raw` is byte-identical). So
-  `<TOOL_RESULT>` spans — tool output, not model output — are stripped before counting,
-  while `<TOOL_RUN>` args are kept because the model wrote them. Counting the raw
-  message overstated output by ~138x on the measured record.
+  appended when the turn finishes — one observed record spanned 3h47m. Round 6 used the
+  file's *mtime* as the activity signal, with a `genui.exe` process sighting carrying
+  presence through long turns. The process sighting remains barred outright: it is host
+  observation, not AI evidence. Round 4 does **not** revive the mtime signal either —
+  it observes the append of a specific completed LLM record while holding a byte
+  offset, which is why a touched file, a truncation or a rotation produce nothing.
+  Note that the premise "the line is appended only once the turn ends" is carried from
+  the round-6 prose and has not been re-measured; the whole dating design rests on it.
+- **`message` is ~99% embedded tool transcript** (`message_raw` is byte-identical), and
+  base64 image uploads are inlined, so records reach megabytes. Counting the raw message
+  overstated output by ~138x on the measured record. Nothing in this repo parses these
+  bodies any more.
 
-`projectAlias` comes from the nearest git repository: the project folder if it is one,
-else an enclosing repo, else the single repo directly inside it (so
-`apps/Vibemunity` reports `vibehub`, agreeing with what every other adapter reports
-from its cwd), else the folder name.
+**Media generation is not model-tagged.** `variations[].model_name` only ever holds the
+chat model; a media call names only a meta-section id, and the media model lives in a
+file on disk, not in the log. So even a perfect reader could not attribute media work to
+the model that did it.
 
-**Media generation is not model-tagged.** `model_name` only ever holds the chat model;
-a media call names only a meta-section id, and the media model lives in a file on disk,
-not in the log. Quadcode media work is tracked as activity under the chat model that
-drove it.
+**The one reliable field is `variations[].model_name`.** Of the seven values observed,
+five are already in the reviewed allowlists; `grok-4.6` and `gemini-3.5-flash` are not,
+and are deliberately **not** added — an unreviewed id normalizes to `null` (§4.3)
+rather than becoming an allowlist entry with no pricing evidence behind it.
 
-Chat logs embed base64 image uploads inline and can be huge, so the tailer skips any
-single append over 8 MB or record over 2 MB rather than reading it. Only the model,
-project, timestamps and character counts ever leave the machine — never message text.
+`tracker/scripts/local-quadcode-check.ts` keeps this schema as an executable record and
+demonstrates both dating failures without reading any real log.
+
+### 4.6 Opt-in attested metadata receiver (`attested-metadata-v1`)
+
+For a tool the collector cannot honestly read, the tracker can **receive** metadata a
+separate, user-installed producer already knows — instead of guessing at it. This is a
+receiver, never a producer: it discovers nothing, derives nothing, and with the switch
+off it opens no file descriptor at all.
+
+**Consent is explicit and lives in `~/.vibehub/config.json`:**
+
+```json
+{ "attestedMetadata": { "enabled": true, "tools": ["quadcode"] } }
+```
+
+Absent or `enabled: false` means the receiver is never constructed. Only receiver-only
+tool ids may be listed — a natively supported tool must come from its own log adapter,
+so no producer can assert Claude Code or Codex activity by writing a file. Malformed
+consent invalidates the whole config (collection pauses) rather than silently
+downgrading. The setting is part of `configFingerprint`, so granting or withdrawing it
+re-fences collected state, and `refreshConfig` applies a change on the next tick without
+a restart. `StatusFile.attestedReceiver` reports whether it is live; `collectionPolicy`
+stays `ai-session-metadata-v1`, whose guarantee is unchanged while the switch is off.
+
+**The producer appends JSONL to `~/.vibehub/attested.jsonl`.** The tracker only ever
+reads that file: it never creates, writes, rotates, chmods or deletes it.
+
+```json
+{ "v": 1, "tool": "quadcode", "recordId": "turn-7f3a",
+  "occurredAt": "2026-09-19T12:04:31.000Z", "model": "claude-fable-5-1",
+  "projectHint": "vibehub", "measured": true,
+  "tokensInputDelta": 391, "tokensOutputDelta": 120 }
+```
+
+Every rule below fails closed — a record that does not satisfy it is dropped, never
+coerced:
+
+- `occurredAt` must be a real instant carrying `Z` or `±HH:MM`. A local timestamp with
+  no zone — exactly what Quadcode's own logs hold (§4.5) — is rejected and never
+  repaired by assuming the host offset. This is what makes "dated" structural.
+- Records outside the active window, or in the future beyond the existing skew bound,
+  are dropped; timestamps are not clamped into range.
+- `estimated` may not appear **at all**, in either polarity, so a derivation cannot be
+  smuggled in under a measured claim.
+- Token counts are accepted **only** under `measured: true`, and only as safe
+  non-negative integers. Without that claim the counts must be absent entirely and the
+  record contributes activity and model with `usage: []` — usage stays unknown rather
+  than becoming a zero that reads as "nothing spent".
+- `model` runs through the same allowlist as every other source; an unreviewed id
+  becomes `null`. No id is added on a receiver-only tool's behalf.
+- `projectHint` is a bounded alias and runs through the existing alias/hidden override;
+  `cwd` is always `null`. No path, message, prompt or free-form field is read or kept.
+- `recordId` is a bounded opaque token, deduplicated per daemon lifetime, so a producer
+  retry or restart cannot double-bill.
+- The reader primes at EOF on first sight, replacement, truncation, in-place rewrite or
+  an oversized append, so history is never replayed; it refuses symlinks, hard links and
+  non-regular files, and bounds file, chunk, line and per-poll record counts.
+- `clear()` — consent change, account change, pause, cancellation — drops both the
+  cursor and the dedup set.
+
+Records that pass then travel the ordinary path: the same `projectObservation`
+projection, the same hidden-project filter, the same outgoing allowlist (§4.3). Nothing
+about pricing changes — measured tokens on a reviewed model price exactly as any other
+source's do, and an unpriced or `null` model stays unpriced.
 
 ## 5. REST + WebSocket Contract
 

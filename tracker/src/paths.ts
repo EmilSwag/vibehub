@@ -11,9 +11,20 @@ export const QUEUE_PATH = path.join(CONFIG_DIR, "queue.json");
 export const PID_PATH = path.join(CONFIG_DIR, "tracker.pid");
 export const LOG_PATH = path.join(CONFIG_DIR, "daemon.log");
 export const STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request");
+/**
+ * Inbox of the explicitly opt-in metadata receiver (adapters/attested.ts). Append-only
+ * JSONL written by a SEPARATE, user-installed producer — this process only ever reads
+ * it, and only while the receiver is switched on in config.json. Deliberately absent
+ * from JSON_PATHS: it is not one of our atomic state files and must never be written,
+ * rewritten or deleted by the tracker.
+ */
+export const ATTESTED_PATH = path.join(CONFIG_DIR, "attested.jsonl");
 const JSON_PATHS = new Set([CONFIG_PATH, STATUS_PATH, PID_PATH, STOP_REQUEST_PATH]);
 const MAX_STATE_BYTES = 64 * 1024;
 const normalized = (p: string): string => process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p);
+
+/** Exported so every reader of our own state dir applies the identical check. */
+export function configDirSafe(): boolean { return safeDirectory(); }
 
 function safeDirectory(): boolean {
   try {

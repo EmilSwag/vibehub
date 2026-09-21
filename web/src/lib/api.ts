@@ -299,6 +299,26 @@ export const statsApi = {
     ),
 };
 
+// ---- VibeHub for Mac (§5.10) ----
+
+export const macApi = {
+  /**
+   * The newest installable `mac-v*` release, or a 404 / 503 that the caller turns into
+   * an honest state (`lib/macInstall.ts`).
+   *
+   * `sessionAuth: false` deliberately, same reasoning as `authApi.me`: this endpoint is
+   * public — the download tab and the one-command installer both call it before anyone
+   * has a token — and its 404 means "no release yet", never "your session expired". With
+   * the default guard a signed-out visit, or simply the period before the first `mac-v*`
+   * tag, would poison every later `sessionAuth` request on the page.
+   *
+   * Returns `unknown`: the body is a deploy-time contract with another service, so it is
+   * validated by `parseMacRelease` rather than trusted into a typed download button.
+   */
+  latest: (signal?: AbortSignal) =>
+    request<unknown>("/api/v1/mac/latest", { signal, headers: { Accept: "application/json" } }, false),
+};
+
 // ---- Presence (§5.7) ----
 
 export const presenceApi = {
