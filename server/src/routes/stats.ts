@@ -3,6 +3,7 @@ import { Router } from "express";
 import { prisma } from "../db";
 import { asyncHandler, HttpError } from "../lib/http-error";
 import { LEGACY_UNKNOWN_MODEL, normalizeModel, utcDay } from "../lib/sessions";
+import { isTokenlessTool } from "../lib/schemas";
 import { foldByTool, topToolOf } from "../lib/stats-tools";
 import { estimateUsd, foldEstimatedUsd } from "../lib/token-pricing";
 
@@ -138,7 +139,22 @@ export async function computeStats(user: User, rangeDays: number | null) {
   // Priced once the bucket is final (every row folded in), never per contributing row:
   // the fold prices ORIGINAL per-model counts, so summing bucket USDs equals pricing
   // the rows - and a bucket whose model is unpriced is simply null.
-  for (const bucket of byModel) bucket.estimatedUsd = estimateUsd(bucket.model, bucket.tokensInput, bucket.tokensOutput);
+  // A tokenless tool has no counts to price, so its bucket is unknown rather than free -
+  // otherwise Windsurf, whose model IS in the price table, would come back at $0.00 and
+  // read as "this cost nothing" instead of "nobody knows" (Round 6, fix F-A).
+  for (const bucket of byModel) {
+    bucket.estimatedUsd = isTokenlessTool(bucket.tool)
+      ? null
+      : estimateUsd(bucket.model, bucket.tokensInput, bucket.tokensOutput);
+  }
+
+  // Measured buckets are the only ones that can state a number. A range whose only work
+  // was on tokenless tools reports `null` - unknown - while a range with any measuring
+  // tool keeps its real total, including a genuine zero, and an empty range stays 0
+  // because there is nothing to be unknown about.
+  const measured = byModel.filter((bucket) => !isTokenlessTool(bucket.tool));
+  const hasTokenless = measured.length < byModel.length;
+  const measuredTokens = measured.reduce((sum, b) => sum + b.tokensInput + b.tokensOutput, 0);
 
   // Round 20: the same buckets folded by tool alone — "which tool/IDE does this person
   // use the most". Ranked by active time (hours are the measure), tokens break ties.
@@ -149,12 +165,16 @@ export async function computeStats(user: User, rangeDays: number | null) {
     topModel: byModel[0]?.model ?? null,
     byTool,
     topTool: topToolOf(byTool),
-    totalTokens: byModel.reduce((sum, b) => sum + b.tokensInput + b.tokensOutput, 0),
+    // `null` = unknown (tokenless tools only), never a fabricated 0. Active time is
+    // always real, so it keeps summing every bucket.
+    totalTokens: measured.length === 0 && hasTokenless ? null : measuredTokens,
     totalActiveSeconds: byModel.reduce((sum, b) => sum + b.activeSeconds, 0),
     // Lane B (mac app): the range's tokens at standard API prices — priced buckets only,
     // null when tokens exist but no bucket has a verified price (same rule as the web's
-    // estimateTokenCost, so the two never disagree on the same stats).
-    totalEstimatedUsd: foldEstimatedUsd(byModel).estimatedUsd,
+    // estimateTokenCost, so the two never disagree on the same stats). Tokenless buckets
+    // are excluded from the fold: they are unpriceable, not free, and a range made only
+    // of them is unknown rather than $0.00.
+    totalEstimatedUsd: measured.length === 0 && hasTokenless ? null : foldEstimatedUsd(measured).estimatedUsd,
     streak: {
       currentStreak: streak?.currentStreak ?? 0,
       longestStreak: streak?.longestStreak ?? 0,

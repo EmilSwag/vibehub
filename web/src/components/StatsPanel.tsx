@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { statsApi } from "../lib/api";
 import { formatActiveTime, formatTokens, humanizeModel, modelFamily, toolFamily, toolLabel } from "../lib/format";
-import { estimateTokenCost, isValidTokenCount } from "../lib/tokenCost";
+import { isTokenlessTool, TOKENS_NOT_REPORTED } from "../lib/supportedTools";
+import { estimateTokenCost, isValidTokenCount, tokenlessCost } from "../lib/tokenCost";
 import { topToolOf, topToolShare } from "../lib/topTool";
 import type { UserStats } from "../types";
 import { Button } from "./ui/Button";
@@ -30,7 +31,13 @@ function Tiles({ stats, onTopModel }: TilesProps) {
   const topTool = stats ? topToolOf(stats) : null;
   const toolShare = stats ? topToolShare(stats) : null;
   // This response's own range and original input/output rows, not lifetime/presence.
-  const cost = estimateTokenCost(stats?.byModel, stats?.totalTokens);
+  // A profile whose every row comes from a tool that publishes no counts has nothing to
+  // price: the rows are real, their zeros are not measurements. Before Round 6 this tile
+  // priced them anyway and announced `0` / `≈ $0.00` / complete coverage over a Models
+  // block that correctly said "tokens not reported" two lines below (fix F-A).
+  const rows = stats?.byModel ?? [];
+  const unmeasured = rows.length > 0 && rows.every((row) => isTokenlessTool(row.tool));
+  const cost = unmeasured ? tokenlessCost(null) : estimateTokenCost(stats?.byModel, stats?.totalTokens);
 
   return (
     <>
@@ -58,7 +65,11 @@ function Tiles({ stats, onTopModel }: TilesProps) {
           label="Tokens · fuel"
           quiet
           loading={loading}
-          value={stats ? (isValidTokenCount(stats.totalTokens) ? formatTokens(stats.totalTokens) : "—") : undefined}
+          value={stats
+            ? unmeasured
+              ? TOKENS_NOT_REPORTED
+              : isValidTokenCount(stats.totalTokens) ? formatTokens(stats.totalTokens) : "—"
+            : undefined}
           companion={<TokenCost estimate={cost} />}
         />
       </div>

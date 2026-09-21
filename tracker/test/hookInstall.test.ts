@@ -13,7 +13,7 @@
 // ones. No IDE is installed, launched or detected; nothing outside the sandbox is read.
 
 import { strict as assert } from "node:assert";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 
@@ -33,6 +33,7 @@ if (!CONFIG_DIR.startsWith(sandbox)) {
   throw new Error(`refusing to run: the tracker resolves ${CONFIG_DIR}, not the sandbox ${sandbox}`);
 }
 const install = require("../src/hooks/install") as typeof import("../src/hooks/install");
+const { ensureInboxExists } = require("../src/hooks/inbox") as typeof import("../src/hooks/inbox");
 const { readConfig, writeConfig, attestedToolsFor } = require("../src/config") as typeof import("../src/config");
 import type { HookFilePlan } from "../src/hooks/install";
 import type { TrackerConfig } from "../src/types";
@@ -504,6 +505,106 @@ describe("hooks status: says what is wired and what is only half wired", () => {
     const inbox = install.inboxPresence();
     assert.equal(inbox.exists, false);
     assert.ok(inbox.path.startsWith(sandbox));
+  });
+});
+
+// ---- Round 6: what production verification caught ----
+
+describe("leaving leaves nothing behind (F-D)", () => {
+  it("puts the user's original bytes back, byte for byte", () => {
+    // Four-space indent, no trailing newline, their own key order: a file they may well
+    // have in Git. We are allowed to add one key and then to take it away again - we are
+    // not allowed to hand the file back reformatted.
+    const original = '{\n    "version": 1,\n    "hooks": {\n        "stop": []\n    }\n}';
+    const file = install.hookFileFor("cursor");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, original);
+
+    install.applyHookPlan(install.planHookInstall("cursor", command("cursor")));
+    assert.notEqual(readFileSync(file, "utf8"), original, "install must have changed something");
+    assert.equal(existsSync(install.backupPathFor("cursor")), true, "install takes one backup");
+
+    install.applyHookPlan(install.planHookUninstall("cursor", command("cursor")));
+    assert.equal(readFileSync(file, "utf8"), original, "uninstall restores the original bytes");
+    assert.equal(existsSync(install.backupPathFor("cursor")), false, "and takes our backup with it");
+  });
+
+  it("keeps a file the user changed while we were installed, and still drops the backup", () => {
+    const file = install.hookFileFor("windsurf");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ hooks: { pre_user_prompt: [] } }, null, 2));
+    install.applyHookPlan(install.planHookInstall("windsurf", command("windsurf")));
+    // The user adds a hook of their own after we installed ours.
+    const mine = JSON.parse(readFileSync(file, "utf8")) as { hooks: Record<string, unknown[]> };
+    mine.hooks.pre_user_prompt.push({ command: "my-own-tool" });
+    writeFileSync(file, JSON.stringify(mine, null, 2));
+
+    install.applyHookPlan(install.planHookUninstall("windsurf", command("windsurf")));
+    const after = JSON.parse(readFileSync(file, "utf8")) as { hooks: Record<string, unknown[]> };
+    assert.deepEqual(after.hooks.pre_user_prompt, [{ command: "my-own-tool" }], "their hook survives, ours is gone");
+    assert.equal(existsSync(install.backupPathFor("windsurf")), false, "stale backup is not left behind");
+  });
+
+  it("cleans up a backup even when the uninstall has nothing left to change", () => {
+    // Their own hook, none of ours: an uninstall with literally nothing to do. The
+    // backup is a leftover from an earlier install, and it still has to go.
+    const theirs = { hooks: { stop: [{ command: "my-own-tool" }] } };
+    const file = install.hookFileFor("cursor");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(theirs, null, 2)}\n`);
+    writeFileSync(install.backupPathFor("cursor"), `${JSON.stringify(theirs, null, 2)}\n`);
+    const plan = install.planHookUninstall("cursor", command("cursor"));
+    assert.equal(plan.changed, false, "nothing of ours is in the file");
+    install.applyHookPlan(plan);
+    assert.equal(existsSync(install.backupPathFor("cursor")), false);
+  });
+});
+
+describe("the first event counts (F-G)", () => {
+  it("creates the inbox empty at consent time, so first sight is not first record", () => {
+    assert.equal(install.inboxPresence().exists, false);
+    assert.equal(ensureInboxExists(), true);
+    const inbox = install.inboxPresence();
+    assert.equal(inbox.exists, true);
+    assert.equal(inbox.records, 0, "empty: the receiver primes here and misses nothing");
+  });
+
+  it("never disturbs an inbox that already holds records", () => {
+    const line = `${JSON.stringify({ tool: "cursor", at: "2026-09-21T10:00:00.000Z" })}\n`;
+    writeFileSync(install.inboxPresence().path, line);
+    assert.equal(ensureInboxExists(), true);
+    assert.equal(readFileSync(install.inboxPresence().path, "utf8"), line, "history is left exactly as it was");
+  });
+});
+
+describe("hooks status can tell idle from broken (F-F)", () => {
+  it("separates never-fired, fired-once and oversized", () => {
+    assert.deepEqual(
+      [install.inboxPresence().exists, install.inboxPresence().records],
+      [false, null],
+      "absent inbox reports nothing rather than zero"
+    );
+
+    ensureInboxExists();
+    assert.equal(install.inboxPresence().records, 0, "created but idle");
+
+    const record = `${JSON.stringify({ tool: "cursor", at: "2026-09-21T10:00:00.000Z" })}\n`;
+    writeFileSync(install.inboxPresence().path, record.repeat(3));
+    const busy = install.inboxPresence();
+    assert.equal(busy.records, 3);
+    assert.ok(busy.lastWriteMs !== null && busy.lastWriteMs > 0, "and when the last one arrived");
+    assert.equal(busy.oversized, false);
+  });
+
+  it("says a file the daemon will not read is oversized, instead of counting it", () => {
+    // Past the receiver's own 32 MB bound. Grown by truncate rather than by writing the
+    // bytes, so the test stays fast and the point is the size, not the content.
+    const path = install.inboxPresence().path;
+    ensureInboxExists();
+    truncateSync(path, 33 * 1024 * 1024);
+    const presence = install.inboxPresence();
+    assert.equal(presence.oversized, true);
+    assert.equal(presence.records, null, "a count nobody consumes would be a lie");
   });
 });
 

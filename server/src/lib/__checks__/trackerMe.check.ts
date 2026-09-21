@@ -228,9 +228,10 @@ eq("FRIENDS_SAMPLE_LIMIT matches the popover", FRIENDS_SAMPLE_LIMIT, 4);
 // ---- foldToday ----
 // Rows default to claude-opus-5 ($5 / $25 per million input / output, lib/token-pricing.ts),
 // so the ≈$ pins below are: input tokens × 5e-6 + output tokens × 25e-6.
-const stat = (date: Date, activeSeconds: number, tokensInput: number, tokensOutput: number, model = "claude-opus-5") => ({
+const stat = (date: Date, activeSeconds: number, tokensInput: number, tokensOutput: number, model = "claude-opus-5", tool = "claude-code") => ({
   date,
   model,
+  tool,
   activeSeconds,
   tokensInput,
   tokensOutput,
@@ -396,6 +397,42 @@ eq("...but that day's cost is unknown, not $0", measuredZeroWithHookPayload.toda
 eq("...while the priced model keeps its real zero",
   measuredZeroWithHookPayload.today.byModel, { "claude-opus-5": 0 });
 eq("...while both sessions still accrue their time", measuredZeroWithHookPayload.today.activeSeconds, 7_200);
+
+// ---- Round 6, fix F-B: the rule must survive the session CLOSING ----
+// Production verification caught today's count flipping from null to 0 a heartbeat after
+// a hook session ended: closed work folds into a DailyStat row, and the fold used to read
+// any such row as a measurement. The row's TOOL decides, exactly as it does for an open
+// session, so a day of hook work reads the same before and after it closes.
+for (const tool of ["cursor", "windsurf", "quadcode"]) {
+  const closed = foldToday([stat(today, 3_600, 0, 0, "claude-opus-5", tool)], [], today);
+  const closedPayload = buildTrackerMePayload({ ...base, today: closed });
+  eq(`a closed ${tool} day still reports tokens null, never 0`, closedPayload.today.tokens, null);
+  eq(`a closed ${tool} day still reports estimatedUsd null, never 0`, closedPayload.today.estimatedUsd, null);
+  eq(`a closed ${tool} day prices no model`, closedPayload.today.byModel, {});
+  eq(`a closed ${tool} day keeps its elapsed time`, closedPayload.today.activeSeconds, 3_600);
+}
+
+// The same day before and after the session closes must not disagree.
+const openHookDay = foldToday([], [session(at(10 * H), at(11 * H), 0, 0, "claude-opus-5", "cursor")], today);
+const closedHookDay = foldToday([stat(today, 3_600, 0, 0, "claude-opus-5", "cursor")], [], today);
+eq("closing a hook session does not change today's count",
+  [openHookDay.tokens, closedHookDay.tokens], [null, null]);
+eq("closing a hook session does not change today's cost",
+  [openHookDay.estimatedUsd, closedHookDay.estimatedUsd], [null, null]);
+
+// A closed measuring row is still a measurement - the fix must not make everything unknown.
+const closedMeasured = foldToday([stat(today, 3_600, 10, 20)], [], today);
+eq("a closed Claude Code row is still measured", closedMeasured.tokens, 30);
+eq("...and still priced", closedMeasured.estimatedUsd, 0.00055);
+
+// Mixed, both closed: the measured row survives the tokenless one beside it.
+const closedMixed = foldToday(
+  [stat(today, 600, 1_000_000, 0, "gpt-4.1"), stat(today, 600, 0, 0, "claude-opus-5", "windsurf")],
+  [],
+  today
+);
+eq("a closed mixed day counts only the measured row", closedMixed.tokens, 1_000_000);
+eq("...and prices only what it could price", closedMixed.byModel, { "gpt-4.1": 2 });
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

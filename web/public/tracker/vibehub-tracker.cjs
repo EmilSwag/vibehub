@@ -4016,6 +4016,31 @@ function appendAttestedRecord(record) {
       }
   }
 }
+function ensureInboxExists() {
+  let fd;
+  try {
+    ensureConfigDir();
+    try {
+      let existing = fs7.lstatSync(ATTESTED_PATH);
+      return existing.isFile() && !existing.isSymbolicLink() && existing.nlink === 1;
+    } catch (error) {
+      if (error.code !== "ENOENT") return !1;
+    }
+    return fd = fs7.openSync(
+      ATTESTED_PATH,
+      fs7.constants.O_WRONLY | fs7.constants.O_CREAT | fs7.constants.O_EXCL | (fs7.constants.O_NOFOLLOW ?? 0),
+      384
+    ), !0;
+  } catch (error) {
+    return error.code === "EEXIST";
+  } finally {
+    if (fd !== void 0)
+      try {
+        fs7.closeSync(fd);
+      } catch {
+      }
+  }
+}
 function readBoundedPayload(stream, timeoutMs) {
   return new Promise((resolve3) => {
     let chunks = [], total = 0, settled = !1, parsed = () => {
@@ -4183,7 +4208,7 @@ function renderPlan(tool, command, mode) {
   let content = mode === "uninstall" && Object.keys(root).every((key) => Object.hasOwn(vendor.required, key)) ? null : `${JSON.stringify(root, null, 2)}
 `, previous = existed ? `${JSON.stringify(before, null, 2)}
 ` : null;
-  return { tool, file, command, events, content, changed: content !== previous, existed };
+  return { tool, file, command, events, content, changed: content !== previous, existed, mode };
 }
 function planHookInstall(tool, command) {
   return assertLauncherUsable(), renderPlan(tool, command, "install");
@@ -4191,19 +4216,57 @@ function planHookInstall(tool, command) {
 function planHookUninstall(tool, command) {
   return renderPlan(tool, command, "uninstall");
 }
-function applyHookPlan(plan) {
-  if (!plan.changed) return;
-  let directory = path4.dirname(plan.file);
-  if (fs8.mkdirSync(directory, { recursive: !0 }), plan.existed && plan.content !== null) {
-    let backup = backupPathFor(plan.tool);
-    fs8.existsSync(backup) || fs8.copyFileSync(plan.file, backup, fs8.constants.COPYFILE_EXCL);
+function savedOriginal(backup) {
+  try {
+    let stat = fs8.lstatSync(backup);
+    return !stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_HOOK_FILE_BYTES ? null : fs8.readFileSync(backup, "utf8");
+  } catch {
+    return null;
   }
-  if (plan.content === null) {
+}
+function sameDocument(a, b) {
+  try {
+    return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
+  } catch {
+    return !1;
+  }
+}
+function applyHookPlan(plan) {
+  let backupFile = backupPathFor(plan.tool), finish = () => {
+    if (plan.mode === "uninstall")
+      try {
+        fs8.unlinkSync(backupFile);
+      } catch {
+      }
+  };
+  if (!plan.changed) {
+    finish();
+    return;
+  }
+  let directory = path4.dirname(plan.file);
+  if (fs8.mkdirSync(directory, { recursive: !0 }), plan.mode === "uninstall") {
+    let original = savedOriginal(backupFile);
+    if (original !== null && (plan.content === null || sameDocument(original, plan.content))) {
+      let restore = path4.join(directory, `.hooks.json.${(0, import_node_crypto7.randomUUID)()}.tmp`);
+      try {
+        fs8.writeFileSync(restore, original, { mode: 384, flag: "wx" }), fs8.renameSync(restore, plan.file);
+      } finally {
+        try {
+          fs8.unlinkSync(restore);
+        } catch {
+        }
+      }
+      finish();
+      return;
+    }
+  }
+  if (plan.existed && plan.content !== null && (fs8.existsSync(backupFile) || fs8.copyFileSync(plan.file, backupFile, fs8.constants.COPYFILE_EXCL)), plan.content === null) {
     try {
       fs8.unlinkSync(plan.file);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
+    finish();
     return;
   }
   let temporary = path4.join(directory, `.hooks.json.${(0, import_node_crypto7.randomUUID)()}.tmp`);
@@ -4215,6 +4278,7 @@ function applyHookPlan(plan) {
     } catch {
     }
   }
+  finish();
 }
 function withConsent(config, tool, enabled) {
   vendorFor(tool);
@@ -4287,13 +4351,22 @@ function removeOwnedShims(cjsPath, candidates = shimCandidates()) {
   });
 }
 function inboxPresence() {
-  let exists = !1;
+  let absent = { path: ATTESTED_PATH, exists: !1, records: null, lastWriteMs: null, oversized: !1 }, stat;
   try {
-    exists = fs8.lstatSync(ATTESTED_PATH).isFile();
+    if (stat = fs8.lstatSync(ATTESTED_PATH), !stat.isFile() || stat.isSymbolicLink()) return absent;
   } catch {
-    exists = !1;
+    return absent;
   }
-  return { path: ATTESTED_PATH, exists };
+  let present = { path: ATTESTED_PATH, exists: !0, lastWriteMs: stat.mtimeMs };
+  if (stat.size > MAX_ATTESTED_FILE_BYTES) return { ...present, records: null, oversized: !0 };
+  let records = null;
+  try {
+    records = fs8.readFileSync(ATTESTED_PATH, "utf8").split(`
+`).filter((line) => line.trim().length > 0).length;
+  } catch {
+    records = null;
+  }
+  return { ...present, records, oversized: !1 };
 }
 
 // src/toolLabels.ts
@@ -4451,7 +4524,7 @@ hooks.command("install <tool>").description(`register the hook for ${HOOKABLE_TO
     console.log(`Would write ${plan.file}:`), console.log(plan.content ?? ""), console.log(`Would consent to "${tool}" records in ${CONFIG_PATH_LABEL}. Nothing was changed.`);
     return;
   }
-  applyHookPlan(plan), setConsent(config, tool, !0), console.log(`${toolLabel(tool)} hook ${plan.changed ? "installed" : "already present"}: ${plan.file}`), console.log(`Events: ${plan.events.join(", ")}. Restart ${toolLabel(tool)} for it to pick the hook up.`), plan.existed && plan.changed && console.log(`Previous file kept as ${backupPathFor(tool)}.`), console.log(`Consented in ${CONFIG_PATH_LABEL}: the tracker now reads ${ATTESTED_PATH_LABEL} for ${toolLabel(tool)}.`), console.log("Each event records six fields: the tool, a random id, the time, the model when the id is one"), console.log("this tracker knows, and the project folder's name. No prompt, no path, no transcript, and no"), console.log("token count - neither tool reports one, so their usage stays unknown rather than zero."), path5.resolve(__filename).endsWith(".ts") && (console.log("Note: this is a source checkout, so the hook points at a TypeScript entry point that node"), console.log("cannot run on its own. Run `npm run build` and re-run this command for a hook that fires."));
+  applyHookPlan(plan), setConsent(config, tool, !0), ensureInboxExists(), console.log(`${toolLabel(tool)} hook ${plan.changed ? "installed" : "already present"}: ${plan.file}`), console.log(`Events: ${plan.events.join(", ")}. Restart ${toolLabel(tool)} for it to pick the hook up.`), plan.existed && plan.changed && console.log(`Previous file kept as ${backupPathFor(tool)}.`), console.log(`Consented in ${CONFIG_PATH_LABEL}: the tracker now reads ${ATTESTED_PATH_LABEL} for ${toolLabel(tool)}.`), console.log("Each event records six fields: the tool, a random id, the time, the model when the id is one"), console.log("this tracker knows, and the project folder's name. No prompt, no path, no transcript, and no"), console.log("token count - neither tool reports one, so their usage stays unknown rather than zero."), path5.resolve(__filename).endsWith(".ts") && (console.log("Note: this is a source checkout, so the hook points at a TypeScript entry point that node"), console.log("cannot run on its own. Run `npm run build` and re-run this command for a hook that fires."));
 });
 hooks.command("uninstall <tool>").description("remove VibeHub's hook from that tool's config and withdraw consent").option("--dry-run", "print what would change, and change nothing").action((tool, options) => {
   let config = requireConfig();
@@ -4468,7 +4541,12 @@ hooks.command("status").description("show which hooks are installed and consente
   for (let state of hookStatus(config, process.execPath, path5.resolve(__filename)))
     console.log(`${toolLabel(state.tool)}:`), console.log(`  Consent: ${state.consented ? "yes" : "no"}`), console.log(`  Hook:    ${state.registered.length === 0 ? "not installed" : state.missing.length === 0 ? `installed (${state.registered.join(", ")})` : `partly installed (${state.registered.join(", ")}; missing ${state.missing.join(", ")})`}`), console.log(`  File:    ${state.file}${state.fileExists ? "" : " (absent)"}`), state.stale.length > 0 && (console.log(`  Stale:   ${state.stale.join(", ")} - registered by an older VibeHub and no longer used.`), console.log(`           Run \`vibehub-tracker hooks install ${state.tool}\` to clear them.`)), state.consented && state.registered.length === 0 && console.log(`  Note:    consented, but nothing writes records - run \`vibehub-tracker hooks install ${state.tool}\`.`), !state.consented && state.registered.length > 0 && console.log("  Note:    the hook is installed but its records are ignored until you consent again.");
   let inbox = inboxPresence();
-  console.log(`Inbox:     ${inbox.path}${inbox.exists ? "" : " (not created yet)"}`), console.log("           Written only by the hook command; the tracker never writes it."), console.log("Tokens:    not reported by either tool, so usage stays unknown - never 0, never estimated.");
+  if (console.log(`Inbox:     ${inbox.path}${inbox.exists ? "" : " (not created yet)"}`), inbox.exists) {
+    let written = inbox.lastWriteMs === null ? null : new Date(inbox.lastWriteMs);
+    inbox.oversized ? console.log("           Too large for the tracker to read. Stop the tracker, delete this file, start it again.") : (inbox.records ?? 0) === 0 ? (console.log("           No events yet. Make one request in the tool, then run this command again."), console.log("           If it stays empty: restart the tool so it re-reads its hook file.")) : (console.log(`           ${inbox.records} event${inbox.records === 1 ? "" : "s"} written${written ? `, last at ${written.toLocaleString()}` : ""}.`), console.log("           The hook is working. The file is a log, not a queue - it keeps every"), console.log("           record, and only a running tracker turns new ones into activity, so if"), console.log("           nothing reaches your profile check `vibehub-tracker status` next."));
+  } else
+    console.log("           No hook has fired yet: the file is created the first time one does.");
+  console.log("           Written only by the hook command; the tracker never writes it."), console.log("Tokens:    not reported by either tool, so usage stays unknown - never 0, never estimated.");
 });
 program2.parseAsync().catch((err) => {
   console.error(err instanceof Error ? err.message : err), process.exit(1);

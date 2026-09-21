@@ -377,7 +377,13 @@ export interface UserStats {
    * unresolved when the underlying data exists to derive one.
    */
   topTool?: string | null;
-  totalTokens: number;
+  /**
+   * `null` = unknown, not zero: every row in range came from a tool that publishes no
+   * token counts (Cursor, Windsurf, Quadcode AI). A measuring tool anywhere in the
+   * range — including one that genuinely used nothing — sends a real number, and an
+   * empty range sends 0. Render it as "not reported", never as a count.
+   */
+  totalTokens: number | null;
   totalActiveSeconds: number;
   streak: { currentStreak: number; longestStreak: number };
   githubCommits: GithubCommitDay[];

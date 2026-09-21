@@ -7,6 +7,7 @@ import { asyncHandler } from "../lib/http-error";
 import { toJsonArrayValue, toPayloadValue } from "../lib/json-field";
 import { computeLevel } from "../lib/level";
 import { heartbeatSchema } from "../lib/schemas";
+import { isTokenlessTool } from "../lib/tools";
 import { closeSession, foldUsageIntoDailyStat, normalizeModel, presenceFor, utcDay, type UsageEntry } from "../lib/sessions";
 import { buildTrackerMePayload, foldToday } from "../lib/tracker-me";
 import { latestTrackerLastSeenAt, trackerConnections } from "../lib/trackerConnection";
@@ -94,7 +95,11 @@ router.get(
       // `today.estimatedUsd` / `today.byModel` (lane B, mac app).
       prisma.dailyStat.findMany({
         where: { userId, date: today },
-        select: { date: true, model: true, tokensInput: true, tokensOutput: true, activeSeconds: true },
+        // `tool` since Round 6 (fix F-B): a closed Cursor/Windsurf/Quadcode session folds
+        // into a DailyStat row like any other, so without it foldToday reads a tokenless
+        // row as a measurement of zero and today's count flips from null to 0 the moment
+        // a hook session ends.
+        select: { date: true, model: true, tool: true, tokensInput: true, tokensOutput: true, activeSeconds: true },
       }),
       prisma.session.findMany({
         where: { userId, status: { not: "ENDED" } },
@@ -239,8 +244,13 @@ router.post(
           tokensOutputDelta: entry.tokensOutputDelta,
         }))
       : null;
-    const tokensInputDelta = usage ? 0 : body.tokensInputDelta ?? 0;
-    const tokensOutputDelta = usage ? 0 : body.tokensOutputDelta ?? 0;
+    // Fix F-E, second of the four chokepoint guards (lib/tools.ts `refusesTokenClaim`):
+    // the schema already 400s a tokenless tool that claims a count, so this can only
+    // fire for a zero — but it is what makes "no count is ever credited to a tokenless
+    // tool" a property of the accounting rather than of one validator.
+    const legacyTokens = !isTokenlessTool(tool);
+    const tokensInputDelta = usage || !legacyTokens ? 0 : body.tokensInputDelta ?? 0;
+    const tokensOutputDelta = usage || !legacyTokens ? 0 : body.tokensOutputDelta ?? 0;
 
     // Round 6 multi-tool presence (§4.3): every tool the tracker can see open right
     // now rides along on the live session so presence can show the whole stack. This

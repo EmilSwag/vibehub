@@ -72,6 +72,47 @@ export function appendAttestedRecord(record: AttestedHookRecord): boolean {
 }
 
 /**
+ * Creates the inbox as an empty file, if it is not there already. Called when consent is
+ * granted — from the `hooks install` command, never from the daemon, which must keep the
+ * file strictly read-only.
+ *
+ * This exists because of how the receiver protects itself: on first sight of the inbox it
+ * primes at EOF, so that a restart cannot replay work that was already billed. Before
+ * this, the first record a user ever produced also created the file, so the daemon's
+ * first sight was a file with that record already in it — and it was skipped. The user's
+ * first Cursor turn after installing vanished and the second one appeared, which reads as
+ * flaky rather than broken, the worst way for a feature to fail.
+ *
+ * With an empty file already in place at consent time, first sight primes at offset zero
+ * and the first append is picked up. History is still never replayed: an inbox that
+ * already holds records is left untouched.
+ *
+ * Returns false on every failure — this is best-effort, and the hook writer creates the
+ * file on demand anyway.
+ */
+export function ensureInboxExists(): boolean {
+  let fd: number | undefined;
+  try {
+    ensureConfigDir();
+    try {
+      const existing = fs.lstatSync(ATTESTED_PATH);
+      // Anything already there is left exactly as it is, including a file we would
+      // refuse to write to: repairing it is the writer's business, not ours.
+      return existing.isFile() && !existing.isSymbolicLink() && existing.nlink === 1;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    }
+    // O_EXCL: if a hook wins the race and creates it first, that file is the real one.
+    fd = fs.openSync(ATTESTED_PATH,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0),
+      0o600);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EEXIST";
+  } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch {} } }
+}
+
+/**
  * Bounded, deadline-guarded stdin read that returns the parsed payload, or null.
  *
  * Three ways it can finish, and no fourth:

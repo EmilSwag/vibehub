@@ -14,7 +14,7 @@ import * as path from "node:path";
 
 import { attestedToolsFor, DEFAULT_API_URL, deleteConfig, readConfig, requireConfig, writeConfig } from "./config";
 import { daemonStatus, runForeground, serveForeground, startDaemon, stopDaemon } from "./daemon";
-import { runHookEvent } from "./hooks/inbox";
+import { ensureInboxExists, runHookEvent } from "./hooks/inbox";
 import {
   applyHookPlan, backupPathFor, hookCommandFor, HOOKABLE_TOOLS, hookStatus, inboxPresence,
   isHookableTool, planHookInstall, planHookUninstall, removeOwnedShims, setConsent,
@@ -346,6 +346,12 @@ hooks
     }
     applyHookPlan(plan);
     setConsent(config, tool, true);
+    // The receiver primes at EOF the first time it sees the inbox, so that a restart can
+    // never replay work that was already billed. Creating it empty here - at the moment
+    // consent is granted, before any hook can fire - means the daemon's first sight is an
+    // empty file and the user's FIRST turn counts. Without it the first record also
+    // created the file and was skipped, which looks like flakiness rather than a bug.
+    ensureInboxExists();
     console.log(`${toolLabel(tool)} hook ${plan.changed ? "installed" : "already present"}: ${plan.file}`);
     console.log(`Events: ${plan.events.join(", ")}. Restart ${toolLabel(tool)} for it to pick the hook up.`);
     if (plan.existed && plan.changed) console.log(`Previous file kept as ${backupPathFor(tool)}.`);
@@ -414,6 +420,25 @@ hooks
     }
     const inbox = inboxPresence();
     console.log(`Inbox:     ${inbox.path}${inbox.exists ? "" : " (not created yet)"}`);
+    // The hook process is deliberately silent - anything it printed would land inside the
+    // user's editor - so this is the one place that can distinguish "nothing has happened
+    // yet" from "something is wrong" (fix F-F).
+    if (inbox.exists) {
+      const written = inbox.lastWriteMs === null ? null : new Date(inbox.lastWriteMs);
+      if (inbox.oversized) {
+        console.log("           Too large for the tracker to read. Stop the tracker, delete this file, start it again.");
+      } else if ((inbox.records ?? 0) === 0) {
+        console.log("           No events yet. Make one request in the tool, then run this command again.");
+        console.log("           If it stays empty: restart the tool so it re-reads its hook file.");
+      } else {
+        console.log(`           ${inbox.records} event${inbox.records === 1 ? "" : "s"} written${written ? `, last at ${written.toLocaleString()}` : ""}.`);
+        console.log("           The hook is working. The file is a log, not a queue - it keeps every");
+        console.log("           record, and only a running tracker turns new ones into activity, so if");
+        console.log("           nothing reaches your profile check `vibehub-tracker status` next.");
+      }
+    } else {
+      console.log("           No hook has fired yet: the file is created the first time one does.");
+    }
     console.log("           Written only by the hook command; the tracker never writes it.");
     console.log("Tokens:    not reported by either tool, so usage stays unknown - never 0, never estimated.");
   });

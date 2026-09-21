@@ -193,15 +193,16 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
  * and neither has a price, so both simply make the estimate partial (or null).
  */
 export function foldToday(
-  dailyStats: { date: Date; model: string; tokensInput: number; tokensOutput: number; activeSeconds: number }[],
+  dailyStats: { date: Date; model: string; tool?: string | null; tokensInput: number; tokensOutput: number; activeSeconds: number }[],
   openSessions: { startedAt: Date; lastHeartbeatAt: Date; tool?: string | null; model: string | null; tokensInput: number; tokensOutput: number }[],
   today: Date
 ): { activeSeconds: number; tokens: number | null; sessionStartedAt: Date | null; estimatedUsd: number | null; byModel: Record<string, number> } {
   let activeSeconds = 0;
   let tokens = 0;
-  // A measured source is one that actually reports counts: any DailyStat row (closed
-  // work is only ever folded from measuring tools) or any open session on a tool that
-  // is not tokenless. Its presence is what separates a real 0 from an unknown.
+  // A measured source is one that actually reports counts: a DailyStat row or an open
+  // session whose tool is not tokenless. Its presence is what separates a real 0 from an
+  // unknown. The test is the tool in both cases, never the shape of the row - a closed
+  // hook session folds into a DailyStat like everything else (fix F-B).
   let hasMeasuredSource = false;
   let hasTokenlessSource = false;
   const priced: PricedUsage[] = [];
@@ -209,6 +210,17 @@ export function foldToday(
   for (const row of dailyStats) {
     if (row.date.getTime() !== today.getTime()) continue;
     activeSeconds += row.activeSeconds;
+    if (isTokenlessTool(row.tool)) {
+      // Round 6, fix F-B. Closed work used to be assumed measured, and that assumption
+      // died the moment a Cursor or Windsurf session ended: the fold saw an ordinary
+      // DailyStat row carrying 0/0 and reported today's count as 0 instead of unknown,
+      // so a tokenless-only day was honest while the session was open and lied a
+      // heartbeat later. Same treatment as the open-session branch below - the time is
+      // real, the count is not, and the row is unpriceable rather than free.
+      hasTokenlessSource = true;
+      priced.push({ model: null, tokensInput: 0, tokensOutput: 0 });
+      continue;
+    }
     hasMeasuredSource = true;
     tokens += row.tokensInput + row.tokensOutput;
     priced.push({ model: row.model, tokensInput: row.tokensInput, tokensOutput: row.tokensOutput });

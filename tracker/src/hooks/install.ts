@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { MAX_ATTESTED_FILE_BYTES } from "../adapters/attested";
 import { attestedToolsFor, writeConfig } from "../config";
 import { ATTESTED_PATH } from "../paths";
 import { objectRecord } from "../privacy";
@@ -197,6 +198,11 @@ export interface HookFilePlan {
   changed: boolean;
   /** True when a hook file existed before this plan touches it. */
   existed: boolean;
+  /**
+   * Which way this plan goes. `applyHookPlan` needs it to know when we are leaving: an
+   * uninstall restores the user's original bytes and takes our backup with it.
+   */
+  mode: "install" | "uninstall";
 }
 
 function renderPlan(
@@ -261,7 +267,7 @@ function renderPlan(
   const ours = mode === "uninstall" && Object.keys(root).every((key) => Object.hasOwn(vendor.required, key));
   const content = ours ? null : `${JSON.stringify(root, null, 2)}\n`;
   const previous = existed ? `${JSON.stringify(before, null, 2)}\n` : null;
-  return { tool, file, command, events, content, changed: content !== previous, existed };
+  return { tool, file, command, events, content, changed: content !== previous, existed, mode };
 }
 
 export function planHookInstall(tool: HookableTool, command: string): HookFilePlan {
@@ -273,22 +279,73 @@ export function planHookUninstall(tool: HookableTool, command: string): HookFile
   return renderPlan(tool, command, "uninstall");
 }
 
+/**
+ * The bytes we saved before our first edit, or null if there is no usable backup.
+ * A backup larger than the bound we accept for a hook file is not ours to restore.
+ */
+function savedOriginal(backup: string): string | null {
+  try {
+    const stat = fs.lstatSync(backup);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_HOOK_FILE_BYTES) return null;
+    return fs.readFileSync(backup, "utf8");
+  } catch { return null; }
+}
+
+/** Same JSON, whatever the whitespace. Key order is preserved by both sides, so this is exact. */
+function sameDocument(a: string, b: string): boolean {
+  try { return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b)); }
+  catch { return false; }
+}
+
 /** Writes the plan. Atomic rename, and a one-time backup of whatever was there before. */
 export function applyHookPlan(plan: HookFilePlan): void {
-  if (!plan.changed) return;
+  const backupFile = backupPathFor(plan.tool);
+  // Leaving is leaving. Once our entries are out of the file, a `hooks.json.vibehub-backup`
+  // sitting next to it is litter with our name on it — the user asked us to go, and the
+  // only copy of their pre-VibeHub file should not be something they have to clean up
+  // after us. It goes on every uninstall path, including the one where there was nothing
+  // left to change (fix F-D).
+  const finish = (): void => {
+    if (plan.mode !== "uninstall") return;
+    try { fs.unlinkSync(backupFile); }
+    catch { /* never existed, or not ours to remove */ }
+  };
+  if (!plan.changed) { finish(); return; }
   const directory = path.dirname(plan.file);
   fs.mkdirSync(directory, { recursive: true });
+  // An uninstall whose result is the same document we first backed up puts the user's
+  // ORIGINAL bytes back, not our re-serialisation of them. We were only ever supposed to
+  // add one key; handing back a file with our indentation, our spacing and our trailing
+  // newline is a diff they never asked for, in a file they may well have in Git.
+  if (plan.mode === "uninstall") {
+    const original = savedOriginal(backupFile);
+    // A backup exists only because the file was already there when we installed, so
+    // restoring it is simply leaving the room as we found it. It also overrides the
+    // "delete a file that is now empty" rule below: emptiness is judged after our entries
+    // are gone, and a `{ "version": 1 }` husk the user wrote themselves is still theirs to
+    // keep. Their own later edits are never at risk here - those leave real entries
+    // behind, which makes the document differ and takes the ordinary rewrite path.
+    if (original !== null && (plan.content === null || sameDocument(original, plan.content))) {
+      const restore = path.join(directory, `.hooks.json.${randomUUID()}.tmp`);
+      try {
+        fs.writeFileSync(restore, original, { mode: 0o600, flag: "wx" });
+        fs.renameSync(restore, plan.file);
+      } finally { try { fs.unlinkSync(restore); } catch {} }
+      finish();
+      return;
+    }
+  }
   // A file being removed outright held nothing but our own configuration - that is the
   // only case `renderPlan` returns null content for - so there is nothing of the user's
   // to preserve, and leaving a `.vibehub-backup` behind after they asked us to remove
   // ourselves would just be litter with our name on it.
   if (plan.existed && plan.content !== null) {
-    const backup = backupPathFor(plan.tool);
-    if (!fs.existsSync(backup)) fs.copyFileSync(plan.file, backup, fs.constants.COPYFILE_EXCL);
+    if (!fs.existsSync(backupFile)) fs.copyFileSync(plan.file, backupFile, fs.constants.COPYFILE_EXCL);
   }
   if (plan.content === null) {
     try { fs.unlinkSync(plan.file); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    finish();
     return;
   }
   const temporary = path.join(directory, `.hooks.json.${randomUUID()}.tmp`);
@@ -296,6 +353,7 @@ export function applyHookPlan(plan: HookFilePlan): void {
     fs.writeFileSync(temporary, plan.content, { mode: 0o600, flag: "wx" });
     fs.renameSync(temporary, plan.file);
   } finally { try { fs.unlinkSync(temporary); } catch {} }
+  finish();
 }
 
 /**
@@ -439,10 +497,43 @@ export function removeOwnedShims(cjsPath: string, candidates = shimCandidates())
   });
 }
 
-export function inboxPresence(): { path: string; exists: boolean } {
-  let exists = false;
-  try { exists = fs.lstatSync(ATTESTED_PATH).isFile(); } catch { exists = false; }
-  return { path: ATTESTED_PATH, exists };
+/**
+ * What `hooks status` can honestly say about the inbox (fix F-F).
+ *
+ * Before this, the command printed the same four lines whether the user's hook had never
+ * fired, had fired and been refused, or was working perfectly — and the hook itself is
+ * deliberately mute, because anything it prints lands inside the user's editor. So a
+ * stuck user had no way at all to tell "idle" from "broken", which is the only question
+ * they actually have.
+ *
+ * Read-only, bounded, and metadata only: how many records are waiting to be read, and
+ * when the last one was written. Nothing from inside a record is returned, so this stays
+ * on the right side of the privacy harness — the records hold no prompt or path anyway,
+ * but printing them is still not this command's job.
+ */
+export function inboxPresence(): {
+  path: string;
+  exists: boolean;
+  records: number | null;
+  lastWriteMs: number | null;
+  oversized: boolean;
+} {
+  const absent = { path: ATTESTED_PATH, exists: false, records: null, lastWriteMs: null, oversized: false };
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(ATTESTED_PATH);
+    if (!stat.isFile() || stat.isSymbolicLink()) return absent;
+  } catch { return absent; }
+  const present = { path: ATTESTED_PATH, exists: true, lastWriteMs: stat.mtimeMs };
+  // A file past the receiver's own bound is not read by the daemon at all, and the user
+  // needs to be told that rather than shown a record count from a file nobody consumes.
+  if (stat.size > MAX_ATTESTED_FILE_BYTES) return { ...present, records: null, oversized: true };
+  let records: number | null = null;
+  try {
+    const text = fs.readFileSync(ATTESTED_PATH, "utf8");
+    records = text.split("\n").filter((line) => line.trim().length > 0).length;
+  } catch { records = null; }
+  return { ...present, records, oversized: false };
 }
 
 export { HOOKABLE_TOOLS, isHookableTool };

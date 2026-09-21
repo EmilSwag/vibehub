@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { normalizeProjectUrl } from "./project-url";
-import { isTokenlessTool } from "./tools";
+import { isTokenlessTool, refusesTokenClaim, TOKENLESS_USAGE_MESSAGE } from "./tools";
 
 // Enums are validated here as plain strings on purpose — the SQLite dev schema has
 // no native enum type, so the app layer is the single source of truth for both
@@ -147,7 +147,7 @@ export const MAX_USAGE_ENTRIES = 30;
 // Tool-identity facts live in ./tools, which is dependency-free so that zod-free
 // modules (sessions.ts, tracker-me.ts) can share them without dragging the whole
 // request-schema surface into the fixtures-only harness that pins them.
-export { TOKENLESS_TOOLS, isTokenlessTool } from "./tools";
+export { TOKENLESS_TOOLS, isTokenlessTool, TOKENLESS_USAGE_MESSAGE } from "./tools";
 
 export const usageEntrySchema = z.object({
   tool: z.string().min(1).max(60),
@@ -164,7 +164,7 @@ export const usageEntrySchema = z.object({
   tokensInputDelta: z.number().int().nonnegative(),
   tokensOutputDelta: z.number().int().nonnegative(),
 }).refine((entry) => !isTokenlessTool(entry.tool), {
-  message: "usage is not reportable for this tool",
+  message: TOKENLESS_USAGE_MESSAGE,
   path: ["tool"],
 });
 export type UsageEntryInput = z.infer<typeof usageEntrySchema>;
@@ -183,4 +183,22 @@ export const heartbeatSchema = z.object({
   repoAlias: z.string().min(1).max(200).optional(),
   usage: z.array(usageEntrySchema).max(MAX_USAGE_ENTRIES).optional(),
   tools: z.array(toolEntrySchema).max(MAX_TOOL_ENTRIES).optional(),
+}).superRefine((body, ctx) => {
+  // Fix F-E. The `usage[]` guard above covers heartbeat v2; this covers the legacy
+  // top-level pair, which carried no tool guard at all and so accepted forged Cursor /
+  // Windsurf counts with a 200, attributed and priced them, and raised the account's
+  // level. The two paths now refuse the same claim with the same words.
+  //
+  // WIRE COMPATIBILITY, measured rather than assumed (tracker/src/privacy.ts
+  // `projectHeartbeat`, tracker/src/detector.ts `detect`): an honest tracker OMITS the
+  // pair entirely when the primary tool is tokenless and nothing else measured anything,
+  // and its selection rule means the primary is never tokenless while any source in the
+  // same tick DID measure something — a tool with tokens always wins the pick. So no
+  // shipped tracker, current or legacy, can produce the shape this refuses. Absent and
+  // explicit-zero deltas stay legal (see `claimsTokens`), so a legacy body that always
+  // spells the fields keeps its presence, its session and its time.
+  if (!refusesTokenClaim(body.tool, body.tokensInputDelta, body.tokensOutputDelta)) return;
+  for (const path of ["tokensInputDelta", "tokensOutputDelta"] as const) {
+    if ((body[path] ?? 0) > 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message: TOKENLESS_USAGE_MESSAGE });
+  }
 });

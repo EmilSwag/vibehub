@@ -65,6 +65,15 @@ const tokenTile = tags(stats, "StatTile").find((t) => attr(t, "label") === "Toke
 ok("token count is retained in the quiet tile", !!tokenTile && tokenTile.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText() === "quiet") && !!attr(tokenTile, "value")?.includes("formatTokens(stats.totalTokens)"));
 ok("Stats token value is guarded against invalid counts", !!tokenTile && !!attr(tokenTile, "value")?.includes("isValidTokenCount(stats.totalTokens)"));
 ok("Stats cost is a companion, never a replacement count", !!tokenTile && tags(tokenTile, "TokenCost").length === 1 && attr(tokenTile, "companion")?.includes("<TokenCost estimate={cost}") === true);
+// Round 6, fix F-A. The tile summed rows whose tools publish no counts and announced
+// `0` / `≈ $0.00` / complete coverage, directly above a Models block that said "tokens
+// not reported" for the very same rows. The decision of what is unmeasured belongs to
+// the shared tool table, so the tile must consult it rather than price the zeros.
+ok("Stats tile asks the tool table what is measurable", stats.text.includes("isTokenlessTool"));
+ok("a tokenless-only profile takes the tokenless path, not the priced one", calls(stats, "tokenlessCost").length === 1);
+ok("the tokenless verdict needs EVERY row to be tokenless", stats.text.includes("rows.every((row) => isTokenlessTool(row.tool))"));
+ok("an empty response is not mistaken for a tokenless one", stats.text.includes("rows.length > 0 &&"));
+ok("the tokenless tile prints the shared phrase, not a number", !!tokenTile && attr(tokenTile, "value")?.includes("TOKENS_NOT_REPORTED") === true);
 ok("stat companion preserves its own loading placeholder", fn(tile, "StatTile").getText().includes("companion && <span className={styles.companion}><Skeleton"));
 ok("stat companion uses a wrapping value container", fn(tile, "StatTile").getText().includes("!!companion && styles.withCompanion"));
 

@@ -208,6 +208,7 @@ Outside those two paths and your own hook files, nothing was written.
 | PowerShell: *running scripts is disabled* | The one-liner uses `irm` + `scriptblock`, which does not require changing the execution policy. If your org blocks it, download `connect.ps1` and run it with `powershell -ExecutionPolicy Bypass -File connect.ps1 -Start`. |
 | Tracker runs, VibeHub still grey | Wait ~30 s for the first ping. Check `status`: `Connected: yes` plus a fresh server heartbeat is required. Corporate proxies that strip `Authorization` headers break this. |
 | Shows *Connected · idle* | Normal when no supported tool has produced AI activity recently. |
+| Cursor / Windsurf rows say *unknown* instead of a project | Working as intended, and not specific to hooks: a folder name is only ever sent once **you** map it in Settings → Projects. Until then every tool reports `unknown`, so no folder name leaves your machine by accident. |
 | Cursor / Windsurf never appear | Run `vibehub-tracker hooks status`. If it reports the hook as missing, the IDE never ran it: re-run `hooks install`, then restart the IDE so it re-reads its hook file. Note that only a completed AI turn counts — opening the editor does not. |
 | `vibehub-tracker: command not found` | The launcher's directory is not on your PATH — `~/.local/bin`, or `%LOCALAPPDATA%\Programs\VibeHub` on Windows. Add it as the installer printed and reopen the terminal, or call the launcher by its full path. |
 
