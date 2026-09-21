@@ -165,7 +165,10 @@ program
 
 program
   .command("start")
-  .description("track supported Claude Code / Codex / Quadcode AI session metadata and send heartbeats")
+  // Names every tool the daemon can actually send, not only the ones it reads logs for -
+  // Cursor and Windsurf arrive through the opt-in hook inbox, and a user who ran
+  // `hooks install` should see them here rather than wonder whether `start` covers them.
+  .description("track Claude Code / Codex / Quadcode AI session metadata, plus Cursor / Windsurf if you opted in with `hooks install`, and send heartbeats")
   .action(async () => {
     requireConfig();
     await startDaemon(path.resolve(__filename));

@@ -4224,6 +4224,24 @@ function savedOriginal(backup) {
     return null;
   }
 }
+function replaceFile(target, contents) {
+  let temporary = path4.join(path4.dirname(target), `.hooks.json.${(0, import_node_crypto7.randomUUID)()}.tmp`);
+  try {
+    fs8.writeFileSync(temporary, contents, { mode: 384, flag: "wx" });
+    try {
+      fs8.renameSync(temporary, target);
+    } catch (error) {
+      let code = error.code;
+      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw error;
+      fs8.writeFileSync(target, contents, { mode: 384 });
+    }
+  } finally {
+    try {
+      fs8.unlinkSync(temporary);
+    } catch {
+    }
+  }
+}
 function sameDocument(a, b) {
   try {
     return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
@@ -4247,16 +4265,7 @@ function applyHookPlan(plan) {
   if (fs8.mkdirSync(directory, { recursive: !0 }), plan.mode === "uninstall") {
     let original = savedOriginal(backupFile);
     if (original !== null && (plan.content === null || sameDocument(original, plan.content))) {
-      let restore = path4.join(directory, `.hooks.json.${(0, import_node_crypto7.randomUUID)()}.tmp`);
-      try {
-        fs8.writeFileSync(restore, original, { mode: 384, flag: "wx" }), fs8.renameSync(restore, plan.file);
-      } finally {
-        try {
-          fs8.unlinkSync(restore);
-        } catch {
-        }
-      }
-      finish();
+      replaceFile(plan.file, original), finish();
       return;
     }
   }
@@ -4269,16 +4278,7 @@ function applyHookPlan(plan) {
     finish();
     return;
   }
-  let temporary = path4.join(directory, `.hooks.json.${(0, import_node_crypto7.randomUUID)()}.tmp`);
-  try {
-    fs8.writeFileSync(temporary, plan.content, { mode: 384, flag: "wx" }), fs8.renameSync(temporary, plan.file);
-  } finally {
-    try {
-      fs8.unlinkSync(temporary);
-    } catch {
-    }
-  }
-  finish();
+  replaceFile(plan.file, plan.content), finish();
 }
 function withConsent(config, tool, enabled) {
   vendorFor(tool);
@@ -4451,7 +4451,7 @@ program2.command("set <projectFolder> <alias>").description(`remap a project fol
     alias === HIDDEN ? `"${projectFolder}" will be hidden from presence.` : `"${projectFolder}" will be shown as "${alias}".`
   );
 });
-program2.command("start").description("track supported Claude Code / Codex / Quadcode AI session metadata and send heartbeats").action(async () => {
+program2.command("start").description("track Claude Code / Codex / Quadcode AI session metadata, plus Cursor / Windsurf if you opted in with `hooks install`, and send heartbeats").action(async () => {
   requireConfig(), await startDaemon(path5.resolve(__filename));
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {

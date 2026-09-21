@@ -291,6 +291,30 @@ function savedOriginal(backup: string): string | null {
   } catch { return null; }
 }
 
+/**
+ * Puts `contents` in `target`, atomically where the platform allows it.
+ *
+ * The write goes to a fresh temporary file and is renamed into place, so a crash halfway
+ * through can never leave the user with half a hooks.json. Windows, though, refuses the
+ * rename with EPERM/EBUSY whenever anything else holds the destination open - an editor
+ * with the file in a tab, a virus scanner, the search indexer - and that is common enough
+ * on a real desktop that failing the install over it would be worse than losing the
+ * atomicity. So we fall back to writing in place: same bytes, smaller guarantee.
+ */
+function replaceFile(target: string, contents: string): void {
+  const temporary = path.join(path.dirname(target), `.hooks.json.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, contents, { mode: 0o600, flag: "wx" });
+    try {
+      fs.renameSync(temporary, target);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw error;
+      fs.writeFileSync(target, contents, { mode: 0o600 });
+    }
+  } finally { try { fs.unlinkSync(temporary); } catch {} }
+}
+
 /** Same JSON, whatever the whitespace. Key order is preserved by both sides, so this is exact. */
 function sameDocument(a: string, b: string): boolean {
   try { return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b)); }
@@ -326,11 +350,7 @@ export function applyHookPlan(plan: HookFilePlan): void {
     // keep. Their own later edits are never at risk here - those leave real entries
     // behind, which makes the document differ and takes the ordinary rewrite path.
     if (original !== null && (plan.content === null || sameDocument(original, plan.content))) {
-      const restore = path.join(directory, `.hooks.json.${randomUUID()}.tmp`);
-      try {
-        fs.writeFileSync(restore, original, { mode: 0o600, flag: "wx" });
-        fs.renameSync(restore, plan.file);
-      } finally { try { fs.unlinkSync(restore); } catch {} }
+      replaceFile(plan.file, original);
       finish();
       return;
     }
@@ -348,11 +368,7 @@ export function applyHookPlan(plan: HookFilePlan): void {
     finish();
     return;
   }
-  const temporary = path.join(directory, `.hooks.json.${randomUUID()}.tmp`);
-  try {
-    fs.writeFileSync(temporary, plan.content, { mode: 0o600, flag: "wx" });
-    fs.renameSync(temporary, plan.file);
-  } finally { try { fs.unlinkSync(temporary); } catch {} }
+  replaceFile(plan.file, plan.content);
   finish();
 }
 
