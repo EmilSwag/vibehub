@@ -50,9 +50,11 @@ curl -fsSL https://web-production-da778.up.railway.app/tracker/mac.sh | bash
 
 Installs `VibeHub.app` — menu bar, notch island, tracker included — and opens it; the app
 asks for the token, so nothing above carries one. Or download the `.pkg` from **Settings →
-Tracker → macOS app**, which is also where you press *Create a device key* to get the one
-the app asks for. Tracking starts when you start it in the app, then resumes at every
-login until you turn it off.
+Tracker → macOS app** or from [Releases](https://github.com/EmilSwag/vibehub/releases/latest),
+which is also where you press *Create a device key* to get the one the app asks for.
+Tracking starts when you start it in the app, then resumes at every login until you turn
+it off. This build is not notarised yet, so the very first launch needs right-click →
+*Open* once.
 
 **macOS / Linux — the connector**
 
@@ -81,10 +83,12 @@ Details, manage commands and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md)
 
 ## Privacy
 
-The tracker reads **only** Claude Code and Codex session logs on your machine. It sends
-tool, model, timestamps, token counts and a project alias — never code, prompts, diffs,
-window titles or anything about other apps. Profiles and stats are public; live
-presence is for friends. Full model: [Architecture §3](docs/ARCHITECTURE.md).
+The tracker reads **only** Claude Code, Codex and Quadcode AI session logs on your
+machine. It sends tool, model, timestamps, token counts and a project alias — never code,
+prompts, diffs, window titles or anything about other apps. Quadcode AI's logs carry no
+token counts, so its rows show activity and model and say *tokens not reported* — nothing
+is estimated. Profiles and stats are public; live presence is for friends. Full model:
+[Architecture §3](docs/ARCHITECTURE.md).
 
 ## Built with
 
