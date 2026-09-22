@@ -53,6 +53,7 @@ export function SocialFeed({ friends, presences, currentUser }: SocialFeedProps)
       category: "Community Achievement",
       title: ev.content.title,
       subtitle: `${ev.user.displayName} earned this milestone`,
+      fireworks: true,
     });
   };
 

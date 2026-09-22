@@ -27,7 +27,8 @@ export function AchievementsList({ levelBreakdown, userStats, onSelect }: Achiev
       category: a.unlocked ? "Achievement Unlocked" : "Achievement In Progress",
       title: a.title.toUpperCase(),
       subtitle: `${a.tagline} — ${a.requirement}`,
-      duration: 30000,
+      duration: 10000,
+      fireworks: a.unlocked,
     });
   };
 
@@ -38,7 +39,8 @@ export function AchievementsList({ levelBreakdown, userStats, onSelect }: Achiev
       category: "Achievement Unlocked",
       title: randomA.title.toUpperCase(),
       subtitle: `${randomA.tagline} · ${randomA.description}`,
-      duration: 30000,
+      duration: 10000,
+      fireworks: true,
     });
   };
 
