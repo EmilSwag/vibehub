@@ -12,7 +12,15 @@ import * as path from "node:path";
 // explicit metadata allowlist survives. No process/window/OS-idle/git discovery.
 // Legacy public history is not erased or made trustworthy by this restriction.
 
-import { attestedToolsFor, DEFAULT_API_URL, deleteConfig, readConfig, requireConfig, writeConfig } from "./config";
+import {
+  applyAutostartPlan, autostartStatus, ensureAutostart, hostEnv, planAutostartDisable, planAutostartEnable,
+  removeAutostartQuietly,
+} from "./autostart";
+import type { AutostartPlan, AutostartReport } from "./autostart";
+import {
+  attestedToolsFor, autostartOptedOut, DEFAULT_API_URL, deleteConfig, readConfig, requireConfig,
+  setAutostartPreference, writeConfig,
+} from "./config";
 import { daemonStatus, runForeground, serveForeground, startDaemon, stopDaemon } from "./daemon";
 import { ensureInboxExists, runHookEvent } from "./hooks/inbox";
 import {
@@ -28,6 +36,50 @@ import type { TrackerConfig } from "./types";
 const CONFIG_PATH_LABEL = "~/.vibehub/config.json";
 const STATUS_PATH_LABEL = "~/.vibehub/status.json";
 const ATTESTED_PATH_LABEL = "~/.vibehub/attested.jsonl";
+
+/** The tracker file an OS autostart entry should point at, for this process. */
+const entryPath = (): string => path.resolve(__filename);
+
+/**
+ * One line, after `start` has done its real work. Autostart is a convenience: nothing
+ * reported here changes the exit code, because the tracker the user asked for is running
+ * either way - and a line that quietly claims a login item we failed to write would be
+ * worse than the failure.
+ */
+function reportAutostart(report: AutostartReport): void {
+  switch (report.outcome) {
+    case "registered":
+      console.log(`Autostart: on - it will start again at login (${report.file}).`);
+      break;
+    case "already":
+      console.log(`Autostart: on (${report.file}).`);
+      break;
+    case "opted-out":
+      console.log("Autostart: off - you disabled it. Run `vibehub-tracker autostart enable` to turn it back on.");
+      break;
+    case "unsupported":
+      console.log(`Autostart: not available on this platform (${process.platform}) - start the tracker yourself after a reboot.`);
+      break;
+    case "blocked":
+      console.log(`Autostart: left alone. ${report.detail ?? ""}`.trimEnd());
+      break;
+    default:
+      console.log(`Autostart: could not be registered${report.detail ? ` - ${report.detail}` : ""}.`);
+      console.log("  The tracker is running; it just will not come back on its own after a reboot.");
+      break;
+  }
+}
+
+/**
+ * A source checkout resolves `__filename` to a .ts file, which plain node cannot run - so
+ * the login item would be registered and then silently fail at every boot. Same warning
+ * `hooks install` prints, for the same reason.
+ */
+function warnIfSourceCheckout(): void {
+  if (!entryPath().endsWith(".ts")) return;
+  console.log("Note: this is a source checkout, so the entry point is TypeScript, which node cannot run");
+  console.log("on its own. Run `npm run build` and re-run this command for an entry that actually starts.");
+}
 
 const program = new Command();
 program.name("vibehub-tracker").description("VibeHub AI-session metadata tracker");
@@ -128,6 +180,9 @@ program
       // A device-level consent setting, like projectAliases: re-running `login`
       // must not silently switch the receiver on or off behind the user's back.
       attestedMetadata: existing?.attestedMetadata,
+      // Same reasoning: a re-install that re-runs `login` must not undo an explicit
+      // `autostart disable` by dropping the field that records it.
+      autostart: existing?.autostart,
     };
     writeConfig(config);
 
@@ -169,9 +224,139 @@ program
   // Cursor and Windsurf arrive through the opt-in hook inbox, and a user who ran
   // `hooks install` should see them here rather than wonder whether `start` covers them.
   .description("track Claude Code / Codex / Quadcode AI session metadata, plus Cursor / Windsurf if you opted in with `hooks install`, and send heartbeats")
-  .action(async () => {
-    requireConfig();
-    await startDaemon(path.resolve(__filename));
+  .option("--no-autostart", "start the tracker this once without registering it to start at login")
+  .action(async (options: { autostart: boolean }) => {
+    const config = requireConfig();
+    // Autostart is registered AFTER the daemon is up, never before. On macOS the
+    // LaunchAgent carries RunAtLoad, so bootstrapping it starts `serve` immediately -
+    // doing that first would leave two processes racing for tracker.pid.
+    await startDaemon(entryPath());
+    if (!options.autostart) {
+      console.log("Autostart: not registered (--no-autostart). Run `vibehub-tracker autostart enable` when you want it.");
+      return;
+    }
+    reportAutostart(ensureAutostart(hostEnv(entryPath()), autostartOptedOut(config)));
+  });
+
+/**
+ * Start at login, and keep starting at login.
+ *
+ * One user-scope file per platform, in the place that platform documents for it: a launchd
+ * LaunchAgent on macOS, an XDG autostart entry on Linux, a Startup-folder script on Windows.
+ * No elevation, nothing system-wide, nothing hidden - `status` prints the exact path and
+ * `disable` removes it. See src/autostart.ts for why each artifact looks the way it does.
+ */
+const autostart = program
+  .command("autostart")
+  .description("start the tracker automatically at login (enable | disable | status)");
+
+/**
+ * Planning reads the file that is already there, so it can fail on something the user has
+ * to fix (a symlink in place of the registration, a file too large to be ours). That is a
+ * refusal, not a crash: one sentence and a non-zero exit, with nothing written.
+ */
+function planOrExit(mode: "enable" | "disable"): AutostartPlan {
+  const env = hostEnv(entryPath());
+  try {
+    return mode === "enable" ? planAutostartEnable(env) : planAutostartDisable(env);
+  } catch (error) {
+    console.error(`Autostart could not be ${mode === "enable" ? "enabled" : "disabled"}: ${error instanceof Error ? error.message : "unknown error"}`);
+    process.exit(1);
+  }
+}
+
+autostart
+  .command("enable")
+  .description("register the tracker to start at login, and start it now")
+  .option("--dry-run", "print the exact file that would be written, and change nothing")
+  .action((options: { dryRun?: boolean }) => {
+    const config = requireConfig();
+    const env = hostEnv(entryPath());
+    const plan = planOrExit("enable");
+    if (!plan.supported || plan.blocked !== null) {
+      console.error(`Autostart was not enabled. ${plan.blocked ?? "No mechanism on this platform."}`);
+      process.exit(1);
+    }
+    if (options.dryRun) {
+      console.log(`Would write ${plan.file}:`);
+      console.log(plan.content ?? "");
+      console.log(`Would record the preference in ${CONFIG_PATH_LABEL}. Nothing was changed.`);
+      return;
+    }
+    const applied = applyAutostartPlan(plan, { activate: true });
+    if (applied.activation === "failed") {
+      console.error(`Autostart was not enabled: ${applied.detail ?? "the system refused the registration"}.`);
+      console.error("Nothing was left behind. The tracker itself is unaffected.");
+      process.exit(1);
+    }
+    // Written only once the OS has actually accepted it, so the recorded preference can
+    // never describe a login item this machine does not have.
+    setAutostartPreference(config, true);
+    console.log(`Autostart ${applied.wrote ? "enabled" : "already enabled"}: ${plan.file}`);
+    console.log(`At login it runs: ${env.execPath} ${env.scriptPath} serve`);
+    if (applied.activation === "loaded") {
+      console.log("launchd loaded it and will also restart the tracker if it ever crashes.");
+    }
+    console.log("Turn it off with `vibehub-tracker autostart disable`, or by deleting that file.");
+    warnIfSourceCheckout();
+  });
+
+autostart
+  .command("disable")
+  .description("remove the login entry and remember that choice, so `start` does not put it back")
+  .option("--dry-run", "print what would change, and change nothing")
+  .action((options: { dryRun?: boolean }) => {
+    const config = requireConfig();
+    const plan = planOrExit("disable");
+    if (plan.blocked !== null) {
+      console.error(`Autostart was not changed. ${plan.blocked}`);
+      process.exit(1);
+    }
+    if (options.dryRun) {
+      console.log(plan.changed ? `Would remove ${plan.file}.` : `Nothing of ours is registered${plan.file ? ` at ${plan.file}` : ""}.`);
+      console.log(`Would record the choice in ${CONFIG_PATH_LABEL}, so \`start\` leaves it off. Nothing was changed.`);
+      return;
+    }
+    const applied = applyAutostartPlan(plan);
+    // Recorded even when there was no file to remove: the point of this command is that
+    // the NEXT `start` respects it, and `start` reads the preference, not the disk.
+    setAutostartPreference(config, false);
+    console.log(applied.removed ? `Autostart disabled. Removed ${plan.file}.` : "Autostart was not registered.");
+    console.log("`start` will leave it off from now on. Re-enable it with `vibehub-tracker autostart enable`.");
+    console.log("This does not stop a tracker that is running now - use `vibehub-tracker stop` for that.");
+  });
+
+autostart
+  .command("status")
+  .description("show whether the tracker starts at login, and from which file")
+  .action(() => {
+    const env = hostEnv(entryPath());
+    const state = autostartStatus(env, autostartOptedOut(readConfig()));
+    if (!state.supported) {
+      console.log(`Autostart: not available on this platform (${state.platform}).`);
+      return;
+    }
+    const on = state.exists && state.owner === "ours" && !state.optedOut;
+    console.log(`Autostart: ${on ? "on" : "off"}`);
+    console.log(`File:      ${state.file}${state.exists ? "" : " (not present)"}`);
+    console.log(`Runs:      ${state.command}`);
+    if (state.problem !== null) {
+      console.log(`Note:      that file could not be read - ${state.problem}`);
+      return;
+    }
+    if (state.owner === "foreign") {
+      console.log("Note:      that file was not written by VibeHub, so it is left alone.");
+    } else if (state.owner === "other-install") {
+      console.log("Note:      it belongs to another VibeHub install (the Mac app, or a tracker elsewhere).");
+      console.log("           Manage autostart from that install; this one will not overwrite it.");
+    } else if (state.exists && !state.current) {
+      console.log("Note:      it points at an older install. Run `vibehub-tracker autostart enable` to refresh it.");
+    }
+    if (state.optedOut) {
+      console.log("Note:      you disabled autostart, so `start` will not register it.");
+    } else if (!state.exists) {
+      console.log("Note:      `vibehub-tracker start` registers it, or run `autostart enable` on its own.");
+    }
   });
 
 program
@@ -188,6 +373,15 @@ program
     const { running, pid } = daemonStatus();
 
     console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`);
+    // One word here, the full picture in `autostart status`. A daemon that is running
+    // now and a daemon that comes back after a reboot are different questions, and this
+    // is where a user looks for both.
+    const login = autostartStatus(hostEnv(entryPath()), autostartOptedOut(config));
+    console.log(`At login: ${!login.supported ? `not available on ${login.platform}`
+      : login.optedOut ? "no - disabled with `autostart disable`"
+      : login.exists && login.owner === "ours" ? "yes"
+      : login.exists ? "no - that login entry belongs to another install"
+      : "no - run `vibehub-tracker autostart enable`"}`);
     console.log(`Status:  ${status.status}`);
     if (status.status === "active") {
       console.log(`Project: ${status.projectAlias}`);
@@ -243,6 +437,11 @@ program
   .action(async () => {
     // Stop first: its fallback session_end needs config.json to still exist.
     await stopDaemon();
+    // Before the config goes: a login entry left behind would run `serve` at every boot
+    // with no credentials for it to use. On macOS that is worse than untidy - launchd's
+    // KeepAlive would keep waking a credential-less daemon indefinitely.
+    const removed = removeAutostartQuietly(hostEnv(entryPath()));
+    if (removed !== null) console.log(`Removed the login entry (${removed}).`);
     deleteConfig();
     writeOfflineStatus();
     console.log(`Logged out. Removed ${CONFIG_PATH_LABEL}.`);
@@ -255,6 +454,11 @@ program
     const config = readConfig();
     const script = path.resolve(__filename);
     await stopDaemon();
+
+    // 0. The login entry, if this install is the one that wrote it. Removing ourselves
+    //    has to include the part of us that would otherwise come back after a reboot.
+    const loginEntry = removeAutostartQuietly(hostEnv(script));
+    if (loginEntry !== null) console.log(`Removed the login entry (${loginEntry}).`);
 
     // 1. The vendors' hook files: only VibeHub's own entries, never anyone else's.
     if (config) {
@@ -307,7 +511,16 @@ program
   .command("serve", { hidden: true })
   .description("internal: foreground daemon for a supervisor (launchd) - owns tracker.pid; exits 0 if a healthy supervised tracker already runs")
   .action(async () => {
-    const config = requireConfig();
+    // Not `requireConfig`. This is the entry point a supervisor runs, and a supervisor
+    // reads a non-zero exit as a crash: under launchd's `KeepAlive { SuccessfulExit:
+    // false }` a logged-out machine would wake a credential-less daemon every 30 s,
+    // forever. "Nothing to do" is a clean exit. `logout` and `uninstall` remove the
+    // login entry as well, so this is the belt to that braces.
+    const config = readConfig();
+    if (!config) {
+      console.log(`Nothing to serve: no ${CONFIG_PATH_LABEL}. Run \`vibehub-tracker login <deviceToken>\` first.`);
+      return;
+    }
     await serveForeground(config, path.resolve(__filename));
   });
 

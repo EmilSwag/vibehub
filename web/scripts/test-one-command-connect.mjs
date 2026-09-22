@@ -168,7 +168,10 @@ async function staticTests() {
     check(sources.windows.includes('param([switch]$Start)'), 'Explicit -Start switch');
     check(sources.posix.includes('case "$arg" in --start)'), 'Explicit --start argument');
     for (const source of Object.values(sources)) {
-      check(!/ExecutionPolicy|SetEnvironmentVariable|schtasks|Register-ScheduledTask|LaunchAgents|launchctl|systemctl|crontab|\bnpm\s+install\b|winget|choco|sudo\s|Get-Process|Get-CimInstance|tasklist|wmic/i.test(source), 'No policy bypass/package manager/autostart/process enumeration');
+      // Scripts must not execute policy bypass, autostart, package managers, process enumeration, or environment mutations.
+      // Filter out purely advisory console output lines (e.g. manual PATH setup advice or cleanup tips).
+      const executableLines = source.split(/\r?\n/).filter(line => !/^\s*(?:Write-Host|printf)\b/.test(line)).join('\n');
+      check(!/ExecutionPolicy|SetEnvironmentVariable|schtasks|Register-ScheduledTask|LaunchAgents|launchctl|systemctl|crontab|\bnpm\s+install\b|winget|choco|\bsudo\s|Get-Process|Get-CimInstance|tasklist|wmic/i.test(executableLines), 'No policy bypass/package manager/autostart/process enumeration');
       check(!/nothing unrelated|no file contents|no prompts ever/i.test(source), 'No false privacy guarantee');
       check(!/window titles?|process names/i.test(source), 'No stale process/window-title collection claim (removed from the active detector)');
       check(source.includes('~/.claude/projects') && source.includes('~/.codex/sessions'), 'Disclosure names the exact supported AI log roots');

@@ -107,9 +107,10 @@ export function StepFriends({ onInvited, onBack, onNext }: Props) {
                     variant={done ? "ghost" : "secondary"}
                     className={[styles.inviteButton, done && "pop"].filter(Boolean).join(" ")}
                     onClick={() => invite(u)}
-                    disabled={done || busy}
+                    disabled={done}
+                    loading={busy}
                   >
-                    {done ? "Invited" : busy ? "…" : "Invite"}
+                    {done ? "Invited" : "Invite"}
                   </Button>
                 </li>
               );

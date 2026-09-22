@@ -72,24 +72,39 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- readme ---- */
+/* ---- readme ----
+ *
+ * The server hands over ~600 characters of the README as one collapsed paragraph
+ * (`stripMarkdown` flattens every newline), so this block is a single run of prose
+ * sitting in a card that is really about the file list below it. Two things keep it
+ * from taking over: a 66ch measure, and a four-line clamp with "Read on GitHub"
+ * carrying the rest. Prose, not chrome — no well, no second border, no heading that
+ * repeats what the link already says.
+ */
 
 .readme {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   padding-top: var(--vh-space-3);
   border-top: 1px solid var(--vh-border);
 }
 
 .readmeText {
   margin: 0;
-  max-width: 72ch;
+  max-width: 66ch;
   font-family: var(--vh-font-sans);
   font-size: 13.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--vh-text-dim);
+  /* A README opens with badge captions and install one-liners as often as with a
+     sentence, so an unbroken URL or package name must wrap rather than widen the card. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
 }
 
 .readmeLink {
@@ -99,9 +114,17 @@
   font-size: 13px;
   color: var(--vh-text-dim);
   text-decoration: none;
+  transition: color var(--dur-press) var(--ease-out);
 }
 .readmeLink:hover {
   color: var(--vh-text);
+  text-decoration: underline;
+  text-decoration-color: var(--vh-text-faint);
+  text-underline-offset: 3px;
+}
+/* The glyph is a flex item; without this a narrow card shrinks it instead of the label. */
+.readmeLink > svg {
+  flex: none;
 }
 
 /* ---- breadcrumb ---- */

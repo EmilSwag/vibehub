@@ -1,0 +1,26 @@
+/* Local copy of the rotation keyframe. CSS Modules hash animation names, so a module
+ * cannot reach a global @keyframes — see styles/motion.css header. */
+@keyframes vh-spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: currentColor;
+  /* One open quadrant is what makes the rotation readable. */
+  border-top-color: transparent;
+  border-radius: 50%;
+  opacity: 0.9;
+  animation: vh-spin 620ms linear infinite;
+}
+
+/* The blanket rule in motion.css already freezes this; naming it here keeps the
+ * resting frame deliberate — a three-quarter ring still reads as "working". */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

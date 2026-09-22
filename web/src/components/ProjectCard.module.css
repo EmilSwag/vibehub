@@ -256,11 +256,19 @@
   background: none;
 }
 
-.date {
-  margin-left: 4px;
+/* The card's one timestamp, above the name: "Updated 3d ago" — the repo's last push
+ * when there is a repo, else the day the post landed. Meta tier, so it sits under the
+ * title in the reading order without competing with it. */
+.updated {
+  /* It belongs to the title, so it hugs it rather than taking a full body gap. */
+  margin-bottom: -4px;
+  font-family: var(--vh-font-sans);
   font-size: 12px;
+  line-height: 16px;
   color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
 }
+
 .actions {
   margin-left: auto;
   display: inline-flex;

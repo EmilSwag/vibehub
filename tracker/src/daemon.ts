@@ -245,11 +245,19 @@ export async function stopDaemon(): Promise<void> {
   } else {
     console.log(`Tracker stopped (pid ${pid}).`);
   }
-  if (supervised) {
+  if (supervised && process.platform === "darwin") {
     // A KeepAlive supervisor treats this exit as a crash and relaunches `serve` after
     // its throttle interval. Say so, or the user watches it come back and blames `stop`.
     console.log("It was running under a supervisor (VibeHub app / launchd), which restarts it within about 30 s.");
     console.log("To keep it stopped: turn off Track at login in VibeHub, or run `launchctl bootout gui/$(id -u)/com.vibehub.tracker`.");
+  } else if (supervised) {
+    // Since autostart.ts, `serve` is also what a Windows Startup entry and a Linux XDG
+    // autostart entry run - and neither of those is a supervisor. Nothing brings it back
+    // now; the login entry brings it back at the next login. Saying "restarts it within
+    // about 30 s" here would be plainly false, and the user would go looking for a
+    // supervisor that does not exist on this machine.
+    console.log("It was started by the login entry, so nothing will restart it before your next login.");
+    console.log("To stop it coming back then as well: run `vibehub-tracker autostart disable`.");
   }
   removeFile(PID_PATH);
   clearStopRequest();

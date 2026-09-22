@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { projectsApi } from "../lib/api";
+import { updatedLabel } from "../lib/format";
+import { useProjectDigest } from "../lib/useProjectDigest";
 import type { Project, User } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Card } from "../components/ui/Card";
@@ -37,6 +39,10 @@ export function ProjectPage() {
   const [notFound, setNotFound] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
+  // Only for the header's "Updated …" line — the same cached digest the card reads,
+  // so opening a project from the feed costs no extra request. Called before the
+  // early returns below, and inert until `data` brings a GitHub repo URL.
+  const { digest } = useProjectDigest(id, data?.project.repoUrl ?? null);
 
   useEffect(() => {
     setData(null);
@@ -69,6 +75,7 @@ export function ProjectPage() {
         <div className={styles.owner}>
           <Skeleton variant="circle" width={26} />
           <Skeleton width={120} height={13} />
+          <Skeleton width={96} height={13} />
         </div>
         <Skeleton width={280} height={30} style={{ margin: "10px 0" }} />
         <SkeletonText lines={2} />
@@ -81,6 +88,9 @@ export function ProjectPage() {
   const { project, owner } = data;
   const isGithub = /^https?:\/\/(www\.)?github\.com\//i.test(project.repoUrl ?? "");
   const images = project.imageUrls.length ? project.imageUrls : project.coverImageUrl ? [project.coverImageUrl] : [];
+  // Reads off `createdAt` immediately and sharpens to the repo's last push when the
+  // digest arrives — the same line the card shows, so the two never disagree.
+  const updated = updatedLabel(digest?.pushedAt, project.createdAt);
 
   return (
     <div className="reveal">
@@ -96,6 +106,14 @@ export function ProjectPage() {
             {owner.displayName}
           </Link>
           <span className={styles.ownerHandle}>@{owner.username}</span>
+          {updated && (
+            <>
+              <span className={styles.metaSep} aria-hidden="true">
+                ·
+              </span>
+              <span className={styles.updated}>{updated}</span>
+            </>
+          )}
           {!project.isPublic && (
             <span className={styles.privateTag}>
               <Icon name="eyeOff" size={12} />

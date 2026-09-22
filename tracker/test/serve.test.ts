@@ -193,4 +193,30 @@ describe("serve (sandboxed daemon)", () => {
     assert.equal(await withTimeout(taker.exited, 20_000, () => `serve #3 to stop\n${taker.out()}${loopLog()}`), 0, taker.out());
     await waitUntil(() => !existsSync(PID_PATH), () => "tracker.pid to be removed", 5_000);
   });
+
+  it("tells the truth about what happens next when `stop` ends a supervised daemon", { timeout: 90_000 }, async () => {
+    // `serve` used to be reachable only from the Mac app's launchd job, so `stop` could
+    // say "a supervisor restarts it within about 30 s" unconditionally. Since autostart.ts
+    // a Windows Startup entry and a Linux XDG entry run `serve` too, and neither of those
+    // is a supervisor - nothing restarts it before the next login. The wrong sentence here
+    // sends the user hunting for a supervisor this machine does not have.
+    const supervised = serve("serve #4");
+    await waitUntil(() => readPidFile()?.pid === supervised.child.pid && readPidFile()?.mode === "serve",
+      () => `serve #4 to claim tracker.pid\n${supervised.out()}`, 30_000);
+
+    const stopper = run(["--import", "tsx", ENTRY, "stop"], "stop");
+    assert.equal(await withTimeout(stopper.exited, 30_000, () => `stop to finish\n${stopper.out()}`), 0, stopper.out());
+    await withTimeout(supervised.exited, 20_000, () => `serve #4 to honour stop\n${supervised.out()}${loopLog()}`);
+
+    const said = stopper.out();
+    assert.match(said, /Tracker stopped/);
+    if (process.platform === "darwin") {
+      assert.match(said, /restarts it within about 30 s/);
+      assert.match(said, /launchctl bootout/);
+    } else {
+      assert.match(said, /nothing will restart it before your next login/);
+      assert.match(said, /vibehub-tracker autostart disable/);
+      assert.equal(/launchctl|Track at login/.test(said), false, "macOS-only advice leaked onto this platform");
+    }
+  });
 });

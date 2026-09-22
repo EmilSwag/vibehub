@@ -133,8 +133,8 @@ export function StepIdentity({ user, onSaved, onNext }: Props) {
       )}
 
       <div className={[styles.actions, styles.actionsField].join(" ")}>
-        <Button type="submit" disabled={!valid || saving || uploading}>
-          {saving ? "Saving…" : "Continue"}
+        <Button type="submit" disabled={!valid || uploading} loading={saving}>
+          Continue
         </Button>
       </div>
     </form>

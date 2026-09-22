@@ -9,7 +9,6 @@ import { publicPresence } from "../lib/publicPresence";
 import type { ExternalLink, LevelBreakdown, PresenceStatus, Project, User, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
-import { ArchetypeGlyph, archetypeBlurb, archetypeLabel } from "../components/ui/ArchetypeGlyph";
 import { PresenceBlock } from "../components/ui/PresenceBlock";
 import { Icon } from "../components/ui/Icon";
 import { Card } from "../components/ui/Card";
@@ -24,6 +23,7 @@ import { RecentModels } from "../components/RecentModels";
 import type { ModelFocus } from "../components/RecentModels";
 import { ConnectSheet } from "../components/connect/ConnectSheet";
 import { SectionTitle } from "../components/ui/SectionTitle";
+import { ErrorState } from "../components/ui/ErrorState";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
 import { LevelBadge } from "../components/ui/LevelBadge";
 import { roleBlurb, roleTitle } from "../components/ui/RoleGlyph";
@@ -66,9 +66,14 @@ export function ProfilePage() {
   const [notFound, setNotFound] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
+  /** Projects and the wall load independently, so each owns its own failure — one
+   *  dead request must not blank the other block (skills/emil_design_eng §5). */
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [comments, setComments] = useState<WallCommentType[]>([]);
   const [wallLoading, setWallLoading] = useState(true);
+  const [wallFailed, setWallFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [newComment, setNewComment] = useState("");
   const [wallError, setWallError] = useState<string | null>(null);
@@ -93,9 +98,11 @@ export function ProfilePage() {
     setNotFound(false);
     setProjects([]);
     setProjectsLoading(true);
+    setProjectsFailed(false);
     setComments([]);
     setNextCursor(null);
     setWallLoading(true);
+    setWallFailed(false);
 
     usersApi
       .get(username)
@@ -109,7 +116,7 @@ export function ProfilePage() {
         setProjects(projects);
         setLikedIds(new Set(likedIds));
       })
-      .catch(() => undefined)
+      .catch(() => active && setProjectsFailed(true))
       .finally(() => active && setProjectsLoading(false));
 
     wallApi
@@ -119,13 +126,17 @@ export function ProfilePage() {
         setComments(comments);
         setNextCursor(nextCursor);
       })
-      .catch(() => undefined)
+      .catch(() => active && setWallFailed(true))
       .finally(() => active && setWallLoading(false));
 
     return () => {
       active = false;
     };
-  }, [username]);
+  }, [username, attempt]);
+
+  // Retry drops the failed block back to its skeleton. Both blocks refetch — the
+  // request that already succeeded is cheap, and one counter beats two.
+  const retry = () => setAttempt((n) => n + 1);
 
   useEffect(() => {
     return watchWall(username, (comment) => {
@@ -199,18 +210,12 @@ export function ProfilePage() {
             <>
               <div className={styles.nameRow}>
                 <h1 className={styles.displayName}>{profile.user.displayName}</h1>
-                {/* The badges say one word each; the tooltip says what that word
-                    means, which is the only thing round 8 changed up here. */}
+                {/* Each badge says one word; the tooltip says what that word means. */}
                 {profile.user.roles.map((r) => (
                   <Badge key={r} title={roleBlurb(r) ?? undefined}>
                     {roleTitle(r)}
                   </Badge>
                 ))}
-                {profile.user.archetype && (
-                  <Badge active title={archetypeBlurb(profile.user.archetype)}>
-                    <ArchetypeGlyph archetype={profile.user.archetype} /> {archetypeLabel(profile.user.archetype)}
-                  </Badge>
-                )}
               </div>
 
               <span className={styles.username}>@{profile.user.username}</span>
@@ -318,6 +323,8 @@ export function ProfilePage() {
               </Card>
             ))}
           </div>
+        ) : projectsFailed ? (
+          <ErrorState onRetry={retry}>Couldn't load projects.</ErrorState>
         ) : projects.length === 0 ? (
           <div className={styles.emptyBlock}>
             <p className={styles.empty}>{isSelf ? "No projects yet." : "No public projects yet."}</p>
@@ -360,8 +367,13 @@ export function ProfilePage() {
                   maxLength={1000}
                   rows={2}
                 />
-                <Button type="submit" className={styles.postBtn} disabled={posting || !newComment.trim()}>
-                  {posting ? "Posting…" : "Post"}
+                <Button
+                  type="submit"
+                  className={styles.postBtn}
+                  disabled={!newComment.trim()}
+                  loading={posting}
+                >
+                  Post
                 </Button>
               </div>
               {wallError && (
@@ -382,6 +394,8 @@ export function ProfilePage() {
               </div>
             ))}
           </div>
+        ) : wallFailed ? (
+          <ErrorState onRetry={retry}>Couldn't load the wall.</ErrorState>
         ) : comments.length === 0 ? (
           <p className={styles.empty}>No posts yet.</p>
         ) : (

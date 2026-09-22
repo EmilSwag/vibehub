@@ -1,11 +1,32 @@
 /*
  * TrackingStatus — the connected half of ConnectTools: what is connected and
  * whether it is tracking. One ui/Card, hairline dividers between sections, no
- * boxes inside boxes. Two text sizes: 15px title, 13px everything else. The live
- * green (--vh-live) paints the dot (StatusDot) and the "Connected" title,
- * nothing else. Enter/leave motion is the global .reveal/.leave utility applied
- * by the wrapper — nothing here names a motion.css keyframe (CSS Modules would
- * hash the reference and the animation would never play).
+ * boxes inside boxes: the tinted pieces inside it (the status pill, the error
+ * well) carry no border of their own, which is what keeps them wells rather than
+ * cards nested in a card.
+ *
+ * Layout: a section is a two-column grid — a fixed label rail, then the content —
+ * which is the shape the component's own doc comment has always drawn
+ * ("Today   1.2k tokens · 34m active"). The rail is what makes four unrelated
+ * blocks read as one card: every value starts at the same x. Under 560px it folds
+ * and each label sits above its content. Column 1 is the section's first child and
+ * column 2 is everything after it, by position rather than by class, so the
+ * skeleton lands in the same grid without having to borrow `.label`.
+ *
+ * Type: 15px status word, 13px everything else, and one deliberate exception for
+ * figures — the Today counter is 18px mono, because a number that ticks while you
+ * watch it is what the panel is for. Labels are the 12px uppercase micro-label
+ * ui/StatTile already uses, so a metric is labelled the same way in both places.
+ *
+ * The live green (--vh-live) paints three things and nothing else: the dot
+ * (StatusDot), the "Connected" word, and the soft tint behind the two in the
+ * status pill — the "live pill" tokens.css names as the sanctioned use of
+ * --vh-live-soft. The tint hangs off `data-live` on the Card, so the attribute the
+ * TSX has always set is the thing that turns it on.
+ *
+ * Enter/leave motion is the global .reveal/.leave utility applied by the wrapper —
+ * nothing here names a motion.css keyframe (CSS Modules would hash the reference
+ * and the animation would never play).
  */
 
 .panel {
@@ -16,37 +37,56 @@
   text-align: left;
 }
 
-/* ---- header ---- */
+/* ---- header ----
+ * A status badge, then the heartbeat under it. The dot used to sit outside the
+ * text and needed a hand-tuned 5px nudge to land on the title's line; inside the
+ * pill it is centred against the word by the pill itself and the nudge is gone. */
 
 .head {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   padding-bottom: 16px;
 }
 
+/* The one place the two live tokens meet: --vh-live on the word and the dot,
+ * --vh-live-soft behind them. Offline and idle get the neutral tint, so the badge
+ * is the same object in every state and only its lightness changes. */
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 7px;
+  max-width: 100%;
+  padding: 3px 12px 3px 10px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  transition: background var(--dur-state) var(--ease-out);
+}
+
+.panel[data-live] .statusPill,
+.strip[data-live] .statusPill {
+  background: var(--vh-live-soft);
+}
+
 .headDot {
-  margin-top: 5px;
+  flex: none;
 }
 
-.headText {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-/* The head's own gap is 3px — right for a title and its timestamp, too tight for a
+/* The head's own gap is right for a badge and its timestamp, a touch tight for a
    sentence that is a separate thought. */
 .headHint {
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .title {
   font-size: 15px;
   font-weight: 600;
+  line-height: 20px;
   letter-spacing: -0.01em;
+  white-space: nowrap;
   color: var(--vh-text);
   transition: color var(--dur-state) var(--ease-out);
 }
@@ -57,6 +97,7 @@
 
 .meta {
   font-size: 13px;
+  line-height: 18px;
   color: var(--vh-text-faint);
   font-variant-numeric: tabular-nums;
 }
@@ -64,16 +105,30 @@
 /* ---- sections ---- */
 
 .section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 0;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px 16px;
+  padding: 16px 0;
   border-top: 1px solid var(--vh-border);
 }
 
+.section > :first-child {
+  grid-column: 1;
+}
+
+.section > :not(:first-child) {
+  grid-column: 2;
+  min-width: 0;
+}
+
 .label {
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 20px;
   font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
   color: var(--vh-text-faint);
 }
 
@@ -91,15 +146,25 @@
   display: inline-flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 2px 10px;
   font-variant-numeric: tabular-nums;
+}
+
+/* A figure and its unit are one word. Without this the counter wrapped between
+ * "1.2k" and "tokens", which reads as two numbers rather than one. */
+.metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .counterValue {
   font-family: var(--vh-font-mono);
-  font-size: 17px;
-  line-height: 22px;
+  font-size: 18px;
+  line-height: 24px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--vh-text);
 }
 
@@ -115,22 +180,37 @@
   flex-direction: column;
 }
 
-/* "+N more" under a capped Models list on Home. A quiet text control, sized for a
- * thumb without adding a row's worth of height to the block. */
+/* "+N more" under a capped Models list on Home. A quiet text control that earns a
+ * thumb-sized target from its own padding, pulled back into the rail's x by the
+ * matching negative margin so the list's left edge stays straight. */
 .more {
-  align-self: flex-start;
-  padding: 8px 0;
-  margin-top: -2px;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  margin-left: -10px;
   background: none;
   border: 0;
+  border-radius: var(--vh-radius-pill);
   font-family: var(--vh-font-sans);
   font-size: 13px;
+  font-weight: 500;
   color: var(--vh-text-dim);
   cursor: pointer;
-  transition: color var(--dur-press) var(--ease-out);
+  transition:
+    background var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
 }
+
 .more:hover {
+  background: var(--vh-surface-2);
   color: var(--vh-text);
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
 }
 
 .row {
@@ -184,11 +264,17 @@
   color: var(--vh-text-faint);
 }
 
+/* The numbers column, and the floor the whole list aligns to: every row reserves the
+ * same 132px for its figures, so they form a straight edge down the block instead of
+ * stepping in and out with the length of each string. RecentModels' `.right` does the
+ * same thing for the same reason. */
 .rowRight {
   flex: none;
   display: inline-flex;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 6px;
+  min-width: 132px;
   white-space: nowrap;
   color: var(--vh-text-faint);
   font-variant-numeric: tabular-nums;
@@ -200,9 +286,10 @@
 }
 
 /* ---- strip ----
- * The one-line cut of the panel Home keeps after "Got it". Same dot, title and
- * counter sizes as above; details sit on the title's baseline row and the counter
- * hugs the right edge. Under 640px the right column drops under the text. */
+ * The one-line cut of the panel Home keeps after "Got it". Same badge, same word and
+ * same counter as above; details sit beside the badge and the counter hugs the right
+ * edge. Tighter padding than the panel because this is a status bar, not a block of
+ * content. Under 640px the right column drops under the text. */
 
 .strip {
   display: flex;
@@ -210,32 +297,29 @@
   gap: 12px;
   width: 100%;
   min-width: 0;
+  padding: 16px 20px;
   text-align: left;
   /* Wrap so the stale-token hint can take a row of its own. The row above is unchanged
      by this: .stripMain shrinks to nothing before anything wraps (flex:1, min-width:0),
-     so dot + main + right stay on one line exactly as they did under nowrap — the only
-     new behaviour is that a right column too wide for the container now drops to its own
+     so main + right stay on one line exactly as they did under nowrap — the only new
+     behaviour is that a right column too wide for the container now drops to its own
      line instead of overflowing it. */
   flex-wrap: wrap;
-  row-gap: 8px;
+  row-gap: 10px;
 }
 
-/* Aligned with the title, not the dot: 10px dot + 12px gap. */
+/* Its own row, flush with the badge above it. The old 22px indent paid for a dot that
+   sat outside the text; the badge carries the dot now, so there is nothing to clear. */
 .stripHint {
   flex-basis: 100%;
-  padding-left: 22px;
-}
-
-.stripDot {
-  flex: none;
 }
 
 .stripMain {
   flex: 1;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 6px 12px;
   min-width: 0;
 }
 
@@ -287,8 +371,8 @@
   white-space: nowrap;
 }
 
-/* The strip's row is baseline-aligned for its text; a button has no useful baseline,
- * so it centres itself instead of hanging below the line. */
+/* The strip's right column is baseline-aligned for its text; a button has no useful
+ * baseline, so it centres itself instead of hanging below the line. */
 .goOnline {
   align-self: center;
   flex: none;
@@ -297,7 +381,7 @@
 .stripCounter {
   display: inline-flex;
   align-items: baseline;
-  gap: 5px;
+  gap: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -306,32 +390,26 @@
   font-size: 14px;
   line-height: 20px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--vh-text);
 }
 
 @media (max-width: 640px) {
   .strip {
-    flex-wrap: wrap;
     align-items: flex-start;
-    row-gap: 8px;
-  }
-  /* Same offset as .headDot: the dot marks the title line, not the block's middle. */
-  .stripDot {
-    margin-top: 5px;
   }
   .stripMain {
-    flex-basis: calc(100% - 22px);
+    flex-basis: 100%;
   }
   .stripRight {
     flex-basis: 100%;
     justify-content: space-between;
-    padding-left: 22px;
     /* Its three children — the token counter, "Go online", "Tracker settings" — total
-       more than a phone's width once the 22px indent is taken off, and the container
-       defaulted to flex-wrap: nowrap, so they ran off the right edge and took the page
-       with them (measured at 390px: 39px past the card, 23px of horizontal page scroll).
-       Predates the round-10 hint — the same overflow is there with no hint rendered.
-       The children keep their own white-space: nowrap, so each label stays intact. */
+       more than a phone's width, and the container defaulted to flex-wrap: nowrap, so
+       they ran off the right edge and took the page with them (measured at 390px: 39px
+       past the card, 23px of horizontal page scroll). Predates the round-10 hint — the
+       same overflow is there with no hint rendered. The children keep their own
+       white-space: nowrap, so each label stays intact. */
     flex-wrap: wrap;
     row-gap: 8px;
   }
@@ -342,15 +420,19 @@
 .footer {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 14px;
+  gap: 14px;
+  padding-top: 16px;
   border-top: 1px solid var(--vh-border);
 }
 
+/* The one long paragraph in the card, and the only one that has to be read rather
+ * than scanned — it is capped to a readable measure instead of running the full
+ * width of a desktop card. */
 .privacy {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
+  max-width: 72ch;
+  font-size: 12.5px;
+  line-height: 1.55;
   color: var(--vh-text-faint);
 }
 
@@ -365,22 +447,42 @@
 .link {
   font-size: 13px;
   color: var(--vh-text-dim);
+  transition: color var(--dur-press) var(--ease-out);
 }
 
 .link:hover {
   color: var(--vh-text);
 }
 
+/* Inline, next to what failed, in a borderless tinted well — one border per block,
+ * so an error is not a card inside the card. */
 .error {
   margin: 0;
-  padding-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
   font-size: 13px;
+  line-height: 1.45;
   color: var(--vh-text);
+}
+
+@media (max-width: 560px) {
+  /* The label rail folds: a 84px column plus a 16px gutter is a quarter of a phone's
+     width, and every value in the card was paying for it. */
+  .section {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .section > :not(:first-child) {
+    grid-column: 1;
+  }
 }
 
 @media (max-width: 480px) {
   /* Source rows: tokens/last-seen drop under the tool line so the model name
-     keeps its full text instead of ellipsizing next to a wide right column. */
+     keeps its full text instead of ellipsizing next to a wide right column. The
+     numbers column gives up its floor with it — there is no second column left to
+     line up with. */
   .rowSource {
     flex-wrap: wrap;
     row-gap: 0;
@@ -388,6 +490,8 @@
   }
   .rowSource .rowRight {
     flex-basis: 100%;
+    justify-content: flex-start;
+    min-width: 0;
     padding-left: 20px;
   }
   .actions {

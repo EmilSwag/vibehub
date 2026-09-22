@@ -12,8 +12,7 @@ vibehub/
 ├── server/         Express + Prisma API + WebSocket (Postgres; SQLite in dev)
 ├── web/            React + Vite SPA, monochrome design system
 ├── tracker/        vibehub-tracker — the local CLI that sends heartbeats
-├── menubar-mac/    SwiftUI menu-bar app (reads the server)
-├── macos/          earlier companion that reads the tracker's local status.json
+├── mac/            Swift menu-bar app + Dynamic Island (reads the server)
 ├── scripts/        smoke.js and other end-to-end checks
 └── assets/         branding, screenshots
 ```
@@ -101,12 +100,12 @@ The server runs `prisma migrate deploy` on boot, so schema changes ship with
 `railway up`. Data lives in Postgres, avatars on the `/app/uploads` volume; both survive
 redeploys (`scripts/check-avatar-persistence.js` proves it).
 
-## macOS menu bar
+## macOS app
 
-[`menubar-mac/`](../menubar-mac/README.md) — SwiftUI, macOS 13+, no dependencies. Shows
+[`mac/`](../mac/README.md) — SwiftUI, macOS 13+, no external dependencies. Shows
 your presence, today's time and tokens, and which friends are online, using a tracker
-token from the Keychain. `swift run` to iterate, `./scripts/bundle.sh` for a signed
-`.app`; prebuilt zips come from the `menubar-mac` GitHub Actions workflow.
+token from the Keychain. `swift run` to iterate, `./scripts/make-pkg.sh` for a signed
+installer package; prebuilt PKGs come from the `mac` GitHub Actions workflow.
 
 ## Contributing
 

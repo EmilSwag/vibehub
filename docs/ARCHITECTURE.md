@@ -1252,7 +1252,7 @@ vibehub/
 │   └── src/hooks/             the Cursor/Windsurf hook producer (§4.7) — never loaded
 │                              by the daemon, and no collector module may import it
 ├── mac/                       Swift menu-bar app + Island (SwiftPM), was `macos/`
-├── assets/branding/           logo.png, icon.png, banner.png (done — see plans.vibehub-branding)
+├── assets/branding/           banner.png, social-preview.png, marks (see docs/DESIGN.md)
 ├── package.json                root npm workspaces (server, web, tracker)
 ├── docker-compose.yml          local Postgres for dev
 ├── .gitignore

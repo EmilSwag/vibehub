@@ -55,8 +55,8 @@ export function StepWelcome({ user, invited, busy, tracking, onEnter }: Props) {
       </ul>
 
       <div className={[styles.actions, styles.actionsCenter, "reveal"].join(" ")} style={{ animationDelay: "900ms" }}>
-        <Button type="button" onClick={onEnter} disabled={busy} autoFocus>
-          {busy ? "Opening…" : "Enter VibeHub"}
+        <Button type="button" onClick={onEnter} loading={busy} autoFocus>
+          Enter VibeHub
         </Button>
       </div>
     </div>

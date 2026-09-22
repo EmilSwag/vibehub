@@ -184,11 +184,16 @@ router.post(
  * A late 401 from GitHub itself — token looked in-date to us but GitHub rejected it
  * (revoked, app uninstalled, or a legacy row whose real expiry we never stored) —
  * is mapped here too, so this route never degrades into an opaque 500.
+ *
+ * `?refresh=1` (or `true`) bypasses the per-user repo cache for this one request —
+ * the "I just created that repo, look again" button. Anything else, including no
+ * query at all, keeps the cached path, so existing clients are unaffected.
  */
 router.get(
   "/users/me/github/repos",
   requireAuth,
   asyncHandler(async (req, res) => {
+    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
     let token: string | null;
     try {
       token = await getFreshGithubToken(req.user!);
@@ -199,7 +204,7 @@ router.get(
       throw err;
     }
     try {
-      const repos = await fetchOwnRepos(req.user!.id, token);
+      const repos = await fetchOwnRepos(req.user!.id, token, { refresh });
       res.json({ repos });
     } catch (err) {
       if (err instanceof NoGithubTokenError) {

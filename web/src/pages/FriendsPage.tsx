@@ -10,6 +10,7 @@ import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
 import { Input } from "../components/ui/Input";
 import { LevelBadge } from "../components/ui/LevelBadge";
+import { ErrorState } from "../components/ui/ErrorState";
 import { SkeletonRow } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { rolesLabel } from "../components/ui/RoleGlyph";
@@ -28,23 +29,34 @@ export function FriendsPage() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  /** A failed load is not an empty friend list — see skills/emil_design_eng §5. */
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const [query, setQuery] = useState("");
   const [people, setPeople] = useState<SuggestedUser[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [invited, setInvited] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  /** Accept and Decline sit on the same row and share `busy` — this says which one
+   *  is actually running, so only the pressed button spins. */
+  const [busyAction, setBusyAction] = useState<"accept" | "decline" | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
+    setFailed(false);
     Promise.all([friendsApi.list(), friendsApi.requests(), refreshRequests()])
       .then(([friendsRes, requestsRes]) => {
         setFriends(friendsRes.friends);
         setOutgoing(requestsRes.outgoing);
       })
+      .catch(() => setFailed(true))
       .finally(() => setLoading(false));
-  }, [refreshRequests]);
+  }, [refreshRequests, attempt]);
+
+  // Retry drops the list back to its skeleton, so recovery looks like a first load.
+  const retry = () => setAttempt((n) => n + 1);
 
   // People finder: debounced search; empty query = "people you may know".
   useEffect(() => {
@@ -87,6 +99,7 @@ export function FriendsPage() {
 
   async function accept(req: FriendRequest) {
     setBusy(req.id);
+    setBusyAction("accept");
     try {
       await friendsApi.acceptRequest(req.id);
       removeRequest(req.id);
@@ -96,24 +109,37 @@ export function FriendsPage() {
         title: `You and @${req.sender?.username ?? "them"} are now friends`,
         href: req.sender ? `/u/${req.sender.username}` : undefined,
       });
+    } catch (err) {
+      // Without this the row just stops responding and the rejection goes to the
+      // console — the user is told nothing (skills/emil_design_eng §5).
+      pushToast({ title: "Couldn't accept", body: err instanceof ApiError ? err.message : undefined });
     } finally {
       setBusy(null);
+      setBusyAction(null);
     }
   }
 
   async function decline(req: FriendRequest) {
     setBusy(req.id);
+    setBusyAction("decline");
     try {
       await friendsApi.declineRequest(req.id);
       removeRequest(req.id);
+    } catch (err) {
+      pushToast({ title: "Couldn't decline", body: err instanceof ApiError ? err.message : undefined });
     } finally {
       setBusy(null);
+      setBusyAction(null);
     }
   }
 
   async function unfriend(username: string) {
-    await friendsApi.unfriend(username);
-    setFriends((prev) => prev.filter((f) => f.user.username !== username));
+    try {
+      await friendsApi.unfriend(username);
+      setFriends((prev) => prev.filter((f) => f.user.username !== username));
+    } catch (err) {
+      pushToast({ title: "Couldn't unfriend", body: err instanceof ApiError ? err.message : undefined });
+    }
   }
 
   const pendingTo = new Set(outgoing.map((r) => r.receiver?.username).filter(Boolean));
@@ -147,10 +173,21 @@ export function FriendsPage() {
                     </span>
                   </Link>
                   <div className={styles.rowActions}>
-                    <Button size="sm" onClick={() => accept(req)} disabled={busy === req.id}>
+                    <Button
+                      size="sm"
+                      onClick={() => accept(req)}
+                      disabled={busy === req.id}
+                      loading={busy === req.id && busyAction === "accept"}
+                    >
                       Accept
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => decline(req)} disabled={busy === req.id}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => decline(req)}
+                      disabled={busy === req.id}
+                      loading={busy === req.id && busyAction === "decline"}
+                    >
                       Decline
                     </Button>
                   </div>
@@ -169,6 +206,10 @@ export function FriendsPage() {
           <Card className={cx(styles.card, styles.listCard)}>
             {loading ? (
               <FriendListItemSkeleton count={3} withAction />
+            ) : failed ? (
+              <ErrorState onRetry={retry} className={styles.empty}>
+                Couldn't load your friends.
+              </ErrorState>
             ) : friends.length === 0 ? (
               <button
                 type="button"
@@ -250,7 +291,8 @@ export function FriendsPage() {
                           size="sm"
                           variant={sent ? "ghost" : "secondary"}
                           onClick={() => invite(u.username)}
-                          disabled={sent || busy === u.username}
+                          disabled={sent}
+                          loading={busy === u.username}
                         >
                           {sent ? "Sent" : "Invite"}
                         </Button>

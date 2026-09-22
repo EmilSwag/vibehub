@@ -718,7 +718,7 @@ var require_suggestSimilar = __commonJS({
 // ../node_modules/commander/lib/command.js
 var require_command = __commonJS({
   "../node_modules/commander/lib/command.js"(exports2) {
-    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path6 = require("node:path"), fs9 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
+    var EventEmitter = require("node:events").EventEmitter, childProcess = require("node:child_process"), path7 = require("node:path"), fs10 = require("node:fs"), process2 = require("node:process"), { Argument: Argument2, humanReadableArgName } = require_argument(), { CommanderError: CommanderError2 } = require_error(), { Help: Help2 } = require_help(), { Option: Option2, DualOptions } = require_option(), { suggestSimilar } = require_suggestSimilar(), Command2 = class _Command extends EventEmitter {
       /**
        * Initialize a new `Command`.
        *
@@ -1430,11 +1430,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         args = args.slice();
         let launchWithNode = !1, sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          let localBin = path6.resolve(baseDir, baseName);
-          if (fs9.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path6.extname(baseName))) return;
+          let localBin = path7.resolve(baseDir, baseName);
+          if (fs10.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path7.extname(baseName))) return;
           let foundExt = sourceExt.find(
-            (ext) => fs9.existsSync(`${localBin}${ext}`)
+            (ext) => fs10.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
         }
@@ -1443,21 +1443,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs9.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs10.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path6.resolve(
-            path6.dirname(resolvedScriptPath),
+          executableDir = path7.resolve(
+            path7.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            let legacyName = path6.basename(
+            let legacyName = path7.basename(
               this._scriptPath,
-              path6.extname(this._scriptPath)
+              path7.extname(this._scriptPath)
             );
             legacyName !== this._name && (localFile = findFile(
               executableDir,
@@ -1466,7 +1466,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path6.extname(executableFile));
+        launchWithNode = sourceExt.includes(path7.extname(executableFile));
         let proc;
         process2.platform !== "win32" ? launchWithNode ? (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.argv[0], args, { stdio: "inherit" })) : proc = childProcess.spawn(executableFile, args, { stdio: "inherit" }) : (args.unshift(executableFile), args = incrementNodeInspectorPort(process2.execArgv).concat(args), proc = childProcess.spawn(process2.execPath, args, { stdio: "inherit" })), proc.killed || ["SIGUSR1", "SIGUSR2", "SIGTERM", "SIGINT", "SIGHUP"].forEach((signal) => {
           process2.on(signal, () => {
@@ -2094,7 +2094,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        return this._name = path6.basename(filename, path6.extname(filename)), this;
+        return this._name = path7.basename(filename, path7.extname(filename)), this;
       }
       /**
        * Get or set the directory for searching for executable subcommands of this command.
@@ -2107,8 +2107,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path7) {
-        return path7 === void 0 ? this._executableDir : (this._executableDir = path7, this);
+      executableDir(path8) {
+        return path8 === void 0 ? this._executableDir : (this._executableDir = path8, this);
       }
       /**
        * Return program help documentation.
@@ -2274,28 +2274,351 @@ var import_index = __toESM(require_commander(), 1), {
 } = import_index.default;
 
 // src/index.ts
-var path5 = __toESM(require("node:path"));
+var path6 = __toESM(require("node:path"));
+
+// src/autostart.ts
+var import_node_child_process = require("node:child_process"), import_node_crypto = require("node:crypto"), fs = __toESM(require("node:fs")), os = __toESM(require("node:os")), path = __toESM(require("node:path")), LAUNCH_AGENT_LABEL = "com.vibehub.tracker", AUTOSTART_MARK = "vibehub-tracker autostart v1 (managed by VibeHub; safe to delete)", MAX_AUTOSTART_BYTES = 64 * 1024, THROTTLE_INTERVAL_SECONDS = 30, AutostartError = class extends Error {
+};
+function hostEnv(scriptPath) {
+  return {
+    platform: process.platform,
+    home: os.homedir(),
+    execPath: process.execPath,
+    scriptPath,
+    appData: process.env.APPDATA,
+    configHome: process.env.XDG_CONFIG_HOME
+  };
+}
+function autostartFile(env) {
+  switch (env.platform) {
+    case "darwin":
+      return path.join(env.home, "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+    case "linux": {
+      let configHome = env.configHome && path.isAbsolute(env.configHome) ? env.configHome : path.join(env.home, ".config");
+      return path.join(configHome, "autostart", "vibehub-tracker.desktop");
+    }
+    case "win32": {
+      let appData = env.appData && path.isAbsolute(env.appData) ? env.appData : path.join(env.home, "AppData", "Roaming");
+      return path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "VibeHub Tracker.vbs");
+    }
+    default:
+      return null;
+  }
+}
+function autostartSupported(env) {
+  return autostartFile(env) !== null;
+}
+var shellQuote = (value) => /^[A-Za-z0-9_./\\:-]+$/.test(value) ? value : `"${value}"`;
+function autostartCommand(env) {
+  return `${shellQuote(env.execPath)} ${shellQuote(env.scriptPath)} serve`;
+}
+var xmlText = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function renderLaunchAgent(env) {
+  let log = path.join(env.home, ".vibehub", "launchd.log");
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    `<!-- ${AUTOSTART_MARK} -->`,
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>Label</key>",
+    `  <string>${xmlText(LAUNCH_AGENT_LABEL)}</string>`,
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    `    <string>${xmlText(env.execPath)}</string>`,
+    `    <string>${xmlText(env.scriptPath)}</string>`,
+    "    <string>serve</string>",
+    "  </array>",
+    "  <key>RunAtLoad</key>",
+    "  <true/>",
+    "  <key>KeepAlive</key>",
+    "  <dict>",
+    "    <key>SuccessfulExit</key>",
+    "    <false/>",
+    "  </dict>",
+    "  <key>ThrottleInterval</key>",
+    `  <integer>${THROTTLE_INTERVAL_SECONDS}</integer>`,
+    "  <key>ProcessType</key>",
+    "  <string>Background</string>",
+    "  <key>EnvironmentVariables</key>",
+    "  <dict>",
+    "    <key>HOME</key>",
+    `    <string>${xmlText(env.home)}</string>`,
+    "  </dict>",
+    "  <key>StandardOutPath</key>",
+    `  <string>${xmlText(log)}</string>`,
+    "  <key>StandardErrorPath</key>",
+    `  <string>${xmlText(log)}</string>`,
+    "</dict>",
+    "</plist>",
+    ""
+  ].join(`
+`);
+}
+var desktopArg = (value) => `"${value.replace(/["`$\\]/g, (c) => `\\${c}`)}"`;
+function renderDesktopEntry(env) {
+  return [
+    "[Desktop Entry]",
+    `# ${AUTOSTART_MARK}`,
+    "Type=Application",
+    "Version=1.0",
+    "Name=VibeHub Tracker",
+    "Comment=Sends AI-session metadata heartbeats. Delete this file to stop it starting at login.",
+    `Exec=${desktopArg(env.execPath)} ${desktopArg(env.scriptPath)} serve`,
+    "Terminal=false",
+    "NoDisplay=true",
+    "X-GNOME-Autostart-enabled=true",
+    "Hidden=false",
+    ""
+  ].join(`
+`);
+}
+function userProfileRelative(value, home) {
+  let root = home.replace(/[\\/]+$/, "");
+  return value.toLowerCase().startsWith(`${root.toLowerCase()}\\`) ? `%USERPROFILE%${value.slice(root.length)}` : value;
+}
+function renderStartupScript(env) {
+  for (let value of [env.execPath, env.scriptPath])
+    if (value.includes('"'))
+      throw new AutostartError(`The tracker path contains a quote character, which no Windows shell can quote safely (${value}).`);
+  let node = userProfileRelative(env.execPath, env.home), script = userProfileRelative(env.scriptPath, env.home);
+  return [
+    `' ${AUTOSTART_MARK}`,
+    "' Starts the VibeHub tracker at login with no console window.",
+    "' To stop it: run `vibehub-tracker autostart disable`, or just delete this file.",
+    "Option Explicit",
+    "Dim shell, node, script",
+    'Set shell = CreateObject("WScript.Shell")',
+    `node = shell.ExpandEnvironmentStrings("${node}")`,
+    `script = shell.ExpandEnvironmentStrings("${script}")`,
+    // 0 = hidden window, False = do not wait for it. `serve` runs until it is stopped.
+    'shell.Run """" & node & """ """ & script & """ serve", 0, False',
+    ""
+  ].join(`\r
+`);
+}
+function renderAutostart(env) {
+  let file = autostartFile(env);
+  if (file === null) return null;
+  switch (env.platform) {
+    case "darwin":
+      return { file, text: renderLaunchAgent(env), encoding: "utf8" };
+    case "linux":
+      return { file, text: renderDesktopEntry(env), encoding: "utf8" };
+    default: {
+      let text = renderStartupScript(env);
+      return { file, text, encoding: /[^\x00-\x7F]/.test(text) ? "utf16le" : "utf8" };
+    }
+  }
+}
+function encodeAutostart(rendered) {
+  return rendered.encoding === "utf8" ? Buffer.from(rendered.text, "utf8") : Buffer.concat([Buffer.from([255, 254]), Buffer.from(rendered.text, "utf16le")]);
+}
+function decodeAutostart(raw) {
+  return raw.length >= 2 && raw[0] === 255 && raw[1] === 254 ? raw.subarray(2).toString("utf16le") : raw.toString("utf8");
+}
+function readArtifact(file) {
+  let fd;
+  try {
+    let stats = fs.lstatSync(file);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1)
+      throw new AutostartError(`${file} is not a regular file. Move it aside and retry.`);
+    if (stats.size > MAX_AUTOSTART_BYTES)
+      throw new AutostartError(`${file} is unexpectedly large (${stats.size} bytes); refusing to rewrite it.`);
+    return fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0)), decodeAutostart(fs.readFileSync(fd));
+  } catch (error) {
+    if (error instanceof AutostartError) throw error;
+    if (error.code === "ENOENT") return null;
+    throw new AutostartError(`${file} could not be read (${error.code ?? "unknown error"}).`);
+  } finally {
+    if (fd !== void 0)
+      try {
+        fs.closeSync(fd);
+      } catch {
+      }
+  }
+}
+function namesThisInstall(body, env) {
+  if (env.platform === "win32") {
+    let home = env.home.replace(/[\\/]+$/, "");
+    return body.replace(/%USERPROFILE%/gi, home).toLowerCase().includes(env.scriptPath.toLowerCase());
+  }
+  return env.platform === "linux" ? body.includes(env.scriptPath) || body.replace(/\\(.)/g, "$1").includes(env.scriptPath) : body.includes(env.scriptPath);
+}
+function classifyOwner(body, env) {
+  return namesThisInstall(body, env) ? "ours" : env.platform === "darwin" ? /vibehub/i.test(body) ? "other-install" : "foreign" : body.includes(AUTOSTART_MARK) ? "other-install" : "foreign";
+}
+function describeInstall(body) {
+  let line = body.split(/\r?\n/).find((entry) => /vibehub-tracker\.cjs|index\.js/.test(entry));
+  return line === void 0 ? "path unknown" : line.replace(/<\/?string>/g, "").replace(/^\s*Exec=/, "").trim().slice(0, 160);
+}
+function planFor(mode, env) {
+  let base = {
+    mode,
+    env,
+    file: null,
+    content: null,
+    encoding: "utf8",
+    existed: !1,
+    owner: "none",
+    changed: !1
+  }, rendered = renderAutostart(env);
+  if (rendered === null)
+    return {
+      ...base,
+      supported: !1,
+      blocked: `VibeHub has no autostart mechanism for ${env.platform}. Start the tracker yourself after a reboot.`
+    };
+  let current = readArtifact(rendered.file), existed = current !== null, owner = existed ? classifyOwner(current, env) : "none", refuse = (blocked) => ({ ...base, supported: !0, file: rendered.file, existed, owner, blocked });
+  if (owner === "foreign")
+    return refuse(`${rendered.file} was not written by VibeHub. Leaving it alone - move it aside if you want autostart here.`);
+  if (owner === "other-install") {
+    let body = current ?? "";
+    if (env.platform === "darwin" && (!body.includes(AUTOSTART_MARK) || /\.app[\\/]Contents[\\/]/i.test(body)))
+      return refuse(`${rendered.file} belongs to the VibeHub app. Leaving it alone; turn "Track at login" on or off from there.`);
+    if (mode === "disable")
+      return refuse(`${rendered.file} points at a VibeHub tracker installed elsewhere (${describeInstall(body)}). Leaving it alone; disable it from that install.`);
+  }
+  return mode === "disable" ? { ...base, supported: !0, file: rendered.file, existed, owner, changed: existed, blocked: null } : {
+    ...base,
+    supported: !0,
+    file: rendered.file,
+    content: rendered.text,
+    encoding: rendered.encoding,
+    existed,
+    owner,
+    changed: current !== rendered.text,
+    blocked: null
+  };
+}
+function planAutostartEnable(env) {
+  return planFor("enable", env);
+}
+function planAutostartDisable(env) {
+  return planFor("disable", env);
+}
+function replaceFile(target, contents) {
+  let temporary = path.join(path.dirname(target), `.vibehub-autostart.${(0, import_node_crypto.randomUUID)()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, contents, { mode: 384, flag: "wx" });
+    try {
+      fs.renameSync(temporary, target);
+    } catch (error) {
+      let code = error.code;
+      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw error;
+      fs.writeFileSync(target, contents, { mode: 384 });
+    }
+  } finally {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+    }
+  }
+}
+var runLaunchctl = (file, args) => {
+  let result = (0, import_node_child_process.spawnSync)(file, args, { encoding: "utf8", timeout: 2e4, windowsHide: !0 }), output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  return { ok: result.status === 0, detail: output || result.error?.message || "" };
+};
+function applyAutostartPlan(plan, options = {}) {
+  let runner = options.runner ?? runLaunchctl, result = { plan, wrote: !1, removed: !1, activation: "not-needed", detail: null };
+  if (plan.blocked !== null || !plan.supported || plan.file === null) return result;
+  let darwin = plan.env.platform === "darwin", domain = `gui/${process.getuid?.() ?? 0}`;
+  if (plan.mode === "disable") {
+    if (darwin && plan.existed && runner("/bin/launchctl", ["bootout", `${domain}/${LAUNCH_AGENT_LABEL}`]), plan.existed)
+      try {
+        fs.unlinkSync(plan.file), result.removed = !0;
+      } catch (error) {
+        if (error.code !== "ENOENT")
+          throw new AutostartError(`${plan.file} could not be removed (${error.code ?? "unknown error"}).`);
+      }
+    return result;
+  }
+  if (plan.changed && (fs.mkdirSync(path.dirname(plan.file), { recursive: !0 }), replaceFile(plan.file, encodeAutostart({ file: plan.file, text: plan.content ?? "", encoding: plan.encoding })), result.wrote = !0), !darwin) return result;
+  runner("/bin/launchctl", ["bootout", `${domain}/${LAUNCH_AGENT_LABEL}`]);
+  let bootstrap = runner("/bin/launchctl", ["bootstrap", domain, plan.file]);
+  if (!bootstrap.ok) {
+    if (result.wrote)
+      try {
+        fs.unlinkSync(plan.file);
+      } catch {
+      }
+    return { ...result, wrote: !1, activation: "failed", detail: bootstrap.detail || "launchctl bootstrap failed" };
+  }
+  return options.activate && runner("/bin/launchctl", ["kickstart", "-k", `${domain}/${LAUNCH_AGENT_LABEL}`]), { ...result, activation: "loaded" };
+}
+function autostartStatus(env, optedOut) {
+  let base = {
+    supported: autostartSupported(env),
+    platform: env.platform,
+    file: autostartFile(env),
+    exists: !1,
+    owner: "none",
+    current: !1,
+    optedOut,
+    command: autostartCommand(env),
+    problem: null
+  }, rendered = (() => {
+    try {
+      return renderAutostart(env);
+    } catch {
+      return null;
+    }
+  })();
+  if (rendered === null) return base;
+  try {
+    let body = readArtifact(rendered.file);
+    return body === null ? base : { ...base, exists: !0, owner: classifyOwner(body, env), current: body === rendered.text };
+  } catch (error) {
+    return { ...base, exists: !0, problem: error instanceof Error ? error.message : "unreadable" };
+  }
+}
+function ensureAutostart(env, optedOut, options = {}) {
+  if (optedOut) return { outcome: "opted-out", file: autostartFile(env), detail: null };
+  let plan;
+  try {
+    plan = planAutostartEnable(env);
+  } catch (error) {
+    return { outcome: "failed", file: autostartFile(env), detail: error instanceof Error ? error.message : "could not be registered" };
+  }
+  if (!plan.supported) return { outcome: "unsupported", file: null, detail: plan.blocked };
+  if (plan.blocked !== null) return { outcome: "blocked", file: plan.file, detail: plan.blocked };
+  if (!plan.changed) return { outcome: "already", file: plan.file, detail: null };
+  try {
+    let applied = applyAutostartPlan(plan, { runner: options.runner, activate: !1 });
+    return applied.activation === "failed" ? { outcome: "failed", file: plan.file, detail: applied.detail } : { outcome: "registered", file: plan.file, detail: null };
+  } catch (error) {
+    return { outcome: "failed", file: plan.file, detail: error instanceof Error ? error.message : "could not be registered" };
+  }
+}
+function removeAutostartQuietly(env, options = {}) {
+  try {
+    let plan = planAutostartDisable(env);
+    return plan.blocked !== null || !plan.changed ? null : applyAutostartPlan(plan, { runner: options.runner }).removed ? plan.file : null;
+  } catch {
+    return null;
+  }
+}
 
 // src/config.ts
-var import_node_crypto2 = require("node:crypto");
+var import_node_crypto3 = require("node:crypto");
 
 // src/paths.ts
-var os = __toESM(require("node:os")), path = __toESM(require("node:path")), fs = __toESM(require("node:fs")), import_node_crypto = require("node:crypto"), CONFIG_DIR = path.join(os.homedir(), ".vibehub"), CONFIG_PATH = path.join(CONFIG_DIR, "config.json"), STATUS_PATH = path.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path.join(CONFIG_DIR, "queue.json"), PID_PATH = path.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path.join(CONFIG_DIR, "stop.request"), ATTESTED_PATH = path.join(CONFIG_DIR, "attested.jsonl"), JSON_PATHS = /* @__PURE__ */ new Set([CONFIG_PATH, STATUS_PATH, PID_PATH, STOP_REQUEST_PATH]), MAX_STATE_BYTES = 64 * 1024, normalized = (p) => process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p);
+var os2 = __toESM(require("node:os")), path2 = __toESM(require("node:path")), fs2 = __toESM(require("node:fs")), import_node_crypto2 = require("node:crypto"), CONFIG_DIR = path2.join(os2.homedir(), ".vibehub"), CONFIG_PATH = path2.join(CONFIG_DIR, "config.json"), STATUS_PATH = path2.join(CONFIG_DIR, "status.json"), QUEUE_PATH = path2.join(CONFIG_DIR, "queue.json"), PID_PATH = path2.join(CONFIG_DIR, "tracker.pid"), LOG_PATH = path2.join(CONFIG_DIR, "daemon.log"), STOP_REQUEST_PATH = path2.join(CONFIG_DIR, "stop.request"), ATTESTED_PATH = path2.join(CONFIG_DIR, "attested.jsonl"), JSON_PATHS = /* @__PURE__ */ new Set([CONFIG_PATH, STATUS_PATH, PID_PATH, STOP_REQUEST_PATH]), MAX_STATE_BYTES = 64 * 1024, normalized = (p) => process.platform === "win32" ? path2.resolve(p).toLowerCase() : path2.resolve(p);
 function configDirSafe() {
   return safeDirectory();
 }
 function safeDirectory() {
   try {
-    let s = fs.lstatSync(CONFIG_DIR);
-    return s.isDirectory() && !s.isSymbolicLink() && normalized(fs.realpathSync(CONFIG_DIR)) === normalized(CONFIG_DIR);
+    let s = fs2.lstatSync(CONFIG_DIR);
+    return s.isDirectory() && !s.isSymbolicLink() && normalized(fs2.realpathSync(CONFIG_DIR)) === normalized(CONFIG_DIR);
   } catch {
     return !1;
   }
 }
 function ensureConfigDir() {
-  if (fs.mkdirSync(CONFIG_DIR, { recursive: !0, mode: 448 }), !safeDirectory()) throw new Error("Tracker state directory is unavailable.");
+  if (fs2.mkdirSync(CONFIG_DIR, { recursive: !0, mode: 448 }), !safeDirectory()) throw new Error("Tracker state directory is unavailable.");
   try {
-    fs.chmodSync(CONFIG_DIR, 448);
+    fs2.chmodSync(CONFIG_DIR, 448);
   } catch {
   }
 }
@@ -2305,17 +2628,17 @@ function writeJsonAtomic(filePath, data) {
   if (Buffer.byteLength(raw) > MAX_STATE_BYTES) throw new Error("Tracker state exceeds its bound.");
   ensureConfigDir();
   try {
-    let s = fs.lstatSync(filePath);
+    let s = fs2.lstatSync(filePath);
     if (!s.isFile() || s.isSymbolicLink() || s.nlink !== 1) throw new Error("Tracker state file is unavailable.");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  let temporary = path.join(CONFIG_DIR, `.${path.basename(filePath)}.${(0, import_node_crypto.randomUUID)()}.tmp`);
+  let temporary = path2.join(CONFIG_DIR, `.${path2.basename(filePath)}.${(0, import_node_crypto2.randomUUID)()}.tmp`);
   try {
-    fs.writeFileSync(temporary, raw, { mode: 384, flag: "wx" }), fs.renameSync(temporary, filePath);
+    fs2.writeFileSync(temporary, raw, { mode: 384, flag: "wx" }), fs2.renameSync(temporary, filePath);
   } finally {
     try {
-      fs.unlinkSync(temporary);
+      fs2.unlinkSync(temporary);
     } catch {
     }
   }
@@ -2323,7 +2646,7 @@ function writeJsonAtomic(filePath, data) {
 function removeFile(filePath) {
   if (!(!JSON_PATHS.has(filePath) || !safeDirectory()))
     try {
-      fs.unlinkSync(filePath);
+      fs2.unlinkSync(filePath);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -2332,19 +2655,19 @@ function readJson(filePath) {
   let fd;
   try {
     if (!JSON_PATHS.has(filePath) || !safeDirectory()) return null;
-    let before = fs.lstatSync(filePath);
+    let before = fs2.lstatSync(filePath);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > MAX_STATE_BYTES) return null;
-    fd = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-    let opened = fs.fstatSync(fd);
+    fd = fs2.openSync(filePath, fs2.constants.O_RDONLY | (fs2.constants.O_NOFOLLOW ?? 0));
+    let opened = fs2.fstatSync(fd);
     if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > MAX_STATE_BYTES || !safeDirectory()) return null;
-    let buffer = Buffer.alloc(opened.size + 1), bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    let buffer = Buffer.alloc(opened.size + 1), bytes = fs2.readSync(fd, buffer, 0, buffer.length, 0);
     return bytes !== opened.size ? null : JSON.parse(buffer.subarray(0, bytes).toString("utf8"));
   } catch {
     return null;
   } finally {
     if (fd !== void 0)
       try {
-        fs.closeSync(fd);
+        fs2.closeSync(fd);
       } catch {
       }
   }
@@ -2506,6 +2829,14 @@ function projectAttestedMetadata(value) {
   }
   return { enabled: a.enabled, tools };
 }
+function projectAutostart(value) {
+  if (value === void 0) return null;
+  let a = objectRecord(value);
+  return !a || typeof a.enabled != "boolean" || Object.keys(a).length !== 1 ? "invalid" : { enabled: a.enabled };
+}
+function autostartOptedOut(config) {
+  return config?.autostart?.enabled === !1;
+}
 function attestedToolsFor(config) {
   let a = config.attestedMetadata;
   return a?.enabled ? [...a.tools] : [];
@@ -2526,17 +2857,24 @@ function projectConfig(value) {
     if (n !== void 0 && (typeof n != "number" || !Number.isSafeInteger(n) || n < 1 || n > 864e5)) return null;
   }
   let attested2 = projectAttestedMetadata(c.attestedMetadata);
-  return attested2 === "invalid" ? null : {
+  if (attested2 === "invalid") return null;
+  let autostart2 = projectAutostart(c.autostart);
+  return autostart2 === "invalid" ? null : {
     apiUrl,
     deviceToken: c.deviceToken,
     projectAliases,
     ...c.heartbeatIntervalMs !== void 0 ? { heartbeatIntervalMs: c.heartbeatIntervalMs } : {},
     ...c.idleThresholdMs !== void 0 ? { idleThresholdMs: c.idleThresholdMs } : {},
-    ...attested2 ? { attestedMetadata: attested2 } : {}
+    ...attested2 ? { attestedMetadata: attested2 } : {},
+    ...autostart2 ? { autostart: autostart2 } : {}
   };
 }
+function setAutostartPreference(config, enabled) {
+  let next = { ...config, autostart: { enabled } };
+  return writeConfig(next), next;
+}
 function configFingerprint(config) {
-  return (0, import_node_crypto2.createHash)("sha256").update(JSON.stringify({
+  return (0, import_node_crypto3.createHash)("sha256").update(JSON.stringify({
     apiUrl: config.apiUrl,
     deviceToken: config.deviceToken,
     aliases: Object.entries(config.projectAliases).sort(([a], [b]) => a.localeCompare(b)),
@@ -2569,10 +2907,10 @@ function idleThresholdMs(config) {
 }
 
 // src/daemon.ts
-var import_node_child_process = require("node:child_process"), import_node_console = require("node:console"), fs6 = __toESM(require("node:fs"));
+var import_node_child_process2 = require("node:child_process"), import_node_console = require("node:console"), fs7 = __toESM(require("node:fs"));
 
 // src/adapters/attested.ts
-var import_node_fs = __toESM(require("node:fs")), import_node_crypto3 = require("node:crypto"), import_node_util = require("node:util");
+var import_node_fs = __toESM(require("node:fs")), import_node_crypto4 = require("node:crypto"), import_node_util = require("node:util");
 var ATTESTED_RECORD_VERSION = 1, MAX_ATTESTED_FILE_BYTES = 32 * 1024 * 1024, MAX_ATTESTED_CHUNK_BYTES = 1024 * 1024, MAX_ATTESTED_LINE_BYTES = 64 * 1024, MAX_ATTESTED_RECORDS_PER_POLL = 128, MAX_SEEN_DIGESTS = 4096, utf8 = new import_node_util.TextDecoder("utf-8", { fatal: !0 }), regularFile = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_ATTESTED_FILE_BYTES), samePath = (a, b) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b, AttestedTailer = class {
   cursor = null;
   clear() {
@@ -2695,14 +3033,14 @@ var AttestedMetadataAdapter = class {
     return this.tailer.readNewLines((record) => {
       let observation = projectAttestedRecord(record, now, this.activeWindowMs, this.tools);
       if (!observation) return;
-      let digest = (0, import_node_crypto3.createHash)("sha256").update(`${observation.tool}\0${record.recordId}`).digest("hex");
+      let digest = (0, import_node_crypto4.createHash)("sha256").update(`${observation.tool}\0${record.recordId}`).digest("hex");
       this.seen.has(digest) || (this.seen.size >= MAX_SEEN_DIGESTS && this.seen.delete(this.seen.values().next().value), this.seen.add(digest), observations.push(observation));
     }, signal), signal?.aborted ? [] : observations;
   }
 };
 
 // src/adapters/claudeCode.ts
-var import_node_crypto4 = require("node:crypto");
+var import_node_crypto5 = require("node:crypto");
 
 // src/adapters/jsonlTail.ts
 var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util2 = require("node:util"), MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 256, MAX_FILE_BYTES = 256 * 1024 * 1024, utf82 = new import_node_util2.TextDecoder("utf-8", { fatal: !0 }), samePath2 = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile2 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
@@ -2917,7 +3255,7 @@ var ClaudeCodeAdapter = class {
         if (!isCount(input)) return;
         let projectHint = folderFromCwd(line.cwd);
         if (!projectHint || (meta?.generation === generation && meta.projectHint !== projectHint && (meta.invalidProject = !0), meta?.generation === generation && meta.invalidProject)) return;
-        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto4.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
+        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto5.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
         if (previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output)) return;
         let inputDelta = input - (previous?.input ?? 0), outputDelta = output - (previous?.output ?? 0);
         if (!(!(inputDelta || outputDelta) || !usage.add(model, inputDelta, outputDelta))) {
@@ -3016,7 +3354,7 @@ var emptyMeta = (generation) => ({
 };
 
 // src/adapters/quadcode.ts
-var import_node_fs3 = __toESM(require("node:fs")), import_node_os2 = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path")), import_node_crypto5 = require("node:crypto"), import_node_util3 = require("node:util");
+var import_node_fs3 = __toESM(require("node:fs")), import_node_os2 = __toESM(require("node:os")), import_node_path2 = __toESM(require("node:path")), import_node_crypto6 = require("node:crypto"), import_node_util3 = require("node:util");
 var MAX_QUADCODE_FILES = 64, MAX_QUADCODE_DIRECTORY_ENTRIES = 2048, MAX_QUADCODE_CHUNK_BYTES = 4 * 1024 * 1024, MAX_QUADCODE_LINE_BYTES = 1024 * 1024, MAX_QUADCODE_RECORDS_PER_FILE = 256, MAX_QUADCODE_FILE_BYTES = 256 * 1024 * 1024, MAX_SEEN_FINGERPRINTS = 4096, utf83 = new import_node_util3.TextDecoder("utf-8", { fatal: !0 }), samePath3 = (a, b) => process.platform === "win32" ? import_node_path2.default.resolve(a).toLowerCase() === import_node_path2.default.resolve(b).toLowerCase() : import_node_path2.default.resolve(a) === import_node_path2.default.resolve(b), regularFile3 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_QUADCODE_FILE_BYTES);
 function withinHome(home, dir) {
   let a = process.platform === "win32" ? import_node_path2.default.resolve(home).toLowerCase() : import_node_path2.default.resolve(home), b = process.platform === "win32" ? import_node_path2.default.resolve(dir).toLowerCase() : import_node_path2.default.resolve(dir), rel = import_node_path2.default.relative(a, b);
@@ -3224,7 +3562,7 @@ var QuadcodeAdapter = class {
    * exists to make a re-prime or a double read idempotent, not to identify a turn.
    */
   fingerprint(file, project, turn) {
-    return (0, import_node_crypto5.createHash)("sha256").update(`${project ?? ""}\0${import_node_path2.default.basename(file)}\0${turn.startedAt}\0${turn.model ?? ""}\0${turn.variation}`).digest("hex");
+    return (0, import_node_crypto6.createHash)("sha256").update(`${project ?? ""}\0${import_node_path2.default.basename(file)}\0${turn.startedAt}\0${turn.model ?? ""}\0${turn.variation}`).digest("hex");
   }
   async poll(now = Date.now(), signal) {
     if (signal?.aborted) return [];
@@ -3473,12 +3811,12 @@ function markAuthRejected(rejected) {
 }
 
 // src/stopRequest.ts
-var fs5 = __toESM(require("node:fs"));
+var fs6 = __toESM(require("node:fs"));
 function requestStop() {
   writeJsonAtomic(STOP_REQUEST_PATH, { requestedAt: (/* @__PURE__ */ new Date()).toISOString(), byPid: process.pid });
 }
 function isStopRequested() {
-  return fs5.existsSync(STOP_REQUEST_PATH);
+  return fs6.existsSync(STOP_REQUEST_PATH);
 }
 function clearStopRequest() {
   removeFile(STOP_REQUEST_PATH);
@@ -3769,15 +4107,15 @@ function daemonStatus() {
 }
 function fileMtimeMs(filePath) {
   try {
-    return fs6.statSync(filePath).mtimeMs;
+    return fs7.statSync(filePath).mtimeMs;
   } catch {
     return null;
   }
 }
-function staleDaemonInputs(entryPath) {
+function staleDaemonInputs(entryPath2) {
   let startedAt = readJson(PID_PATH)?.startedAt, startedAtMs = startedAt ? Date.parse(startedAt) : Number.NaN;
   return {
-    binMtimeMs: fileMtimeMs(entryPath),
+    binMtimeMs: fileMtimeMs(entryPath2),
     startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : null,
     configMtimeMs: fileMtimeMs(CONFIG_PATH),
     authRejected: readStatus().authRejected === !0
@@ -3786,10 +4124,10 @@ function staleDaemonInputs(entryPath) {
 function reportAlreadyRunning(pid) {
   console.log(`Tracker is already running (pid ${pid}).`), readStatus().authRejected === !0 && (console.log("Connected: no - the server rejects its token."), console.log("  Fix: run the install command from VibeHub (Settings > Tracker) again, then `start`."));
 }
-async function startDaemon(entryPath) {
+async function startDaemon(entryPath2) {
   let existing = daemonStatus();
   if (existing.running) {
-    let stale = isStaleDaemon(staleDaemonInputs(entryPath));
+    let stale = isStaleDaemon(staleDaemonInputs(entryPath2));
     if (!stale) {
       reportAlreadyRunning(existing.pid);
       return;
@@ -3802,25 +4140,25 @@ async function startDaemon(entryPath) {
     }
   }
   ensureConfigDir(), clearStopRequest();
-  let pid = process.platform === "win32" ? spawnDetachedWindows(entryPath) : null;
-  if (pid === null && (pid = spawnDetachedDirect(entryPath)), pid === null) {
+  let pid = process.platform === "win32" ? spawnDetachedWindows(entryPath2) : null;
+  if (pid === null && (pid = spawnDetachedDirect(entryPath2)), pid === null) {
     console.error("Failed to start tracker daemon.");
     return;
   }
   writeJsonAtomic(PID_PATH, { pid, startedAt: (/* @__PURE__ */ new Date()).toISOString() }), console.log(`Tracker started (pid ${pid}). Logs: ${LOG_PATH}`);
 }
-function spawnDetachedDirect(entryPath) {
-  let logFd = fs6.openSync(LOG_PATH, "a"), child = (0, import_node_child_process.spawn)(process.execPath, [entryPath, "run-loop"], {
+function spawnDetachedDirect(entryPath2) {
+  let logFd = fs7.openSync(LOG_PATH, "a"), child = (0, import_node_child_process2.spawn)(process.execPath, [entryPath2, "run-loop"], {
     detached: !0,
     stdio: ["ignore", logFd, logFd],
     windowsHide: !0
   });
   return child.unref(), child.pid ?? null;
 }
-function spawnDetachedWindows(entryPath) {
-  let psQuote = (s) => `'${s.replace(/'/g, "''")}'`, script = `$p = Start-Process -FilePath ${psQuote(process.execPath)} -ArgumentList @(${psQuote(`"${entryPath}"`)}, 'run-loop') -WindowStyle Hidden -PassThru; $p.Id`;
+function spawnDetachedWindows(entryPath2) {
+  let psQuote = (s) => `'${s.replace(/'/g, "''")}'`, script = `$p = Start-Process -FilePath ${psQuote(process.execPath)} -ArgumentList @(${psQuote(`"${entryPath2}"`)}, 'run-loop') -WindowStyle Hidden -PassThru; $p.Id`;
   try {
-    let result = (0, import_node_child_process.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    let result = (0, import_node_child_process2.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
       windowsHide: !0,
       timeout: 2e4
@@ -3832,7 +4170,7 @@ function spawnDetachedWindows(entryPath) {
 }
 function redirectConsoleToLog() {
   ensureConfigDir();
-  let out = fs6.createWriteStream(LOG_PATH, { flags: "a" });
+  let out = fs7.createWriteStream(LOG_PATH, { flags: "a" });
   globalThis.console = new import_node_console.Console({ stdout: out, stderr: out });
 }
 async function endLingeringSession() {
@@ -3869,7 +4207,7 @@ async function stopDaemon() {
     }
   else
     console.log(`Tracker stopped (pid ${pid}).`);
-  supervised && (console.log("It was running under a supervisor (VibeHub app / launchd), which restarts it within about 30 s."), console.log("To keep it stopped: turn off Track at login in VibeHub, or run `launchctl bootout gui/$(id -u)/com.vibehub.tracker`.")), removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
+  supervised && process.platform === "darwin" ? (console.log("It was running under a supervisor (VibeHub app / launchd), which restarts it within about 30 s."), console.log("To keep it stopped: turn off Track at login in VibeHub, or run `launchctl bootout gui/$(id -u)/com.vibehub.tracker`.")) : supervised && (console.log("It was started by the login entry, so nothing will restart it before your next login."), console.log("To stop it coming back then as well: run `vibehub-tracker autostart disable`.")), removeFile(PID_PATH), clearStopRequest(), await endLingeringSession();
 }
 function runForeground(config) {
   redirectConsoleToLog();
@@ -3880,13 +4218,13 @@ function runForeground(config) {
   };
   stopLoop = runLoop(config, { onStopRequest: () => shutdown("stop.request") }).stop, process.on("SIGTERM", () => shutdown("SIGTERM")), process.on("SIGINT", () => shutdown("SIGINT"));
 }
-function serveInputs(entryPath) {
-  return { ...staleDaemonInputs(entryPath), mode: readJson(PID_PATH)?.mode };
+function serveInputs(entryPath2) {
+  return { ...staleDaemonInputs(entryPath2), mode: readJson(PID_PATH)?.mode };
 }
-async function serveForeground(config, entryPath) {
+async function serveForeground(config, entryPath2) {
   let existing = daemonStatus();
   if (existing.running && existing.pid !== null) {
-    let reason = serveTakeoverReason(serveInputs(entryPath));
+    let reason = serveTakeoverReason(serveInputs(entryPath2));
     if (!reason) {
       console.log(`Tracker is already running under a supervisor (pid ${existing.pid}); nothing to do.`);
       return;
@@ -3908,10 +4246,10 @@ async function serveForeground(config, entryPath) {
 }
 
 // src/hooks/inbox.ts
-var fs7 = __toESM(require("node:fs"));
+var fs8 = __toESM(require("node:fs"));
 
 // src/hooks/payload.ts
-var import_node_crypto6 = require("node:crypto");
+var import_node_crypto7 = require("node:crypto");
 var HOOKABLE_TOOLS = ["cursor", "windsurf"];
 function isHookableTool(tool) {
   return tool === "cursor" || tool === "windsurf";
@@ -3963,7 +4301,7 @@ function projectHookEvent(tool, payload, now) {
     // reaches the file. The cost is that a vendor retrying the identical hook
     // invocation is two records rather than one; these tools carry no token counts, so
     // that costs a duplicate activity sighting and nothing measurable.
-    recordId: (0, import_node_crypto6.randomUUID)(),
+    recordId: (0, import_node_crypto7.randomUUID)(),
     occurredAt: at.toISOString(),
     model
   };
@@ -3992,26 +4330,26 @@ function appendAttestedRecord(record) {
   try {
     ensureConfigDir();
     try {
-      let existing = fs7.lstatSync(ATTESTED_PATH);
+      let existing = fs8.lstatSync(ATTESTED_PATH);
       if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) return !1;
-      existing.size >= INBOX_ROTATE_AT_BYTES && fs7.truncateSync(ATTESTED_PATH, 0);
+      existing.size >= INBOX_ROTATE_AT_BYTES && fs8.truncateSync(ATTESTED_PATH, 0);
     } catch (error) {
       if (error.code !== "ENOENT") return !1;
     }
-    fd = fs7.openSync(
+    fd = fs8.openSync(
       ATTESTED_PATH,
-      fs7.constants.O_WRONLY | fs7.constants.O_CREAT | fs7.constants.O_APPEND | (fs7.constants.O_NOFOLLOW ?? 0),
+      fs8.constants.O_WRONLY | fs8.constants.O_CREAT | fs8.constants.O_APPEND | (fs8.constants.O_NOFOLLOW ?? 0),
       384
     );
-    let opened = fs7.fstatSync(fd);
-    return !opened.isFile() || opened.nlink !== 1 ? !1 : (fs7.writeSync(fd, `${line}
+    let opened = fs8.fstatSync(fd);
+    return !opened.isFile() || opened.nlink !== 1 ? !1 : (fs8.writeSync(fd, `${line}
 `), !0);
   } catch {
     return !1;
   } finally {
     if (fd !== void 0)
       try {
-        fs7.closeSync(fd);
+        fs8.closeSync(fd);
       } catch {
       }
   }
@@ -4021,14 +4359,14 @@ function ensureInboxExists() {
   try {
     ensureConfigDir();
     try {
-      let existing = fs7.lstatSync(ATTESTED_PATH);
+      let existing = fs8.lstatSync(ATTESTED_PATH);
       return existing.isFile() && !existing.isSymbolicLink() && existing.nlink === 1;
     } catch (error) {
       if (error.code !== "ENOENT") return !1;
     }
-    return fd = fs7.openSync(
+    return fd = fs8.openSync(
       ATTESTED_PATH,
-      fs7.constants.O_WRONLY | fs7.constants.O_CREAT | fs7.constants.O_EXCL | (fs7.constants.O_NOFOLLOW ?? 0),
+      fs8.constants.O_WRONLY | fs8.constants.O_CREAT | fs8.constants.O_EXCL | (fs8.constants.O_NOFOLLOW ?? 0),
       384
     ), !0;
   } catch (error) {
@@ -4036,7 +4374,7 @@ function ensureInboxExists() {
   } finally {
     if (fd !== void 0)
       try {
-        fs7.closeSync(fd);
+        fs8.closeSync(fd);
       } catch {
       }
   }
@@ -4088,7 +4426,7 @@ async function runHookEvent(tool, stream, now = Date.now(), timeoutMs = HOOK_STD
 }
 
 // src/hooks/install.ts
-var fs8 = __toESM(require("node:fs")), os4 = __toESM(require("node:os")), path4 = __toESM(require("node:path")), import_node_crypto7 = require("node:crypto");
+var fs9 = __toESM(require("node:fs")), os5 = __toESM(require("node:os")), path5 = __toESM(require("node:path")), import_node_crypto8 = require("node:crypto");
 var HookInstallError = class extends Error {
 }, MAX_HOOK_FILE_BYTES = 256 * 1024, VENDOR_FILES = {
   cursor: {
@@ -4112,14 +4450,14 @@ function vendorFor(tool) {
   return VENDOR_FILES[tool];
 }
 function hookFileFor(tool) {
-  return path4.join(os4.homedir(), ...vendorFor(tool).relativePath);
+  return path5.join(os5.homedir(), ...vendorFor(tool).relativePath);
 }
 function backupPathFor(tool) {
   return `${hookFileFor(tool)}.vibehub-backup`;
 }
 var quote = (value) => /^[A-Za-z0-9_./\\:-]+$/.test(value) ? value : `"${value}"`;
 function windowsLauncher() {
-  return path4.join(launcherDir(), "vibehub-tracker.cmd");
+  return path5.join(launcherDir(), "vibehub-tracker.cmd");
 }
 function hookCommandFor(tool, execPath, scriptPath) {
   let vendor = vendorFor(tool);
@@ -4136,7 +4474,7 @@ function assertLauncherUsable() {
     throw new HookInstallError(
       `The command path contains a character no shell can quote safely (${launcher}). Move VibeHub to a path without % or " characters, then retry.`
     );
-  if (!fs8.existsSync(launcher))
+  if (!fs9.existsSync(launcher))
     throw new HookInstallError(
       `The vibehub-tracker command is not installed yet (${launcher} is missing). Run the VibeHub connector for Windows first - it writes that command - then retry.`
     );
@@ -4149,13 +4487,13 @@ function isOurCommand(command, tool, expected) {
 function readHookFile(file) {
   let fd;
   try {
-    let stats = fs8.lstatSync(file);
+    let stats = fs9.lstatSync(file);
     if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1)
       throw new HookInstallError(`${file} is not a regular file. Move it aside and retry.`);
     if (stats.size > MAX_HOOK_FILE_BYTES)
       throw new HookInstallError(`${file} is unexpectedly large (${stats.size} bytes); refusing to rewrite it.`);
-    fd = fs8.openSync(file, fs8.constants.O_RDONLY | (fs8.constants.O_NOFOLLOW ?? 0));
-    let raw = fs8.readFileSync(fd, "utf8");
+    fd = fs9.openSync(file, fs9.constants.O_RDONLY | (fs9.constants.O_NOFOLLOW ?? 0));
+    let raw = fs9.readFileSync(fd, "utf8");
     if (raw.trim() === "") return {};
     let parsed;
     try {
@@ -4173,7 +4511,7 @@ function readHookFile(file) {
   } finally {
     if (fd !== void 0)
       try {
-        fs8.closeSync(fd);
+        fs9.closeSync(fd);
       } catch {
       }
   }
@@ -4218,26 +4556,26 @@ function planHookUninstall(tool, command) {
 }
 function savedOriginal(backup) {
   try {
-    let stat = fs8.lstatSync(backup);
-    return !stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_HOOK_FILE_BYTES ? null : fs8.readFileSync(backup, "utf8");
+    let stat = fs9.lstatSync(backup);
+    return !stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_HOOK_FILE_BYTES ? null : fs9.readFileSync(backup, "utf8");
   } catch {
     return null;
   }
 }
-function replaceFile(target, contents) {
-  let temporary = path4.join(path4.dirname(target), `.hooks.json.${(0, import_node_crypto7.randomUUID)()}.tmp`);
+function replaceFile2(target, contents) {
+  let temporary = path5.join(path5.dirname(target), `.hooks.json.${(0, import_node_crypto8.randomUUID)()}.tmp`);
   try {
-    fs8.writeFileSync(temporary, contents, { mode: 384, flag: "wx" });
+    fs9.writeFileSync(temporary, contents, { mode: 384, flag: "wx" });
     try {
-      fs8.renameSync(temporary, target);
+      fs9.renameSync(temporary, target);
     } catch (error) {
       let code = error.code;
       if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw error;
-      fs8.writeFileSync(target, contents, { mode: 384 });
+      fs9.writeFileSync(target, contents, { mode: 384 });
     }
   } finally {
     try {
-      fs8.unlinkSync(temporary);
+      fs9.unlinkSync(temporary);
     } catch {
     }
   }
@@ -4253,7 +4591,7 @@ function applyHookPlan(plan) {
   let backupFile = backupPathFor(plan.tool), finish = () => {
     if (plan.mode === "uninstall")
       try {
-        fs8.unlinkSync(backupFile);
+        fs9.unlinkSync(backupFile);
       } catch {
       }
   };
@@ -4261,24 +4599,24 @@ function applyHookPlan(plan) {
     finish();
     return;
   }
-  let directory = path4.dirname(plan.file);
-  if (fs8.mkdirSync(directory, { recursive: !0 }), plan.mode === "uninstall") {
+  let directory = path5.dirname(plan.file);
+  if (fs9.mkdirSync(directory, { recursive: !0 }), plan.mode === "uninstall") {
     let original = savedOriginal(backupFile);
     if (original !== null && (plan.content === null || sameDocument(original, plan.content))) {
-      replaceFile(plan.file, original), finish();
+      replaceFile2(plan.file, original), finish();
       return;
     }
   }
-  if (plan.existed && plan.content !== null && (fs8.existsSync(backupFile) || fs8.copyFileSync(plan.file, backupFile, fs8.constants.COPYFILE_EXCL)), plan.content === null) {
+  if (plan.existed && plan.content !== null && (fs9.existsSync(backupFile) || fs9.copyFileSync(plan.file, backupFile, fs9.constants.COPYFILE_EXCL)), plan.content === null) {
     try {
-      fs8.unlinkSync(plan.file);
+      fs9.unlinkSync(plan.file);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
     finish();
     return;
   }
-  replaceFile(plan.file, plan.content), finish();
+  replaceFile2(plan.file, plan.content), finish();
 }
 function withConsent(config, tool, enabled) {
   vendorFor(tool);
@@ -4312,18 +4650,18 @@ function hookStatus(config, execPath, scriptPath) {
 }
 var SHIM_MARK = "# vibehub-tracker shim v1 (managed by VibeHub; safe to delete)";
 function launcherDir() {
-  if (process.platform !== "win32") return path4.join(os4.homedir(), ".local", "bin");
-  let local = process.env.LOCALAPPDATA && path4.isAbsolute(process.env.LOCALAPPDATA) ? process.env.LOCALAPPDATA : path4.join(os4.homedir(), "AppData", "Local");
-  return path4.join(local, "Programs", "VibeHub");
+  if (process.platform !== "win32") return path5.join(os5.homedir(), ".local", "bin");
+  let local = process.env.LOCALAPPDATA && path5.isAbsolute(process.env.LOCALAPPDATA) ? process.env.LOCALAPPDATA : path5.join(os5.homedir(), "AppData", "Local");
+  return path5.join(local, "Programs", "VibeHub");
 }
 function shimCandidates() {
-  return process.platform === "win32" ? [path4.join(launcherDir(), "vibehub-tracker.cmd")] : [path4.join(os4.homedir(), ".local", "bin", "vibehub-tracker"), "/usr/local/bin/vibehub-tracker"];
+  return process.platform === "win32" ? [path5.join(launcherDir(), "vibehub-tracker.cmd")] : [path5.join(os5.homedir(), ".local", "bin", "vibehub-tracker"), "/usr/local/bin/vibehub-tracker"];
 }
 function removeOwnedShims(cjsPath, candidates = shimCandidates()) {
   return candidates.map((candidate) => {
     let stats;
     try {
-      stats = fs8.lstatSync(candidate);
+      stats = fs9.lstatSync(candidate);
     } catch {
       return { path: candidate, outcome: "absent" };
     }
@@ -4331,15 +4669,15 @@ function removeOwnedShims(cjsPath, candidates = shimCandidates()) {
       return { path: candidate, outcome: "foreign", detail: "not a regular file" };
     let body = "";
     try {
-      body = fs8.readFileSync(candidate, "utf8");
+      body = fs9.readFileSync(candidate, "utf8");
     } catch {
       return { path: candidate, outcome: "failed", detail: "could not be read" };
     }
     if (!body.includes(SHIM_MARK)) return { path: candidate, outcome: "foreign" };
-    let home = os4.homedir().replace(/[\\/]+$/, ""), resolved = process.platform === "win32" ? body.replace(/%USERPROFILE%/gi, home).toLowerCase() : body, needle = process.platform === "win32" ? cjsPath.toLowerCase() : cjsPath;
+    let home = os5.homedir().replace(/[\\/]+$/, ""), resolved = process.platform === "win32" ? body.replace(/%USERPROFILE%/gi, home).toLowerCase() : body, needle = process.platform === "win32" ? cjsPath.toLowerCase() : cjsPath;
     if (!resolved.includes(needle)) return { path: candidate, outcome: "other-install" };
     try {
-      fs8.unlinkSync(candidate);
+      fs9.unlinkSync(candidate);
     } catch (error) {
       return {
         path: candidate,
@@ -4353,7 +4691,7 @@ function removeOwnedShims(cjsPath, candidates = shimCandidates()) {
 function inboxPresence() {
   let absent = { path: ATTESTED_PATH, exists: !1, records: null, lastWriteMs: null, oversized: !1 }, stat;
   try {
-    if (stat = fs8.lstatSync(ATTESTED_PATH), !stat.isFile() || stat.isSymbolicLink()) return absent;
+    if (stat = fs9.lstatSync(ATTESTED_PATH), !stat.isFile() || stat.isSymbolicLink()) return absent;
   } catch {
     return absent;
   }
@@ -4361,7 +4699,7 @@ function inboxPresence() {
   if (stat.size > MAX_ATTESTED_FILE_BYTES) return { ...present, records: null, oversized: !0 };
   let records = null;
   try {
-    records = fs8.readFileSync(ATTESTED_PATH, "utf8").split(`
+    records = fs9.readFileSync(ATTESTED_PATH, "utf8").split(`
 `).filter((line) => line.trim().length > 0).length;
   } catch {
     records = null;
@@ -4394,7 +4732,33 @@ function describeSources(sources) {
 }
 
 // src/index.ts
-var CONFIG_PATH_LABEL = "~/.vibehub/config.json", STATUS_PATH_LABEL = "~/.vibehub/status.json", ATTESTED_PATH_LABEL = "~/.vibehub/attested.jsonl", program2 = new Command();
+var CONFIG_PATH_LABEL = "~/.vibehub/config.json", STATUS_PATH_LABEL = "~/.vibehub/status.json", ATTESTED_PATH_LABEL = "~/.vibehub/attested.jsonl", entryPath = () => path6.resolve(__filename);
+function reportAutostart(report) {
+  switch (report.outcome) {
+    case "registered":
+      console.log(`Autostart: on - it will start again at login (${report.file}).`);
+      break;
+    case "already":
+      console.log(`Autostart: on (${report.file}).`);
+      break;
+    case "opted-out":
+      console.log("Autostart: off - you disabled it. Run `vibehub-tracker autostart enable` to turn it back on.");
+      break;
+    case "unsupported":
+      console.log(`Autostart: not available on this platform (${process.platform}) - start the tracker yourself after a reboot.`);
+      break;
+    case "blocked":
+      console.log(`Autostart: left alone. ${report.detail ?? ""}`.trimEnd());
+      break;
+    default:
+      console.log(`Autostart: could not be registered${report.detail ? ` - ${report.detail}` : ""}.`), console.log("  The tracker is running; it just will not come back on its own after a reboot.");
+      break;
+  }
+}
+function warnIfSourceCheckout() {
+  entryPath().endsWith(".ts") && (console.log("Note: this is a source checkout, so the entry point is TypeScript, which node cannot run"), console.log("on its own. Run `npm run build` and re-run this command for an entry that actually starts."));
+}
+var program2 = new Command();
 program2.name("vibehub-tracker").description("VibeHub AI-session metadata tracker");
 async function verifyToken(apiUrl, deviceToken) {
   try {
@@ -4439,7 +4803,10 @@ program2.command("login [deviceToken]").description(`validate the token with the
     toolProcessNames: existing?.toolProcessNames,
     // A device-level consent setting, like projectAliases: re-running `login`
     // must not silently switch the receiver on or off behind the user's back.
-    attestedMetadata: existing?.attestedMetadata
+    attestedMetadata: existing?.attestedMetadata,
+    // Same reasoning: a re-install that re-runs `login` must not undo an explicit
+    // `autostart disable` by dropping the field that records it.
+    autostart: existing?.autostart
   };
   writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) - saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
   let daemon = daemonStatus();
@@ -4451,8 +4818,53 @@ program2.command("set <projectFolder> <alias>").description(`remap a project fol
     alias === HIDDEN ? `"${projectFolder}" will be hidden from presence.` : `"${projectFolder}" will be shown as "${alias}".`
   );
 });
-program2.command("start").description("track Claude Code / Codex / Quadcode AI session metadata, plus Cursor / Windsurf if you opted in with `hooks install`, and send heartbeats").action(async () => {
-  requireConfig(), await startDaemon(path5.resolve(__filename));
+program2.command("start").description("track Claude Code / Codex / Quadcode AI session metadata, plus Cursor / Windsurf if you opted in with `hooks install`, and send heartbeats").option("--no-autostart", "start the tracker this once without registering it to start at login").action(async (options) => {
+  let config = requireConfig();
+  if (await startDaemon(entryPath()), !options.autostart) {
+    console.log("Autostart: not registered (--no-autostart). Run `vibehub-tracker autostart enable` when you want it.");
+    return;
+  }
+  reportAutostart(ensureAutostart(hostEnv(entryPath()), autostartOptedOut(config)));
+});
+var autostart = program2.command("autostart").description("start the tracker automatically at login (enable | disable | status)");
+function planOrExit(mode) {
+  let env = hostEnv(entryPath());
+  try {
+    return mode === "enable" ? planAutostartEnable(env) : planAutostartDisable(env);
+  } catch (error) {
+    console.error(`Autostart could not be ${mode === "enable" ? "enabled" : "disabled"}: ${error instanceof Error ? error.message : "unknown error"}`), process.exit(1);
+  }
+}
+autostart.command("enable").description("register the tracker to start at login, and start it now").option("--dry-run", "print the exact file that would be written, and change nothing").action((options) => {
+  let config = requireConfig(), env = hostEnv(entryPath()), plan = planOrExit("enable");
+  if ((!plan.supported || plan.blocked !== null) && (console.error(`Autostart was not enabled. ${plan.blocked ?? "No mechanism on this platform."}`), process.exit(1)), options.dryRun) {
+    console.log(`Would write ${plan.file}:`), console.log(plan.content ?? ""), console.log(`Would record the preference in ${CONFIG_PATH_LABEL}. Nothing was changed.`);
+    return;
+  }
+  let applied = applyAutostartPlan(plan, { activate: !0 });
+  applied.activation === "failed" && (console.error(`Autostart was not enabled: ${applied.detail ?? "the system refused the registration"}.`), console.error("Nothing was left behind. The tracker itself is unaffected."), process.exit(1)), setAutostartPreference(config, !0), console.log(`Autostart ${applied.wrote ? "enabled" : "already enabled"}: ${plan.file}`), console.log(`At login it runs: ${env.execPath} ${env.scriptPath} serve`), applied.activation === "loaded" && console.log("launchd loaded it and will also restart the tracker if it ever crashes."), console.log("Turn it off with `vibehub-tracker autostart disable`, or by deleting that file."), warnIfSourceCheckout();
+});
+autostart.command("disable").description("remove the login entry and remember that choice, so `start` does not put it back").option("--dry-run", "print what would change, and change nothing").action((options) => {
+  let config = requireConfig(), plan = planOrExit("disable");
+  if (plan.blocked !== null && (console.error(`Autostart was not changed. ${plan.blocked}`), process.exit(1)), options.dryRun) {
+    console.log(plan.changed ? `Would remove ${plan.file}.` : `Nothing of ours is registered${plan.file ? ` at ${plan.file}` : ""}.`), console.log(`Would record the choice in ${CONFIG_PATH_LABEL}, so \`start\` leaves it off. Nothing was changed.`);
+    return;
+  }
+  let applied = applyAutostartPlan(plan);
+  setAutostartPreference(config, !1), console.log(applied.removed ? `Autostart disabled. Removed ${plan.file}.` : "Autostart was not registered."), console.log("`start` will leave it off from now on. Re-enable it with `vibehub-tracker autostart enable`."), console.log("This does not stop a tracker that is running now - use `vibehub-tracker stop` for that.");
+});
+autostart.command("status").description("show whether the tracker starts at login, and from which file").action(() => {
+  let env = hostEnv(entryPath()), state = autostartStatus(env, autostartOptedOut(readConfig()));
+  if (!state.supported) {
+    console.log(`Autostart: not available on this platform (${state.platform}).`);
+    return;
+  }
+  let on = state.exists && state.owner === "ours" && !state.optedOut;
+  if (console.log(`Autostart: ${on ? "on" : "off"}`), console.log(`File:      ${state.file}${state.exists ? "" : " (not present)"}`), console.log(`Runs:      ${state.command}`), state.problem !== null) {
+    console.log(`Note:      that file could not be read - ${state.problem}`);
+    return;
+  }
+  state.owner === "foreign" ? console.log("Note:      that file was not written by VibeHub, so it is left alone.") : state.owner === "other-install" ? (console.log("Note:      it belongs to another VibeHub install (the Mac app, or a tracker elsewhere)."), console.log("           Manage autostart from that install; this one will not overwrite it.")) : state.exists && !state.current && console.log("Note:      it points at an older install. Run `vibehub-tracker autostart enable` to refresh it."), state.optedOut ? console.log("Note:      you disabled autostart, so `start` will not register it.") : state.exists || console.log("Note:      `vibehub-tracker start` registers it, or run `autostart enable` on its own.");
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {
   let config = readConfig();
@@ -4461,7 +4873,9 @@ program2.command("status").description(`pretty-print the current ${STATUS_PATH_L
     return;
   }
   let status = readStatus(), { running, pid } = daemonStatus();
-  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`), console.log(`Status:  ${status.status}`), status.status === "active" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
+  console.log(`Daemon:  ${running ? `running (pid ${pid})` : "not running"}`);
+  let login = autostartStatus(hostEnv(entryPath()), autostartOptedOut(config));
+  console.log(`At login: ${login.supported ? login.optedOut ? "no - disabled with `autostart disable`" : login.exists && login.owner === "ours" ? "yes" : login.exists ? "no - that login entry belongs to another install" : "no - run `vibehub-tracker autostart enable`" : `not available on ${login.platform}`}`), console.log(`Status:  ${status.status}`), status.status === "active" && (console.log(`Project: ${status.projectAlias}`), console.log(`Tool:    ${status.tool}`), console.log(`Model:   ${status.model}`), console.log(`Started: ${status.sessionStartedAt}`)), console.log(`Updated: ${status.updatedAt}`);
   let attested2 = attestedToolsFor(config);
   console.log("Scope:   supported AI-session activity only (Claude Code, Codex, Quadcode AI)"), attested2.length > 0 && (console.log(`Receiver: on for ${attested2.map(toolLabel).join(", ")} (opt-in, ${ATTESTED_PATH_LABEL})`), console.log("          Records come from a separate producer you installed; this tracker reads"), console.log("          no log, process or window for those tools, and never estimates their usage."), console.log("          `vibehub-tracker hooks status` shows whether anything is writing them."));
   let seeingCutoff = Date.now() - MAX_EVENT_AGE_MS, seeing = (status.sources ?? []).filter((s) => Date.parse(s.lastSeenAt) >= seeingCutoff);
@@ -4473,11 +4887,15 @@ program2.command("stop").description("stop the running tracker daemon (waits for
   await stopDaemon();
 });
 program2.command("logout").description(`stop the daemon and remove ${CONFIG_PATH_LABEL}`).action(async () => {
-  await stopDaemon(), deleteConfig(), writeOfflineStatus(), console.log(`Logged out. Removed ${CONFIG_PATH_LABEL}.`);
+  await stopDaemon();
+  let removed = removeAutostartQuietly(hostEnv(entryPath()));
+  removed !== null && console.log(`Removed the login entry (${removed}).`), deleteConfig(), writeOfflineStatus(), console.log(`Logged out. Removed ${CONFIG_PATH_LABEL}.`);
 });
 program2.command("uninstall").description("remove what this install owns: the hooks it wrote, its consent, its config and the `vibehub-tracker` command").action(async () => {
-  let config = readConfig(), script = path5.resolve(__filename);
-  if (await stopDaemon(), config)
+  let config = readConfig(), script = path6.resolve(__filename);
+  await stopDaemon();
+  let loginEntry = removeAutostartQuietly(hostEnv(script));
+  if (loginEntry !== null && console.log(`Removed the login entry (${loginEntry}).`), config)
     for (let tool of HOOKABLE_TOOLS)
       try {
         let plan = planHookUninstall(tool, hookCommandFor(tool, process.execPath, script));
@@ -4509,8 +4927,12 @@ program2.command("run-loop", { hidden: !0 }).description("internal: runs the hea
   runForeground(config);
 });
 program2.command("serve", { hidden: !0 }).description("internal: foreground daemon for a supervisor (launchd) - owns tracker.pid; exits 0 if a healthy supervised tracker already runs").action(async () => {
-  let config = requireConfig();
-  await serveForeground(config, path5.resolve(__filename));
+  let config = readConfig();
+  if (!config) {
+    console.log(`Nothing to serve: no ${CONFIG_PATH_LABEL}. Run \`vibehub-tracker login <deviceToken>\` first.`);
+    return;
+  }
+  await serveForeground(config, path6.resolve(__filename));
 });
 program2.command("hook <tool>", { hidden: !0 }).description("internal: record one Cursor/Windsurf hook event as AI-session metadata (payload on stdin)").action(async (tool) => {
   await runHookEvent(tool, process.stdin).catch(() => !1), process.exitCode = 0;
@@ -4519,17 +4941,17 @@ var hooks = program2.command("hooks").description("opt in to Cursor / Windsurf a
 hooks.command("install <tool>").description(`register the hook for ${HOOKABLE_TOOLS.join(" or ")} and consent to its records`).option("--dry-run", "print the exact file that would be written, and change nothing").action((tool, options) => {
   let config = requireConfig();
   isHookableTool(tool) || (console.error(`Unknown tool "${tool}". Supported: ${HOOKABLE_TOOLS.join(", ")}.`), process.exit(1));
-  let plan = planHookInstall(tool, hookCommandFor(tool, process.execPath, path5.resolve(__filename)));
+  let plan = planHookInstall(tool, hookCommandFor(tool, process.execPath, path6.resolve(__filename)));
   if (options.dryRun) {
     console.log(`Would write ${plan.file}:`), console.log(plan.content ?? ""), console.log(`Would consent to "${tool}" records in ${CONFIG_PATH_LABEL}. Nothing was changed.`);
     return;
   }
-  applyHookPlan(plan), setConsent(config, tool, !0), ensureInboxExists(), console.log(`${toolLabel(tool)} hook ${plan.changed ? "installed" : "already present"}: ${plan.file}`), console.log(`Events: ${plan.events.join(", ")}. Restart ${toolLabel(tool)} for it to pick the hook up.`), plan.existed && plan.changed && console.log(`Previous file kept as ${backupPathFor(tool)}.`), console.log(`Consented in ${CONFIG_PATH_LABEL}: the tracker now reads ${ATTESTED_PATH_LABEL} for ${toolLabel(tool)}.`), console.log("Each event records six fields: the tool, a random id, the time, the model when the id is one"), console.log("this tracker knows, and the project folder's name. No prompt, no path, no transcript, and no"), console.log("token count - neither tool reports one, so their usage stays unknown rather than zero."), path5.resolve(__filename).endsWith(".ts") && (console.log("Note: this is a source checkout, so the hook points at a TypeScript entry point that node"), console.log("cannot run on its own. Run `npm run build` and re-run this command for a hook that fires."));
+  applyHookPlan(plan), setConsent(config, tool, !0), ensureInboxExists(), console.log(`${toolLabel(tool)} hook ${plan.changed ? "installed" : "already present"}: ${plan.file}`), console.log(`Events: ${plan.events.join(", ")}. Restart ${toolLabel(tool)} for it to pick the hook up.`), plan.existed && plan.changed && console.log(`Previous file kept as ${backupPathFor(tool)}.`), console.log(`Consented in ${CONFIG_PATH_LABEL}: the tracker now reads ${ATTESTED_PATH_LABEL} for ${toolLabel(tool)}.`), console.log("Each event records six fields: the tool, a random id, the time, the model when the id is one"), console.log("this tracker knows, and the project folder's name. No prompt, no path, no transcript, and no"), console.log("token count - neither tool reports one, so their usage stays unknown rather than zero."), path6.resolve(__filename).endsWith(".ts") && (console.log("Note: this is a source checkout, so the hook points at a TypeScript entry point that node"), console.log("cannot run on its own. Run `npm run build` and re-run this command for a hook that fires."));
 });
 hooks.command("uninstall <tool>").description("remove VibeHub's hook from that tool's config and withdraw consent").option("--dry-run", "print what would change, and change nothing").action((tool, options) => {
   let config = requireConfig();
   isHookableTool(tool) || (console.error(`Unknown tool "${tool}". Supported: ${HOOKABLE_TOOLS.join(", ")}.`), process.exit(1));
-  let plan = planHookUninstall(tool, hookCommandFor(tool, process.execPath, path5.resolve(__filename)));
+  let plan = planHookUninstall(tool, hookCommandFor(tool, process.execPath, path6.resolve(__filename)));
   if (options.dryRun) {
     console.log(plan.changed ? `Would rewrite ${plan.file}${plan.content === null ? " (removing it - nothing else is in it)" : ""}:` : `${plan.file} carries no VibeHub hook; nothing to remove.`), plan.changed && plan.content !== null && console.log(plan.content), console.log(`Would withdraw consent for "${tool}". Nothing was changed.`);
     return;
@@ -4538,7 +4960,7 @@ hooks.command("uninstall <tool>").description("remove VibeHub's hook from that t
 });
 hooks.command("status").description("show which hooks are installed and consented to").action(() => {
   let config = requireConfig();
-  for (let state of hookStatus(config, process.execPath, path5.resolve(__filename)))
+  for (let state of hookStatus(config, process.execPath, path6.resolve(__filename)))
     console.log(`${toolLabel(state.tool)}:`), console.log(`  Consent: ${state.consented ? "yes" : "no"}`), console.log(`  Hook:    ${state.registered.length === 0 ? "not installed" : state.missing.length === 0 ? `installed (${state.registered.join(", ")})` : `partly installed (${state.registered.join(", ")}; missing ${state.missing.join(", ")})`}`), console.log(`  File:    ${state.file}${state.fileExists ? "" : " (absent)"}`), state.stale.length > 0 && (console.log(`  Stale:   ${state.stale.join(", ")} - registered by an older VibeHub and no longer used.`), console.log(`           Run \`vibehub-tracker hooks install ${state.tool}\` to clear them.`)), state.consented && state.registered.length === 0 && console.log(`  Note:    consented, but nothing writes records - run \`vibehub-tracker hooks install ${state.tool}\`.`), !state.consented && state.registered.length > 0 && console.log("  Note:    the hook is installed but its records are ignored until you consent again.");
   let inbox = inboxPresence();
   if (console.log(`Inbox:     ${inbox.path}${inbox.exists ? "" : " (not created yet)"}`), inbox.exists) {

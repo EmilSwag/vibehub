@@ -1,12 +1,16 @@
 /*
  * RecentModels — Steam Recent Activity, one row per model.
  *
- * Three columns: the capsule (the model's face), the name + tools/tokens sub-line,
- * and a right-aligned numbers column. Rows carry no box of their own — a hairline
- * between them and one border on the Card, per the house rule against nesting cards.
+ * Three columns: the mark (the model's face, in a 48px square), the name +
+ * tools/tokens sub-line, and a right-aligned numbers column. Rows carry no box of
+ * their own — a hairline between them and one border on the Card, per the house rule
+ * against nesting cards.
  *
- * The revealed remainder ("View all N models") uses the same grid at a smaller
- * capsule so the numbers stay in the same place whether the list is open or not.
+ * Every row shares one 48px mark and one 136px floor under the numbers column, so
+ * the three stats line up straight down the block whether the list is collapsed or
+ * open. The mark used to be a 120x45 Steam-style capsule that shrank to 34px on the
+ * revealed rows — two sizes meant two different left edges for the name and two for
+ * the numbers, and the list read as two components stacked.
  *
  * Round 8 split the <li> in two: `.item` holds the clickable band (`.row`) and the
  * per-tool detail (`.detail`) that opens under it.
@@ -119,20 +123,29 @@
   pointer-events: none;
 }
 
-/* The model's face. 120x45 like a Steam capsule, filled with the panel tint so it
- * reads as a well rather than a nested card. */
+/* The model's face: one 48px square on every row, preview or revealed, filled with
+ * the panel tint so it reads as a well rather than a nested card. A square and not a
+ * wide capsule because what sits in it is a 24px glyph, not artwork — 120x45 left two
+ * thirds of the box empty and pushed the name a third of the row to the right.
+ *
+ * At rest the mark is the darker of the two. On hover the band takes that same tint
+ * (`.rowHit:hover`), so the mark swaps to the card's own surface instead of dissolving
+ * into its own hover well. */
 .capsule {
   grid-area: capsule;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 120px;
-  height: 45px;
-  border-radius: var(--vh-radius-sm);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--vh-radius-md);
   background: var(--vh-surface-2);
   color: var(--vh-text-dim);
-  transition: transform var(--dur-press) var(--ease-out), color var(--dur-state) var(--ease-out);
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    background var(--dur-state) var(--ease-out),
+    color var(--dur-state) var(--ease-out);
 }
 
 /* The mark is what the PO clicks, so the mark is what answers. It is the only thing
@@ -142,12 +155,8 @@
 }
 .rowHit:hover + .capsule,
 .rowSelected .capsule {
+  background: var(--vh-surface);
   color: var(--vh-text);
-}
-
-.capsuleCompact {
-  width: 34px;
-  height: 34px;
 }
 
 .main {
@@ -166,10 +175,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.rowCompact .name {
-  font-size: 13.5px;
 }
 
 /* Tools first, tokens last and faintest: hours rank the list, tokens are fuel. */
@@ -238,12 +243,17 @@
   white-space: nowrap;
 }
 
+/* The numbers column. `min-width` is the floor the whole block aligns to: every row
+ * reserves the same 136px for hours + last-used, so the figures form a straight edge
+ * down the list instead of stepping in and out with the length of each string. The
+ * per-tool lines in `.detail` reserve the same three widths for the same reason. */
 .right {
   grid-area: right;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
+  min-width: 136px;
   text-align: right;
   white-space: nowrap;
 }
@@ -281,9 +291,9 @@
  * than a wipe. Under `prefers-reduced-motion` the global override in motion.css zeroes
  * both durations and it simply appears.
  *
- * A left rule instead of an indent matched to the capsule: the capsule is 120px on a
- * preview row and 34px on a revealed one, and a detail that shifted sideways with it
- * would look like two different components.
+ * A left rule instead of an indent matched to the mark: the rule reads as a
+ * continuation of the row it hangs under, where a 64px indent would read as a second
+ * column the numbers above it do not share.
  */
 .detail {
   display: grid;
@@ -449,7 +459,8 @@
 }
 
 /* Narrow: the numbers move under the name instead of squeezing it to an ellipsis.
- * The capsule spans both rows so the block still reads as one row. */
+ * The mark spans both rows so the block still reads as one row, and the numbers
+ * column gives up its 136px floor — there is no second column left to line up with. */
 @media (max-width: 620px) {
   .row {
     grid-template-columns: auto minmax(0, 1fr);
@@ -459,18 +470,13 @@
     row-gap: 2px;
   }
   .capsule {
-    width: 64px;
-    height: 44px;
     align-self: start;
-  }
-  .capsuleCompact {
-    width: 34px;
-    height: 34px;
   }
   .right {
     flex-direction: row;
     align-items: baseline;
     gap: 8px;
+    min-width: 0;
     text-align: left;
     flex-wrap: wrap;
   }

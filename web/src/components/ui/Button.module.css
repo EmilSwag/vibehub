@@ -80,3 +80,35 @@
   padding: 0 12px;
   font-size: 12.5px;
 }
+
+/* Pending state: the label holds the button's width and only goes invisible, and the
+ * spinner is centred over it, so nothing reflows when an action starts or ends. */
+.content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--vh-space-2);
+}
+
+.loading {
+  position: relative;
+}
+/* A pending button is working, not unavailable — it keeps full contrast so the
+ * spinner reads, and only loses the "not-allowed" cursor of a real disabled one. */
+.btn.loading:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+.loading .content {
+  visibility: hidden;
+}
+
+/* The spinner rotates, so its own transform is spoken for — the centring lives on
+ * this wrapper instead of on the spinner itself. */
+.spinnerSlot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  transform: translate(-50%, -50%);
+}

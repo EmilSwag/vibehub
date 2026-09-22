@@ -15,6 +15,7 @@ import { ConnectTools } from "../components/ConnectTools";
 import { ConnectSheet } from "../components/connect/ConnectSheet";
 import { takeConnectDeepLink } from "../lib/connectDeepLink";
 import { FriendListItem, FriendListItemSkeleton } from "../components/FriendListItem";
+import { ErrorState } from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import styles from "./HomePage.module.css";
@@ -27,6 +28,10 @@ export function HomePage() {
   const { presences, incomingRequests } = useRealtime();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
+  /** A failed list is not an empty list. Without this the cards below would tell a
+   *  user with friends that they have none (skills/emil_design_eng §5). */
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   /** `/?connect=1` from the menu-bar app. Home renders its own sheet rather than asking
    *  ConnectTools to open its one: ConnectTools skips the sheet entirely while the
    *  status is loading and once the strip has replaced the panel, and the deep link has
@@ -39,10 +44,15 @@ export function HomePage() {
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setFailed(false);
     friendsApi
       .list()
       .then(({ friends }) => {
         if (active) setFriends(friends);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -50,7 +60,10 @@ export function HomePage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
+
+  // Retry drops the block back to its skeleton, so recovery looks like a first load.
+  const retry = () => setAttempt((n) => n + 1);
 
   const activeFriends = friends.filter((f) => presences.get(f.user.username)?.status === "active");
   // Only ticks once a friend is both non-live and has a known lastSeenAt to render —
@@ -80,6 +93,10 @@ export function HomePage() {
           <Card className={styles.listCard}>
             {loading ? (
               <FriendListItemSkeleton count={3} live />
+            ) : failed ? (
+              <ErrorState onRetry={retry} className={styles.empty}>
+                Couldn't load your friends.
+              </ErrorState>
             ) : friends.length === 0 ? (
               <div className={styles.empty}>
                 No friends yet — head to <Link to="/friends">Friends</Link> to add some.
@@ -154,6 +171,10 @@ export function HomePage() {
                     </div>
                   ))}
                 </div>
+              ) : failed ? (
+                <ErrorState onRetry={retry} className={styles.empty}>
+                  Couldn't load your friends.
+                </ErrorState>
               ) : friends.length === 0 ? (
                 <div className={styles.empty}>No friends yet.</div>
               ) : (

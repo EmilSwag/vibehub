@@ -16,9 +16,6 @@ on a 24-point grid), rounded caps and joins, no fill, Lucide/Feather feel.
 | `settings` | gear with eight teeth + centre circle     |
 | `user`     | single person                             |
 | `logout`   | open door frame with an exit arrow        |
-| `inbox`    | notifications bell                        |
-| `sun`      | circle with eight rays (light theme)      |
-| `moon`     | crescent (dark theme)                     |
 
 ## Provenance
 

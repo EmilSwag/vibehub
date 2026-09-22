@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { clampWords, formatShortDate } from "../lib/format";
+import { clampWords, updatedLabel } from "../lib/format";
 import { githubRepoOf } from "../lib/projectUrl";
 import { useProjectDigest } from "../lib/useProjectDigest";
 import type { Project, User } from "../types";
@@ -9,6 +9,7 @@ import { Avatar } from "./ui/Avatar";
 import { Icon } from "./ui/Icon";
 import { ProjectCommits } from "./projects/ProjectCommits";
 import { ProjectDigest, ProjectDigestSkeleton } from "./projects/ProjectDigest";
+import { Skeleton } from "./ui/Skeleton";
 import styles from "./ProjectCard.module.css";
 
 interface Props {
@@ -66,6 +67,9 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
   const { digest, loading: digestLoading } = useProjectDigest(project.id, project.repoUrl, previewMode);
   const authoredDescription = project.description?.trim();
   const description = authoredDescription || digest?.description?.trim() || clampWords(digest?.readme?.excerpt ?? "");
+  // Reads off `createdAt` on first paint and swaps to the repo's last push once the
+  // digest lands — same line, same height, so nothing under it moves.
+  const updated = updatedLabel(digest?.pushedAt, project.createdAt);
 
   return (
     <article className={styles.card} style={style}>
@@ -123,6 +127,7 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
       )}
 
       <div className={styles.body}>
+        {updated && <span className={styles.updated}>{updated}</span>}
         <h3 className={styles.name}>
           <Link
             to={`/p/${project.id}`}
@@ -177,8 +182,43 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
             <Icon name="heart" size={15} className={styles.heart} />
             {project.likeCount}
           </button>
-          <span className={styles.date}>{formatShortDate(project.createdAt)}</span>
+          {/* No date here any more: `.updated` at the top of the body is the card's
+              one timestamp, and it is the better of the two (the repo's last push,
+              falling back to this same `createdAt`). */}
           {actions && <div className={styles.actions}>{actions}</div>}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * The card's silhouette while its list loads (skills/emil_design_eng §5). Built from
+ * the card's own classes, not from guessed dimensions, so the real post drops into the
+ * same box and nothing below it moves.
+ */
+export function ProjectCardSkeleton({ style }: { style?: CSSProperties }) {
+  return (
+    <article className={styles.card} style={style} aria-hidden="true">
+      <div className={styles.owner}>
+        <Skeleton variant="circle" width={26} />
+        <Skeleton width={104} height={13} />
+      </div>
+      <div className={styles.media}>
+        {/* The cover's own 16/9 box, inline rather than via `.cover` — that class
+            also paints a background and would race Skeleton's own. */}
+        <Skeleton variant="block" style={{ width: "100%", aspectRatio: "16 / 9", borderRadius: 0 }} />
+      </div>
+      <div className={styles.body}>
+        <Skeleton width={92} height={12} />
+        <Skeleton width="68%" height={17} />
+        <Skeleton height={13} />
+        <Skeleton width="84%" height={13} />
+        <div className={styles.links}>
+          <Skeleton width={128} height={12} />
+        </div>
+        <div className={styles.footer}>
+          <Skeleton variant="pill" width={46} height={15} />
         </div>
       </div>
     </article>

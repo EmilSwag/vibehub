@@ -34,6 +34,28 @@
 .ownerHandle {
   color: var(--vh-text-faint);
 }
+
+/* The page's one timestamp, on the owner line: "Updated 3d ago" — the repo's last
+ * push when there is a repo, else the day the project landed. Same tier as the
+ * handle next to it, so the line stays one thought. */
+.metaSep {
+  color: var(--vh-text-faint);
+}
+.updated {
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Below the owner line's width the handle and the timestamp wrap; the tag keeps its
+ * own end of whichever row it lands on rather than being pushed off the edge. */
+@media (max-width: 480px) {
+  .owner {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+}
+
 .privateTag {
   margin-left: auto;
   display: inline-flex;

@@ -329,6 +329,42 @@ export function formatDateTime(iso: string): string {
   });
 }
 
+/**
+ * Day-grained relative date — the coarse companion to `elapsedShort`'s minutes:
+ * "today", "yesterday", "5d ago", then the date itself once a day count stops
+ * carrying meaning ("Sep 3", and with the year once it is not this year).
+ *
+ * Returns "" for anything that does not parse, so a caller can treat "no usable
+ * date" and "no date at all" the same way instead of printing "Invalid Date".
+ * `now` is injectable for the same reason `elapsedShort` takes one.
+ */
+export function relativeDay(iso: string, now: number = Date.now()): string {
+  const at = new Date(iso).getTime();
+  if (!Number.isFinite(at)) return "";
+  const days = daysSince(iso, now);
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days}d ago`;
+  // A bare "Nov 26" is ambiguous the moment the year turns, so the year comes back
+  // as soon as the date is not this one's.
+  return new Date(at).getFullYear() === new Date(now).getFullYear() ? formatShortDate(iso) : formatDate(iso);
+}
+
+/**
+ * "Updated 3d ago" — the one timestamp a project leads with, on its card and at the
+ * top of its page. The repo's last push is the truth when there is a repo; the post's
+ * own date is the fallback, so a project with no GitHub link still says when it landed.
+ * null when neither date parses, and the caller leaves the line out.
+ */
+export function updatedLabel(
+  pushedAt: string | null | undefined,
+  createdAt: string | null | undefined,
+  now: number = Date.now(),
+): string | null {
+  const when = relativeDay(pushedAt ?? "", now) || relativeDay(createdAt ?? "", now);
+  return when ? `Updated ${when}` : null;
+}
+
 export function initial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }

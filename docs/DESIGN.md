@@ -136,8 +136,6 @@ so it resolves to `--vh-accent` and introduces no hue in either theme.
 | `assets/branding/banner.png` | README banner, 1280x400 |
 | `web/public/brand/` | the copies the SPA serves |
 
-`logo.png`, `icon.png` and `banner_source.png` are the earlier colourway and are superseded.
-
 **Pick the colourway explicitly when embedding.** An `<img>` resolves
 `prefers-color-scheme` against the OS, not the page it sits on, so the auto file disappears on a
 light page under a dark OS. Only the favicon should be auto.

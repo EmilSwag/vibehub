@@ -54,26 +54,28 @@ function ProfileSection() {
   return (
     <Card>
       <div className={styles.avatarRow}>
-        <Avatar src={user.avatarUrl} name={user.displayName} size={64} />
-        <label>
+        <span className={styles.avatarFrame}>
+          <Avatar src={user.avatarUrl} name={user.displayName} size={64} />
+        </span>
+        <label className={styles.avatarUpload}>
           <Button
             type="button"
             variant="secondary"
-            disabled={uploading}
+            loading={uploading}
             onClick={(e) => (e.currentTarget.nextElementSibling as HTMLInputElement)?.click()}
           >
-            {uploading ? "Uploading…" : "Change avatar"}
+            Change avatar
           </Button>
           <input type="file" accept="image/*" hidden onChange={handleAvatarChange} />
         </label>
       </div>
 
-      <form className={styles.form} onSubmit={handleSubmit} style={{ marginTop: 20 }}>
-        <div>
+      <form className={styles.form} onSubmit={handleSubmit}>
+        <div className={styles.field}>
           <FieldLabel htmlFor="s-name">Display name</FieldLabel>
           <Input id="s-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </div>
-        <div>
+        <div className={styles.field}>
           <FieldLabel htmlFor="s-bio">Bio</FieldLabel>
           <Textarea
             id="s-bio"
@@ -83,9 +85,9 @@ function ProfileSection() {
             onChange={(e) => setBio(e.target.value)}
           />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+        <div className={styles.formActions}>
+          <Button type="submit" loading={saving}>
+            Save
           </Button>
           {saved && <span className={styles.saved}>Saved.</span>}
         </div>
@@ -141,9 +143,12 @@ function LinksSection() {
     return (
       <Card aria-busy="true">
         {[0, 1].map((i) => (
-          <div className={styles.linkRow} key={i} style={{ marginBottom: 8 }}>
-            <Skeleton height={36} width="60%" />
-            <Skeleton height={36} width="30%" />
+          // Shape-matched down to the × : three items on the row, or the real rows
+          // land 40px narrower than their own skeleton.
+          <div className={styles.linkRow} key={i}>
+            <Skeleton height={39} className={styles.linkUrl} />
+            <Skeleton height={39} className={styles.linkLabel} />
+            <Skeleton variant="circle" width={32} />
           </div>
         ))}
       </Card>
@@ -153,31 +158,38 @@ function LinksSection() {
   return (
     <Card>
       {links.map((link, i) => (
-        <div className={styles.linkRow} key={i} style={{ marginBottom: 8 }}>
+        <div className={styles.linkRow} key={i}>
           <Input
+            className={styles.linkUrl}
             placeholder="https://github.com/you"
             value={link.url}
             onChange={(e) => updateRow(i, "url", e.target.value)}
           />
           <Input
+            className={styles.linkLabel}
             placeholder="label (optional)"
             value={link.label}
             onChange={(e) => updateRow(i, "label", e.target.value)}
           />
-          <button type="button" className={styles.removeBtn} onClick={() => removeRow(i)}>
+          <button
+            type="button"
+            className={styles.removeBtn}
+            onClick={() => removeRow(i)}
+            aria-label={`Remove ${link.url || "link"}`}
+          >
             ×
           </button>
         </div>
       ))}
-      <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+      <div className={styles.linkActions}>
         <Button type="button" variant="secondary" onClick={addRow}>
           Add link
         </Button>
-        <Button type="button" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving…" : "Save links"}
+        <Button type="button" onClick={handleSave} loading={saving}>
+          Save links
         </Button>
       </div>
-      {saved.length > 0 && <p className={styles.saved} style={{ marginTop: 12 }}>Saved {saved.length} link(s).</p>}
+      {saved.length > 0 && <p className={styles.savedNote}>Saved {saved.length} link(s).</p>}
     </Card>
   );
 }
@@ -229,7 +241,7 @@ function RolesSection() {
           );
         })}
       </div>
-      {error && <p className={styles.saved}>{error}</p>}
+      {error && <p className={styles.savedNote}>{error}</p>}
     </Card>
   );
 }
@@ -324,7 +336,7 @@ export function SettingsPage() {
   }, [hash]);
 
   return (
-    <div>
+    <div className={styles.page}>
       <h1 className={styles.title}>Settings</h1>
 
       <section className={styles.section}>

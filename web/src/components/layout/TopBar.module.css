@@ -188,6 +188,19 @@
   padding: 8px 10px 10px;
   border-bottom: 1px solid var(--vh-border);
   margin-bottom: 4px;
+  text-decoration: none;
+  border-radius: var(--vh-radius-sm);
+  transition: background-color var(--dur-press) var(--ease-out);
+}
+
+.menuHeader:hover,
+.menuHeader:focus-visible {
+  background: var(--vh-surface-2);
+  outline: none;
+}
+
+.menuHeader:hover .menuName {
+  text-decoration: underline;
 }
 
 /* Two text sizes per block: 14 for the name, 13 for handle + presence. */

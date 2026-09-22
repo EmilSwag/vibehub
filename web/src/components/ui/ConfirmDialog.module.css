@@ -1,0 +1,99 @@
+/* Local copies of motion.css's keyframes: CSS Modules hash animation names, so a
+ * module cannot reach the global ones (see styles/motion.css header). */
+@keyframes vh-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes vh-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  /* Above the connect sheet (61), below toasts (100) — a confirm can be raised from
+   * inside the sheet and has to sit on top of it. */
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.42);
+  animation: vh-fade-in var(--dur-state) var(--ease-out) both;
+}
+.scrimOut {
+  animation: vh-fade-in var(--dur-state) var(--ease-out) reverse both;
+}
+
+.wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 81;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--vh-space-4);
+  pointer-events: none;
+}
+
+.dialog {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 380px;
+  padding: var(--vh-space-4);
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-panel);
+}
+.dialog:focus {
+  outline: none;
+}
+
+.dialogIn {
+  animation: vh-pop-in var(--dur-enter) var(--ease-out) both;
+}
+.dialogOut {
+  animation: vh-pop-in var(--dur-state) var(--ease-out) reverse both;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--vh-font-serif);
+  font-weight: 500;
+  font-size: 19px;
+  line-height: 1.3;
+  color: var(--vh-text);
+}
+
+.body {
+  margin: var(--vh-space-2) 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--vh-text-dim);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--vh-space-2);
+  margin-top: var(--vh-space-4);
+}
+
+/* Phone: a confirm is a thumb target, so the two actions go full width and the
+ * destructive one sits on top, furthest from a resting thumb. */
+@media (max-width: 480px) {
+  .actions {
+    flex-direction: column-reverse;
+  }
+  .actions > * {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .scrimOut,
+  .dialogIn,
+  .dialogOut {
+    animation: none;
+  }
+}

@@ -18,11 +18,23 @@ export interface TrackerConfig {
    * producer wrote. See docs/ARCHITECTURE.md §4.6.
    */
   attestedMetadata?: AttestedMetadataConfig;
+  /**
+   * The user's standing answer about starting at login. Absent means "never asked": the
+   * default, under which `start` registers autostart because starting a background tracker
+   * is what the user just asked for. `enabled: false` is written by `autostart disable` and
+   * is what makes that command mean something - without a recorded opt-out the next `start`
+   * would silently put the login item back. See src/autostart.ts.
+   */
+  autostart?: AutostartPreference;
 }
 
 export interface AttestedMetadataConfig {
   enabled: boolean;
   tools: string[];
+}
+
+export interface AutostartPreference {
+  enabled: boolean;
 }
 
 export type PresenceStatus = "active" | "idle" | "offline";

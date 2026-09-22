@@ -10,16 +10,49 @@ this scaffold followed: [`../docs/BUILD_PLAN.md`](../docs/BUILD_PLAN.md) §6.
 ```
 vibehub-tracker login <deviceToken> [--api-url <url>]   # write ~/.vibehub/config.json
 vibehub-tracker set <projectFolder> <alias|hidden>       # remap or hide a project's display name
-vibehub-tracker start                                    # spawn the background heartbeat daemon
+vibehub-tracker start [--no-autostart]                   # spawn the background heartbeat daemon, and start it at login from now on
 vibehub-tracker status                                    # pretty-print ~/.vibehub/status.json
 vibehub-tracker stop                                      # stop the daemon
-vibehub-tracker logout                                    # stop the daemon and remove config.json
+vibehub-tracker autostart enable|disable|status [--dry-run]  # start at login: register, remove, or report
+vibehub-tracker logout                                    # stop the daemon, deregister autostart, remove config.json
 vibehub-tracker uninstall                                 # logout, plus remove the hooks and the `vibehub-tracker` command it owns
 ```
 
 `start` requires a device token from a prior `login`. For local testing, seed one
 via `npm run db:seed` inside `server/` (prints a raw `TrackerToken`; see
 BUILD_PLAN.md §2.2) and pass it to `login`.
+
+## Starting at login
+
+`start` also registers the tracker to start again at every login, so it survives a
+reboot without anyone re-running anything. Installing does **not**: `install.{ps1,sh}`
+and `connect.{ps1,sh}` are setup-only by contract (`web/scripts/test-installers.mjs`
+fails if an install produces a LaunchAgent, a `.plist`, a Startup entry or a `.lnk`).
+Starting a background tracker is the user's decision, and this is what it registers.
+
+One user-scope file per platform, in the place that platform documents for it. No
+elevation, nothing system-wide, nothing hidden — `autostart status` prints the exact
+path, and deleting that file by hand is a supported way to turn it off.
+
+| Platform | File | Mechanism |
+|---|---|---|
+| macOS | `~/Library/LaunchAgents/com.vibehub.tracker.plist` | launchd, `RunAtLoad`, `KeepAlive { SuccessfulExit: false }`, `ThrottleInterval 30` |
+| Linux | `~/.config/autostart/vibehub-tracker.desktop` (honours `XDG_CONFIG_HOME`) | XDG autostart |
+| Windows | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\VibeHub Tracker.vbs` | Startup folder, run by `wscript` so no console window appears |
+
+What the OS launches is the hidden `serve` command, never `start`: it runs the loop in
+that process, owns `tracker.pid`, and knows how to defer to or take over a daemon that
+is already running (see "Daemon model" below).
+
+`autostart disable` removes the file **and** records the choice in `config.json`
+(`autostart: { enabled: false }`), which `start` honours — otherwise the next `start`
+would silently put the login entry back. `logout` and `uninstall` deregister it too: a
+login entry with no `config.json` would wake a credential-less daemon at every boot.
+
+A registration this install did not write is reported and left alone, never
+overwritten. On macOS that specifically protects the Mac app, which writes the same
+`com.vibehub.tracker` label from Swift and drives it from its own "Track at login"
+switch.
 
 `status` also prints a `Seeing:` line — every tool and raw model id the daemon
 observed in the last 10 minutes, e.g.
@@ -30,7 +63,7 @@ profile shows a model you don't expect, this is where to check what was actually
 
 | File | Written by | Purpose |
 |---|---|---|
-| `config.json` | `login`, `set` | `{ apiUrl, deviceToken, projectAliases, heartbeatIntervalMs?, idleThresholdMs?, toolProcessNames? }` |
+| `config.json` | `login`, `set`, `autostart` | `{ apiUrl, deviceToken, projectAliases, heartbeatIntervalMs?, idleThresholdMs?, toolProcessNames?, autostart? }` |
 | `status.json` | the daemon | current presence snapshot — the only file `vibehub/macos` reads (ARCHITECTURE.md §4.4); additionally carries `sources` (see below) |
 | `queue.json` | the daemon | FIFO-ordered heartbeat events that failed to POST, retried on the next tick |
 | `tracker.pid` | `start` | pid of the detached daemon, used by `stop`/`status` |

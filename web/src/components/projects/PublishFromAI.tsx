@@ -105,8 +105,8 @@ export function PublishFromAI() {
                   </div>
                 ) : (
                   <div className={styles.tokenRow}>
-                    <Button type="button" size="sm" onClick={mint} disabled={busy}>
-                      {busy ? "Creating…" : "Create token"}
+                    <Button type="button" size="sm" onClick={mint} loading={busy}>
+                      Create token
                     </Button>
                     <span className={styles.note}>Shown once. Revoke anytime in Settings → Tracker.</span>
                   </div>

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { CONFIG_PATH, readJson, removeFile, writeJsonAtomic } from "./paths";
 import { ATTESTED_TOOLS, isAttestedTool, MAX_EVENT_AGE_MS, objectRecord, safeAlias, safeApiOrigin, safeDeviceToken } from "./privacy";
-import type { AttestedMetadataConfig, TrackerConfig } from "./types";
+import type { AttestedMetadataConfig, AutostartPreference, TrackerConfig } from "./types";
 
 /**
  * The opt-in receiver switch. Anything malformed is a hard `null` (the whole config
@@ -29,6 +29,27 @@ export function projectAttestedMetadata(value: unknown): AttestedMetadataConfig 
     tools.push(tool);
   }
   return { enabled: a.enabled, tools };
+}
+
+/**
+ * The standing autostart answer. Same strictness as every other optional field here -
+ * a shape we do not recognise rejects the whole file rather than being read as a
+ * preference the user never expressed. Getting this wrong in the permissive direction
+ * would mean a typo silently re-enabling a login item somebody switched off.
+ */
+export function projectAutostart(value: unknown): AutostartPreference | null | "invalid" {
+  if (value === undefined) return null;
+  const a = objectRecord(value);
+  if (!a || typeof a.enabled !== "boolean" || Object.keys(a).length !== 1) return "invalid";
+  return { enabled: a.enabled };
+}
+
+/**
+ * True only for an explicit `autostart disable`. An absent entry is not an opt-out: it
+ * means the question has never been answered, and `start` registers autostart then.
+ */
+export function autostartOptedOut(config: TrackerConfig | null): boolean {
+  return config?.autostart?.enabled === false;
 }
 
 /** True only when the switch is on AND at least one tool was explicitly listed. */
@@ -59,12 +80,28 @@ export function projectConfig(value: unknown): TrackerConfig | null {
   }
   const attested = projectAttestedMetadata(c.attestedMetadata);
   if (attested === "invalid") return null;
+  const autostart = projectAutostart(c.autostart);
+  if (autostart === "invalid") return null;
   return { apiUrl, deviceToken: c.deviceToken, projectAliases,
     ...(c.heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs: c.heartbeatIntervalMs as number } : {}),
     ...(c.idleThresholdMs !== undefined ? { idleThresholdMs: c.idleThresholdMs as number } : {}),
-    ...(attested ? { attestedMetadata: attested } : {}) };
+    ...(attested ? { attestedMetadata: attested } : {}),
+    ...(autostart ? { autostart } : {}) };
 }
 
+/** Records the standing autostart answer, leaving every other field exactly as it was. */
+export function setAutostartPreference(config: TrackerConfig, enabled: boolean): TrackerConfig {
+  const next: TrackerConfig = { ...config, autostart: { enabled } };
+  writeConfig(next);
+  return next;
+}
+
+/**
+ * Deliberately blind to `autostart`: the fingerprint fences COLLECTED state, so that
+ * records gathered under one account or consent setting cannot survive into another.
+ * When the tracker starts changes nothing about what it collects, and folding it in
+ * would discard the daemon's status snapshot every time the preference moved.
+ */
 export function configFingerprint(config: TrackerConfig): string {
   return createHash("sha256").update(JSON.stringify({ apiUrl: config.apiUrl, deviceToken: config.deviceToken,
     aliases: Object.entries(config.projectAliases).sort(([a], [b]) => a.localeCompare(b)),

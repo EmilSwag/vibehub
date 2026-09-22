@@ -15,9 +15,6 @@ export const NAV_ICON_NAMES = [
   "settings",
   "user",
   "logout",
-  "inbox",
-  "sun",
-  "moon",
 ] as const;
 
 export type NavIconName = (typeof NAV_ICON_NAMES)[number];

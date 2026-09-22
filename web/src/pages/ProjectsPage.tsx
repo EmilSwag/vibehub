@@ -7,9 +7,10 @@ import { arrivalToast, externalArrivals } from "../lib/projectArrivals";
 import type { Project } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { ErrorState } from "../components/ui/ErrorState";
 import { Icon } from "../components/ui/Icon";
-import { Skeleton } from "../components/ui/Skeleton";
-import { ProjectCard } from "../components/ProjectCard";
+import { ProjectCard, ProjectCardSkeleton } from "../components/ProjectCard";
 import { ProjectComposer } from "../components/projects/ProjectComposer";
 import { PublishFromAI } from "../components/projects/PublishFromAI";
 import styles from "./ProjectsPage.module.css";
@@ -20,6 +21,13 @@ export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  /** A failed snapshot is not an empty profile — without this the page tells a user
+   *  with posts that they have none (skills/emil_design_eng §5). */
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  /** Deleting is destructive and irreversible, so it is confirmed — in-product, not
+   *  through the OS dialog `window.confirm` puts on screen. */
+  const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
   const changedProjectIds = useRef(new Set<string>());
   // Last snapshot's ids, so a later refresh can tell "always been there" apart from
   // "just appeared" — null until the first load resolves. See lib/projectArrivals.ts.
@@ -63,10 +71,12 @@ export function ProjectsPage() {
             ...[...prev].filter((id) => changed.has(id)),
           ]));
         })
-        .catch(() => undefined)
+        .catch(() => { if (active) setFailed(true); })
         .finally(() => { if (active) setLoading(false); });
     }
 
+    setLoading(true);
+    setFailed(false);
     void refresh();
     // Catches the common case: copy the AI-publish prompt, alt-tab to the agent, come
     // back — the tab regaining visibility is the one moment worth re-checking without
@@ -79,11 +89,15 @@ export function ProjectsPage() {
       active = false;
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [user, pushToast]);
+  }, [user, pushToast, attempt]);
+
+  // Retry drops the grid back to its skeleton, so recovery looks like a first load.
+  const retry = () => setAttempt((n) => n + 1);
 
   function saved(project: Project) {
     changedProjectIds.current.add(project.id);
     setLoading(false);
+    setFailed(false);
     setProjects((prev) => {
       const exists = prev.some((p) => p.id === project.id);
       return exists ? prev.map((p) => (p.id === project.id ? project : p)) : [project, ...prev];
@@ -97,10 +111,14 @@ export function ProjectsPage() {
   }
 
   async function remove(project: Project) {
-    if (!window.confirm(`Delete “${project.name}”? This can't be undone.`)) return;
-    await projectsApi.remove(project.id);
-    changedProjectIds.current.add(project.id);
-    setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    try {
+      await projectsApi.remove(project.id);
+      changedProjectIds.current.add(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      setPendingDelete(null);
+    } catch {
+      pushToast({ title: "Couldn't delete", body: `${project.name} is still there.` });
+    }
   }
 
   async function toggleLike(project: Project) {
@@ -156,9 +174,16 @@ export function ProjectsPage() {
       {loading ? (
         <div className={styles.grid}>
           {Array.from({ length: 3 }, (_, i) => (
-            <Skeleton key={i} variant="block" height={220} style={stagger(i)} />
+            <ProjectCardSkeleton key={i} style={stagger(i)} />
           ))}
         </div>
+      ) : failed && projects.length === 0 ? (
+        /* Only when there is nothing else to show. `refresh` also runs when the tab
+           regains visibility, and a transient failure there must not replace posts
+           the user is already looking at with an error. */
+        <Card className={styles.empty}>
+          <ErrorState onRetry={retry}>Couldn't load your posts.</ErrorState>
+        </Card>
       ) : projects.length === 0 ? (
         <Card className={styles.empty}>
           <Icon name="image" size={22} />
@@ -188,7 +213,7 @@ export function ProjectsPage() {
                   <button
                     type="button"
                     className={[styles.iconBtn, styles.iconBtnDanger].join(" ")}
-                    onClick={() => remove(project)}
+                    onClick={() => setPendingDelete(project)}
                     aria-label="Delete"
                     title="Delete"
                   >
@@ -200,6 +225,15 @@ export function ProjectsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={pendingDelete ? `Delete “${pendingDelete.name}”?` : "Delete post?"}
+        body="This can't be undone."
+        confirmLabel="Delete"
+        onConfirm={() => (pendingDelete ? remove(pendingDelete) : undefined)}
+        onClose={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

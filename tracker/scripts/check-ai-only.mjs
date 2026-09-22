@@ -281,7 +281,7 @@ function createHarness() {
     advance: async (ms) => { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); if (timer.interval) timers.set(id, { ...timer, at: now + timer.ms }); timer.fn(); } await h.drain(); },
     clean: () => { assert.deepEqual(violations, []); assert.equal(fds.size, 0); assert.ok(!dump(state).includes(CANARY)); assert.ok(!logs.join("\n").includes(CANARY));
       for (const post of h.posts()) { const text = JSON.stringify(post); assert.ok(!text.includes(CANARY)); assert.ok(!text.includes("UNRELATED_NEVER_OPEN")); assert.ok(!text.includes(config.deviceToken)); } },
-    dispose: () => { state.detector.clear(); timers.clear(); for (const fd of fds.keys()) fs.closeSync(fd); fs.rmSync(home, { recursive: true, force: true }); },
+    dispose: () => { state.detector.clear(); timers.clear(); for (const fd of fds.keys()) fs.closeSync(fd); try { fs.rmSync(home, { recursive: true, force: true }); } catch {} },
   };
   return h;
 }
@@ -870,8 +870,13 @@ if (!bundleMode) {
   // Round 5 adds `hook` (the Cursor/Windsurf producer a vendor spawns) and `hooks` (how a
   // person turns it on). A bundle without them is STALE, not broken: the fix is
   // `npm --prefix vibehub/tracker run bundle`, whose output lands in web/public/tracker/.
+  //
+  // `autostart` (enable | disable | status) joins them: the one place that writes an OS
+  // login entry. It reads and writes nothing but that file and the preference in
+  // config.json, so it collects nothing and this gate has no more to say about it than
+  // that it is registered - which is exactly what this case is for.
   assert.deepEqual(plain(h.api.commands),
-    ["login", "set", "start", "status", "stop", "logout", "uninstall", "run-loop", "serve", "hook", "hooks"],
+    ["login", "set", "start", "autostart", "status", "stop", "logout", "uninstall", "run-loop", "serve", "hook", "hooks"],
     "served bundle is out of date - re-run `npm run bundle` in tracker/");
 });
 
@@ -921,6 +926,6 @@ try {
   if (failed) process.exitCode = 1;
 } catch (error) { console.error(error.stack ?? error); process.exitCode = 1; }
 finally {
-  fs.rmSync(runRoot, { recursive: true, force: true });
+  try { fs.rmSync(runRoot, { recursive: true, force: true }); } catch {}
   for (const key of Object.keys(originalEnv)) { if (originalEnv[key] === undefined) delete process.env[key]; else process.env[key] = originalEnv[key]; }
 }

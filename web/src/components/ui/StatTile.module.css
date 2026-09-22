@@ -60,12 +60,13 @@
 /* Names wrap; numbers never do. */
 .text {
   font-family: var(--vh-font-sans);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 500;
-  line-height: 24px;
+  line-height: 20px;
   letter-spacing: -0.01em;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Top tool only. `.text` above is Top model's contract (a name must read whole,

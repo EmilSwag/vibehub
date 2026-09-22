@@ -313,6 +313,15 @@ export function showHomeDevices(devices: readonly { lastUsedAt: string | null }[
  * "keys" or "tokens", which the person never saw. Never-used tokens are dropped without
  * asking, so this is only ever about a real device.
  */
+export function revokeQuestion(label: string): { title: string; body: string } {
+  return {
+    title: `Revoke ${label}?`,
+    body: "This removes reporting authorization, but does not guarantee local shutdown or erase history. Reconnect with a new device command to report again.",
+  };
+}
+
+/** The same question as one string, for anything that can only take one. */
 export function revokePrompt(label: string): string {
-  return `Revoke ${label}? This removes reporting authorization, but does not guarantee local shutdown or erase history. Reconnect with a new device command to report again.`;
+  const { title, body } = revokeQuestion(label);
+  return `${title} ${body}`;
 }

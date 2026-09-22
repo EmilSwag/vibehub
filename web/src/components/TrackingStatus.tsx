@@ -15,7 +15,7 @@ import { stagger } from "../lib/motion";
 import { modelRowLabel } from "../lib/recentModels";
 import { sumToday } from "../lib/sources";
 import { TOKENS_NOT_REPORTED, TOKENS_NOT_REPORTED_TITLE, isTokenlessTool } from "../lib/supportedTools";
-import { homeDevices, revokePrompt, showHomeDevices } from "../lib/trackerPing";
+import { homeDevices, revokeQuestion, showHomeDevices } from "../lib/trackerPing";
 import {
   TRACKER_HISTORY_NOTICE,
   TRACKER_LOCAL_READS,
@@ -26,6 +26,7 @@ import {
 } from "../lib/connectPrompt";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { ModelGlyph } from "./ui/ModelGlyph";
 import { PresenceBlock, useNow } from "./ui/PresenceBlock";
 import { Skeleton } from "./ui/Skeleton";
@@ -68,17 +69,27 @@ interface DeviceListProps {
 /** label · "seen 3m ago" / "never used" · Revoke. One row per non-revoked token. */
 export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<TrackerDevice | null>(null);
 
-  const revoke = async (d: TrackerDevice) => {
+  const revoke = (d: TrackerDevice) => {
     if (!onRevoke) return;
     // A used token is a machine that is reporting; revoking it stops that tracker for
     // good — the daemon gets rejected and only a reinstall brings it back. A ghost button
     // in a list is one slip away, so ask first (Projects do the same before delete). A
     // never-used token is harmless to drop and gets no dialog.
-    if (d.lastUsedAt && !window.confirm(revokePrompt(d.label))) return;
+    if (d.lastUsedAt) {
+      setConfirming(d);
+      return;
+    }
+    void run(d);
+  };
+
+  const run = async (d: TrackerDevice) => {
+    if (!onRevoke) return;
     setBusy(d.id);
     try {
       await onRevoke(d.id);
+      setConfirming(null);
     } finally {
       setBusy(null);
     }
@@ -95,12 +106,21 @@ export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
           </span>
           <span className={styles.rowRight}>{d.lastUsedAt ? `seen ${agoShort(d.lastUsedAt, now)}` : "never used"}</span>
           {onRevoke && (
-            <Button size="sm" variant="ghost" onClick={() => revoke(d)} disabled={busy === d.id}>
+            <Button size="sm" variant="ghost" onClick={() => revoke(d)} loading={busy === d.id}>
               Revoke
             </Button>
           )}
         </div>
       ))}
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming ? revokeQuestion(confirming.label).title : ""}
+        body={confirming ? revokeQuestion(confirming.label).body : undefined}
+        confirmLabel="Revoke"
+        onConfirm={() => (confirming ? run(confirming) : undefined)}
+        onClose={() => setConfirming(null)}
+      />
     </div>
   );
 }
@@ -165,10 +185,10 @@ export function trackerTitle(status: TrackerStatusData): string {
  * What Home keeps once the explainer has been dismissed: one line that answers
  * "is anything being tracked right now?" without a click, so it never hides itself.
  *
- *   ● Connected   in vibehub · ⌥ Cursor · ✦ Claude Sonnet 5 · for 12m          1.6k tokens · 34m today   Tracker settings
- *   ● Offline     last heartbeat 2h ago                                        1.6k tokens · 34m today   Tracker settings
+ *   (● Connected)  in vibehub · ⌥ Cursor · ✦ Claude Sonnet 5 · for 12m        1.6k tokens   34m today   Tracker settings
+ *   (● Offline)    last ping 2h ago                                           1.6k tokens   34m today   Tracker settings
  *
- * Same dot, same title, same counter as the panel above — a smaller cut of the
+ * Same badge, same word, same counter as the panel above — a smaller cut of the
  * same thing, not a second design. Wraps to two rows under 640px. */
 
 export interface TrackingStripProps {
@@ -191,10 +211,15 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
 
   return (
     <Card className={cx(styles.strip, className)} data-live={live || undefined} aria-label="Your tracker">
-      <StatusDot status={presence.status} pulse={live} size={10} className={styles.stripDot} />
-
       <div className={styles.stripMain}>
-        <strong className={cx(styles.title, live && styles.titleLive)}>{trackerTitle(status)}</strong>
+        {/* The badge is one object: dot, word, and the live tint behind both. It is the
+            same one the panel wears, so the strip stays a smaller cut of that card and
+            not a second design — and the dot no longer needs a hand-tuned offset to
+            land on the word's line. */}
+        <span className={styles.statusPill}>
+          <StatusDot status={presence.status} pulse={live} size={8} className={styles.headDot} />
+          <strong className={cx(styles.title, live && styles.titleLive)}>{trackerTitle(status)}</strong>
+        </span>
         {activity && parts ? (
           <span className={styles.stripActivity}>
             <span className={styles.stripIn}>in</span>
@@ -232,21 +257,20 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
       <span className={styles.stripRight}>
         <span className={styles.stripCounter}>
           {today.tokensReported ? (
-            <>
+            <span className={styles.metric}>
               <span className={styles.stripValue}>
                 {today.estimated ? "~" : ""}
                 {formatTokens(today.tokens)}
               </span>
               <span className={styles.counterUnit}>tokens</span>
-            </>
+            </span>
           ) : (
             <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
           )}
-          <span className={styles.sep} aria-hidden="true">
-            ·
+          <span className={styles.metric}>
+            <span className={styles.stripValue}>{formatActiveTime(today.activeSeconds)}</span>
+            <span className={styles.counterUnit}>today</span>
           </span>
-          <span className={styles.stripValue}>{formatActiveTime(today.activeSeconds)}</span>
-          <span className={styles.counterUnit}>today</span>
         </span>
         {onGoOnline && presence.status === "offline" && (
           <Button size="sm" onClick={onGoOnline} className={styles.goOnline}>
@@ -299,12 +323,12 @@ export interface TrackingStatusProps {
  * and what the celebration layer leaves behind, showing the same two numbers so the
  * panel is never a blank frame after the fireworks stop.
  *
- *   ● Connected                            ← green only here (dot + title)
- *     last heartbeat 12s ago · every 30s
- *   Today          1.2k tokens · 34m active
- *   Now            Online · in vibehub · Claude Code · Claude Fable 5.1 · for 12m
- *   Models         ✦ Claude Fable 5.1 · ⌘ Claude Code       160 today · 12s ago
- *   Devices        Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1 *used*)
+ *   (● Connected)                          ← green only here (dot, word, its tint)
+ *   last ping 12s ago · every 30s
+ *   TODAY     1.2k tokens   34m active
+ *   NOW       Online · in vibehub · Claude Code · Claude Fable 5.1 · for 12m
+ *   MODELS    ✦ Claude Fable 5.1 · ⌘ Claude Code           160 today · 12s ago
+ *   DEVICES   Windows · Sep 4 · seen 12s ago · Revoke   (settings; home only if > 1 *used*)
  *   Supported AI-log metadata; local reads and public stats disclosed.   [Got it]
  *
  * Relative times re-render every 5s. The wrapper owns polling and realtime.
@@ -332,15 +356,17 @@ export function TrackingStatus({
     return (
       <Card className={cx(styles.panel, className)} aria-busy="true">
         <div className={styles.head}>
-          <Skeleton variant="circle" width={10} className={styles.headDot} />
-          <div className={styles.headText}>
-            <Skeleton width={120} height={14} />
-            <Skeleton width={190} height={12} />
-          </div>
+          {/* The badge's own silhouette, not a bare dot: the head is 26px of pill plus
+              one meta line, and the skeleton has to be the same or the card grows
+              under the reader the moment the status lands. */}
+          <Skeleton variant="pill" width={118} height={26} />
+          <Skeleton width={190} height={16} />
         </div>
+        {/* Each section's first child stands in for the label and lands in the rail,
+            by position — the same rule the real labels are placed by. */}
         <div className={styles.section}>
           <Skeleton width={38} height={12} />
-          <Skeleton width={168} height={17} />
+          <Skeleton width={168} height={22} />
         </div>
         <div className={styles.section}>
           <Skeleton width={30} height={12} />
@@ -349,30 +375,37 @@ export function TrackingStatus({
         </div>
         <div className={styles.section}>
           <Skeleton width={54} height={12} />
-          {Array.from({ length: HOME_SOURCE_ROWS }, (_, i) => (
-            <div key={i} className={styles.row}>
-              <span className={styles.rowMain}>
-                <Skeleton variant="circle" width={14} />
-                <Skeleton width="45%" height={13} />
-              </span>
-              <span className={styles.rowRight}>
-                <Skeleton width={96} height={12} />
-              </span>
-            </div>
-          ))}
+          {/* One `.rows` wrapper, exactly as the real list renders: as loose children
+              of the grid each row would take a row-gap the real rows do not have, and
+              five of those is a 40px jump. */}
+          <div className={styles.rows}>
+            {Array.from({ length: HOME_SOURCE_ROWS }, (_, i) => (
+              <div key={i} className={styles.row}>
+                <span className={styles.rowMain}>
+                  <Skeleton variant="circle" width={14} />
+                  <Skeleton width="45%" height={13} />
+                </span>
+                <span className={styles.rowRight}>
+                  <Skeleton width={96} height={12} />
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
         <div className={styles.section}>
           <Skeleton width={54} height={12} />
-          {[0, 1].map((i) => (
-            <div key={i} className={styles.row}>
-              <span className={styles.rowMain}>
-                <Skeleton width="28%" height={13} />
-              </span>
-              <span className={styles.rowRight}>
-                <Skeleton width={82} height={12} />
-              </span>
-            </div>
-          ))}
+          <div className={styles.rows}>
+            {[0, 1].map((i) => (
+              <div key={i} className={styles.row}>
+                <span className={styles.rowMain}>
+                  <Skeleton width="28%" height={13} />
+                </span>
+                <span className={styles.rowRight}>
+                  <Skeleton width={82} height={12} />
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
         <div className={styles.footer}>
           <div className={styles.privacy}>
@@ -401,17 +434,19 @@ export function TrackingStatus({
   return (
     <Card className={cx(styles.panel, className)} data-live={live || undefined}>
       <div className={styles.head}>
-        <StatusDot status={status.presence.status} pulse={live} size={10} className={styles.headDot} />
-        <div className={styles.headText}>
+        {/* Dot, word and the soft live tint behind both — one badge, the same one the
+            strip wears. Everything below it is grayscale. */}
+        <span className={styles.statusPill}>
+          <StatusDot status={status.presence.status} pulse={live} size={8} className={styles.headDot} />
           <strong className={cx(styles.title, live && styles.titleLive)}>{trackerTitle(status)}</strong>
-          <span className={styles.meta}>
-            {heartbeat} · {everyLabel(status.heartbeatIntervalMs)}
-          </span>
-          {/* Directly under the status word, because it is what "Offline" is failing to
-              explain. Shared by both variants: Settings' permanent panel and Home's
-              first-run explainer ask the same question, and only one is ever on screen. */}
-          <StaleTrackerHint status={status} className={styles.headHint} />
-        </div>
+        </span>
+        <span className={styles.meta}>
+          {heartbeat} · {everyLabel(status.heartbeatIntervalMs)}
+        </span>
+        {/* Directly under the status word, because it is what "Offline" is failing to
+            explain. Shared by both variants: Settings' permanent panel and Home's
+            first-run explainer ask the same question, and only one is ever on screen. */}
+        <StaleTrackerHint status={status} className={styles.headHint} />
       </div>
 
       {/* The same counter the celebration layer showed, so closing it reveals the
@@ -420,21 +455,20 @@ export function TrackingStatus({
         <span className={styles.label}>Today</span>
         <span className={styles.counter}>
           {today.tokensReported ? (
-            <>
+            <span className={styles.metric}>
               <span className={styles.counterValue}>
                 {today.estimated ? "~" : ""}
                 {formatTokens(today.tokens)}
               </span>
               <span className={styles.counterUnit}>tokens</span>
-            </>
+            </span>
           ) : (
             <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
           )}
-          <span className={styles.sep} aria-hidden="true">
-            ·
+          <span className={styles.metric}>
+            <span className={styles.counterValue}>{formatActiveTime(today.activeSeconds)}</span>
+            <span className={styles.counterUnit}>active</span>
           </span>
-          <span className={styles.counterValue}>{formatActiveTime(today.activeSeconds)}</span>
-          <span className={styles.counterUnit}>active</span>
         </span>
       </section>
 
@@ -475,8 +509,8 @@ export function TrackingStatus({
           <DeviceList devices={devices} now={now} onRevoke={variant === "settings" ? onRevoke : undefined} />
           {onAddDevice && !addDeviceBlock && (
             <div>
-              <Button size="sm" variant="secondary" onClick={onAddDevice} disabled={addingDevice}>
-                {addingDevice ? "Creating…" : "Add device"}
+              <Button size="sm" variant="secondary" onClick={onAddDevice} loading={addingDevice}>
+                Add device
               </Button>
             </div>
           )}

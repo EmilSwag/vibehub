@@ -218,7 +218,13 @@ export function TopBar() {
                   aria-label="Account"
                   onKeyDown={onMenuKeyDown}
                 >
-                  <div className={styles.menuHeader}>
+                  <Link
+                    to={`/u/${user.username}`}
+                    role="menuitem"
+                    className={styles.menuHeader}
+                    onClick={() => closeMenu(false)}
+                    aria-label={`Profile for ${user.displayName}`}
+                  >
                     <span className={styles.menuName}>{user.displayName}</span>
                     <span className={styles.menuHandle}>@{user.username}</span>
                     <PresenceBlock
@@ -227,7 +233,7 @@ export function TopBar() {
                       showElapsed={false}
                       className={styles.menuPresence}
                     />
-                  </div>
+                  </Link>
                   <Link to={`/u/${user.username}`} role="menuitem" className={styles.menuItem}>
                     <NavIcon name="user" size={16} className={styles.menuIcon} />
                     Profile

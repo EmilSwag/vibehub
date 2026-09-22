@@ -84,7 +84,6 @@ interface RowProps {
   /** The server dates its buckets (round 7). Without dates the hours are a 30-day
    *  total, not a lifetime one, so they drop the "on record" claim. */
   dated: boolean;
-  compact?: boolean;
   index: number;
   /** The tick this row was picked at, or null when it is not the picked row. A number
    *  rather than a boolean so a *repeat* pick of the same row is still a new value and
@@ -110,7 +109,6 @@ function Row({
   row,
   live,
   dated,
-  compact,
   index,
   selectedAt,
   open,
@@ -154,7 +152,7 @@ function Row({
 
   return (
     <li ref={item} className={cx(styles.item, muted && styles.itemMuted)} style={stagger(index)}>
-      <div className={cx(styles.row, compact && styles.rowCompact, selected && styles.rowSelected)}>
+      <div className={cx(styles.row, selected && styles.rowSelected)}>
         {/* The row is a real button stretched over the whole band. It is a sibling
             behind the content rather than a wrapper because the tool chips are buttons
             too and a button cannot nest in a button; the content is inert to the
@@ -170,8 +168,10 @@ function Row({
           aria-describedby={`${detailId}-cost`}
         />
 
-        <span className={cx(styles.capsule, compact && styles.capsuleCompact)} aria-hidden="true">
-          <ModelGlyph family={glyph} size={compact ? 16 : 26} />
+        {/* One mark, one size, every row. A revealed row used to shrink it to 34px,
+            which gave the list two left edges and two numbers columns. */}
+        <span className={styles.capsule} aria-hidden="true">
+          <ModelGlyph family={glyph} size={24} />
         </span>
 
         <span className={styles.main}>
@@ -270,8 +270,8 @@ function Row({
   );
 }
 
-/** The exact silhouette of the loaded list — same grid, same 120x45 capsule holding
- *  the 26px mark, so nothing moves when the real rows land. */
+/** The exact silhouette of the loaded list — same grid, same 48px mark, same 136px
+ *  numbers column, so nothing moves when the real rows land. */
 function RecentModelsSkeleton() {
   return (
     <ul className={cx(styles.list, "stagger")} aria-hidden="true">
@@ -522,7 +522,6 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
                   row={row}
                   live={live.has(row.label)}
                   dated={dated}
-                  compact={i >= PREVIEW_ROWS}
                   index={i}
                   selectedAt={selectionTickFor(selection, row.label)}
                   open={openRow === row.label}

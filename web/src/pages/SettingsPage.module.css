@@ -1,13 +1,39 @@
+/*
+ * Settings — one column of small cards, each a single editable thing.
+ *
+ * The page caps itself at 760px inside the shell's 1100px. Settings is a stack of
+ * short forms, not a dashboard: at 1100px a 480px form sat in a card that ran the
+ * full width, so every row ended in ~600px of empty paper and the eye had to travel
+ * back across it to find the next label. Capping the page instead of the form lets
+ * each control fill its card, which is what removes the hole rather than moving it.
+ *
+ * Fields sit on --vh-surface-2 rather than --vh-surface: on a card that is already
+ * --vh-surface a bordered white input is a box drawn inside a box (the house rule
+ * against nesting cards). The tint marks the editable area on its own, so the border
+ * can go transparent until focus, where it becomes the ink ring.
+ */
+
+.page {
+  max-width: 760px;
+}
+
 .title {
   font-family: var(--vh-font-serif);
   font-weight: 500;
   font-size: 28px;
+  line-height: 34px;
   color: var(--vh-text);
-  margin: 0 0 var(--vh-space-5);
+  margin: 0 0 var(--vh-space-4);
 }
 
+/* 24px between sections, not 40: each card is short, and the section title already
+ * separates one from the next. 40px left the page reading as five stranded islands. */
 .section {
-  margin-bottom: var(--vh-space-5);
+  margin-bottom: var(--vh-space-4);
+}
+
+.section:last-child {
+  margin-bottom: 0;
 }
 
 /* Anchor target for /settings#tracker — keeps the heading off the top edge. */
@@ -25,77 +51,54 @@
   margin: 0 0 var(--vh-space-2);
 }
 
+/* ---- forms ---- */
+
 .form {
   display: flex;
   flex-direction: column;
   gap: var(--vh-space-3);
-  max-width: 480px;
 }
 
-.avatarRow {
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The tint is the field's edge, so the border only appears when it means something.
+ * Specificity beats ui/Input's own `.field` (one class) without touching it: every
+ * other surface in the product keeps the white input. */
+.form :is(input, textarea),
+.linkRow :is(input, textarea) {
+  background: var(--vh-surface-2);
+  border-color: transparent;
+  transition:
+    background var(--dur-state) var(--ease-out),
+    border-color var(--dur-state) var(--ease-out);
+}
+
+.form :is(input, textarea):hover:not(:focus),
+.linkRow :is(input, textarea):hover:not(:focus) {
+  background: var(--vh-accent-soft);
+}
+
+/* Focus lifts the field off the tint and onto the card: the one place in the form
+ * that is white is the one you are typing in. */
+.form :is(input, textarea):focus,
+.linkRow :is(input, textarea):focus {
+  background: var(--vh-surface);
+  border-color: var(--vh-accent);
+}
+
+.form textarea {
+  resize: vertical;
+  min-height: 84px;
+  line-height: 1.45;
+}
+
+.formActions {
   display: flex;
   align-items: center;
   gap: var(--vh-space-3);
-}
-
-.linkRow {
-  display: flex;
-  gap: var(--vh-space-2);
-  align-items: center;
-}
-
-.removeBtn {
-  background: none;
-  border: none;
-  color: var(--vh-text-faint);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 4px 8px;
-}
-
-.removeBtn:hover {
-  color: var(--vh-accent-hover);
-}
-
-.tokenRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--vh-space-3);
-  border-bottom: 1px solid var(--vh-border);
-}
-
-.tokenRow:last-child {
-  border-bottom: none;
-}
-
-.tokenLabel {
-  font-family: var(--vh-font-sans);
-  font-size: 14px;
-  color: var(--vh-text);
-}
-
-.tokenMeta {
-  font-family: var(--vh-font-sans);
-  font-size: 12px;
-  color: var(--vh-text-faint);
-}
-
-.tokenValue {
-  font-family: var(--vh-font-mono);
-  font-size: 13px;
-  background: var(--vh-surface-2);
-  padding: var(--vh-space-3);
-  border-radius: var(--vh-radius-md);
-  word-break: break-all;
-  margin-bottom: var(--vh-space-3);
-}
-
-.newTokenForm {
-  display: flex;
-  gap: var(--vh-space-2);
-  margin-bottom: var(--vh-space-3);
 }
 
 .saved {
@@ -104,41 +107,161 @@
   font-family: var(--vh-font-sans);
 }
 
-/* role chips */
+/* Same ink as .saved, but as a paragraph under a block rather than a word beside a
+ * button — it needs the space a <p> does not get from the flex row it follows. */
+.savedNote {
+  margin: var(--vh-space-3) 0 0;
+  color: var(--vh-text-dim);
+  font-size: 13px;
+  font-family: var(--vh-font-sans);
+}
+
+/* ---- avatar ----
+ * A 3px ring of panel tint around the portrait, which is the same trick the fields
+ * use: the mark reads as seated in the card rather than pasted onto it. The divider
+ * under the row is what separates the portrait from the name/bio form — the form has
+ * no card of its own, and two cards would nest. */
+
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-3);
+  padding-bottom: var(--vh-space-3);
+  margin-bottom: var(--vh-space-3);
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.avatarFrame {
+  display: inline-flex;
+  flex: none;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--vh-surface-2);
+}
+
+/* The button is wrapped in a <label> so the hidden file input can sit beside it;
+ * without this the label is a block and the button stretches across the card. */
+.avatarUpload {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* ---- external links ---- */
+
+.linkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--vh-space-2);
+}
+
+.linkRow + .linkRow {
+  margin-top: var(--vh-space-2);
+}
+
+/* The URL is the row's subject and the label is an aside, so they split 2:1 rather
+ * than evenly. Both need min-width: 0 or a long URL refuses to shrink. */
+.linkUrl {
+  flex: 2 1 0;
+  min-width: 0;
+}
+
+.linkLabel {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.removeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--vh-radius-pill);
+  background: none;
+  color: var(--vh-text-faint);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
+}
+
+.removeBtn:hover {
+  background: var(--vh-surface-2);
+  color: var(--vh-text);
+}
+
+.removeBtn:active {
+  transform: scale(0.94);
+}
+
+.linkActions {
+  display: flex;
+  gap: var(--vh-space-2);
+  margin-top: var(--vh-space-3);
+}
+
+/* Touch: the × keeps its 32px look and gains a 44px target around it. */
+@media (pointer: coarse) {
+  .removeBtn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ---- role pills ----
+ * Filled, not outlined: five hollow chips in a row read as five empty inputs. The
+ * tint carries the resting state, ink carries the chosen one, and nothing between
+ * them changes size — only lightness, per the house rule on hover. */
+
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--vh-space-2);
 }
+
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px 7px 9px;
+  min-height: 36px;
+  padding: 0 14px 0 11px;
   border-radius: var(--vh-radius-pill);
-  border: 1px solid var(--vh-border-strong);
-  background: transparent;
-  color: var(--vh-text-muted);
+  border: 1px solid transparent;
+  background: var(--vh-surface-2);
+  color: var(--vh-text-dim);
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition:
     background-color var(--dur-press) var(--ease-out),
     color var(--dur-press) var(--ease-out),
-    border-color var(--dur-press) var(--ease-out),
     transform var(--dur-press) var(--ease-out);
 }
+
 .chip:hover {
-  border-color: var(--vh-text-muted);
+  background: var(--vh-accent-soft);
   color: var(--vh-text);
 }
+
 .chip:active {
   transform: scale(0.97);
 }
+
 .chipOn {
-  background: var(--vh-text);
-  border-color: var(--vh-text);
-  color: var(--vh-bg);
+  background: var(--vh-accent);
+  border-color: var(--vh-accent);
+  color: var(--vh-on-accent);
+}
+
+.chipOn:hover {
+  background: var(--vh-accent-hover);
+  color: var(--vh-on-accent);
 }
 
 /* appearance — 3-way segmented control. Same look as ConnectTools .seg, 36px
@@ -204,4 +327,21 @@
   margin: 12px 0 0;
   font-size: 12.5px;
   color: var(--vh-text-faint);
+}
+
+/* Narrow: the two link fields stop competing for one line and the × keeps its own. */
+@media (max-width: 560px) {
+  .linkRow {
+    flex-wrap: wrap;
+  }
+  .linkUrl {
+    flex: 1 1 100%;
+  }
+  .linkLabel {
+    flex: 1 1 0;
+  }
+  .linkActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }

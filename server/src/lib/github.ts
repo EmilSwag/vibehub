@@ -130,7 +130,24 @@ export interface RepoDigest {
 
 const COMMITS_CACHE_TTL_MS = 10 * 60 * 1000;
 const REPO_BROWSE_CACHE_TTL_MS = 10 * 60 * 1000;
-const REPOS_CACHE_TTL_MS = 5 * 60 * 1000;
+/**
+ * Short on purpose: the repo picker is opened right after someone creates a repo or
+ * gets added to one, and a list that is minutes stale reads as "VibeHub can't see my
+ * repo". 60 s still collapses the burst of requests one picker session makes, and
+ * `{ refresh: true }` below bypasses this entirely for an explicit re-read.
+ */
+const REPOS_CACHE_TTL_MS = 60 * 1000;
+/**
+ * What `GET /user/repos` counts as "my repos". `owner` alone (the round-5 behaviour)
+ * hid every repo the user was added to as a collaborator and everything belonging to
+ * their orgs, which is most of what people actually want to attach to a project.
+ *
+ * Scope caveat: OAuth only asks for `read:user user:email` (routes/auth.ts), so this
+ * widens the list to *public* collaborator/org repos. Private ones — including
+ * private org repos — need the `repo` scope, which is a re-consent decision, not
+ * something to change here.
+ */
+const GITHUB_REPO_AFFILIATION = "owner,collaborator,organization_member";
 const GITHUB_TIMEOUT_MS = 8000;
 const MAX_COMMITS_WITH_STATS = 30;
 /** Directory listings are one screen of a file browser, not a repo dump. */
@@ -468,24 +485,49 @@ interface GithubRepoJson {
 export class NoGithubTokenError extends Error {}
 
 /**
- * Repos visible to the *owner's own* token — no scope-widening (round-5 spec):
- * this app only ever requested `read:user user:email` at OAuth time
- * (routes/auth.ts), so this lists whatever GitHub returns for that scope
- * (effectively the owner's public repos) rather than requesting `repo`/
- * `public_repo` to unlock more. Throws NoGithubTokenError if the user never
- * connected GitHub — the route maps that to 409 with a clear message.
+ * The repos GitHub shows this user: their own, ones they're a collaborator on, and
+ * ones belonging to their organizations (GITHUB_REPO_AFFILIATION). Still no
+ * scope-widening — OAuth asks for `read:user user:email` only (routes/auth.ts), so
+ * the list is what that scope reveals, i.e. public repos across those three
+ * affiliations. Private collaborator/org repos need `repo` and stay invisible until
+ * someone decides to ask for that scope.
+ *
+ * Cached for REPOS_CACHE_TTL_MS per user; `{ refresh: true }` skips the cached value
+ * and replaces it, which is what the route's `?refresh=1` is for — "I just made that
+ * repo, look again" must not wait out a TTL.
+ *
+ * Throws NoGithubTokenError if the user never connected GitHub — the route maps that
+ * to 409 with a clear message.
+ *
+ * Note: still a single `per_page=100` page. The wider affiliation makes brushing that
+ * ceiling more likely than it was with `owner` alone; paginating is a separate change.
  */
-export async function fetchOwnRepos(userId: string, accessToken: string | null): Promise<GithubRepoSummary[]> {
+export async function fetchOwnRepos(
+  userId: string,
+  accessToken: string | null,
+  options: { refresh?: boolean } = {}
+): Promise<GithubRepoSummary[]> {
   if (!accessToken) throw new NoGithubTokenError();
 
-  const hit = reposCache.get(userId);
-  if (hit && Date.now() - hit.at < REPOS_CACHE_TTL_MS) return hit.value;
+  // Affiliation is part of the key: a deploy (or rollback) that changes the constant
+  // must not be served a list that was built under the previous one.
+  const key = `${userId}:${GITHUB_REPO_AFFILIATION}`;
+  if (!options.refresh) {
+    const hit = reposCache.get(key);
+    if (hit && Date.now() - hit.at < REPOS_CACHE_TTL_MS) return hit.value;
+  }
 
-  const res = await fetch("https://api.github.com/user/repos?per_page=100&sort=pushed&affiliation=owner", {
+  const url = new URL("https://api.github.com/user/repos");
+  url.searchParams.set("per_page", "100");
+  url.searchParams.set("sort", "pushed");
+  url.searchParams.set("affiliation", GITHUB_REPO_AFFILIATION);
+  const res = await fetch(url, {
     headers: authHeaders(accessToken),
     signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
   });
   if (!res.ok) {
+    // Deliberately leaves any cached list in place: a rate-limited refresh should
+    // surface as an error, not quietly wipe a list that is still perfectly usable.
     throw new Error(`GitHub ${res.status}`);
   }
 
@@ -501,7 +543,7 @@ export async function fetchOwnRepos(userId: string, accessToken: string | null):
     language: r.language,
     stars: r.stargazers_count,
   }));
-  reposCache.set(userId, { at: Date.now(), value: repos });
+  reposCache.set(key, { at: Date.now(), value: repos });
   return repos;
 }
 

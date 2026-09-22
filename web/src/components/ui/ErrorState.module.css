@@ -1,0 +1,18 @@
+/* No padding of its own: every caller already has the class that pads its empty
+ * state, and an error belongs in exactly the same box as the empty it replaces. */
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vh-space-3);
+}
+
+.text {
+  flex: 1 1 180px;
+  /* A notch stronger than an empty state's faint grey — this one is worth reading. */
+  color: var(--vh-text-dim);
+  font-family: var(--vh-font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+}

@@ -14,8 +14,10 @@ import {
   presenceLine,
   presenceParts,
   presenceStatusLabel,
+  relativeDay,
   toolFamily,
   toolLabel,
+  updatedLabel,
 } from "../format";
 
 let passed = 0;
@@ -246,6 +248,38 @@ eq("formatCount below thousand", formatCount(999), "999");
 eq("formatCount thousand", formatCount(1000), "1k");
 eq("formatCount 1.2k", formatCount(1234), "1.2k");
 eq("formatCount million", formatCount(1_200_000), "1.2M");
+
+// ---- relativeDay / updatedLabel: the project header's one timestamp ----
+// Fixed instant so the day counts are the same on every machine and in every month.
+// Named apart from the `NOW`/`ago` pair the elapsedShort block above declares: this
+// file is one module scope, and that `ago` counts milliseconds where this one counts
+// days, so sharing either name is a redeclaration, not a reuse.
+const DAY_NOW = new Date("2026-09-22T12:00:00Z").getTime();
+const DAY = 86_400_000;
+const daysAgo = (days: number, hours = 0) => new Date(DAY_NOW - days * DAY - hours * 3_600_000).toISOString();
+
+eq("relativeDay same instant", relativeDay(daysAgo(0), DAY_NOW), "today");
+eq("relativeDay hours ago", relativeDay(daysAgo(0, 5), DAY_NOW), "today");
+eq("relativeDay one day", relativeDay(daysAgo(1), DAY_NOW), "yesterday");
+eq("relativeDay days", relativeDay(daysAgo(5), DAY_NOW), "5d ago");
+eq("relativeDay 29 days", relativeDay(daysAgo(29), DAY_NOW), "29d ago");
+// 30 days is where the count stops reading as a count and the date takes over.
+eq("relativeDay 30 days", relativeDay(daysAgo(30), DAY_NOW), "Aug 23");
+// Midday UTC on both: the absolute forms print in the machine's own timezone, and
+// a midnight stamp would land on the previous day west of Greenwich.
+eq("relativeDay this year keeps no year", relativeDay("2026-01-04T12:00:00Z", DAY_NOW), "Jan 4");
+eq("relativeDay last year regains the year", relativeDay("2025-11-26T12:00:00Z", DAY_NOW), "Nov 26, 2025");
+// The future is a clock skew, not a negative day count.
+eq("relativeDay future", relativeDay(new Date(DAY_NOW + 4 * DAY).toISOString(), DAY_NOW), "today");
+eq("relativeDay empty", relativeDay("", DAY_NOW), "");
+eq("relativeDay junk", relativeDay("not-a-date", DAY_NOW), "");
+
+eq("updatedLabel prefers the push", updatedLabel(daysAgo(2), daysAgo(40), DAY_NOW), "Updated 2d ago");
+eq("updatedLabel falls back to the post", updatedLabel(null, daysAgo(3), DAY_NOW), "Updated 3d ago");
+eq("updatedLabel falls back past an unparseable push", updatedLabel("nope", daysAgo(1), DAY_NOW), "Updated yesterday");
+eq("updatedLabel no dates", updatedLabel(null, null, DAY_NOW), null);
+eq("updatedLabel undefined dates", updatedLabel(undefined, undefined, DAY_NOW), null);
+eq("updatedLabel empty strings", updatedLabel("", "", DAY_NOW), null);
 
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);

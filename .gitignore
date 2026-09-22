@@ -36,8 +36,8 @@ CLAUDE.md
 ui_views/
 
 # macOS SwiftPM
-macos/.build/
-macos/.swiftpm/
+mac/.build/
+mac/.swiftpm/
 
 # tracker local state (never commit a real device token)
 .vibehub/
