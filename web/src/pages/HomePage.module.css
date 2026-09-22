@@ -32,6 +32,13 @@
   min-width: 0;
 }
 
+.mainCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-4);
+  min-width: 0;
+}
+
 .side {
   display: flex;
   flex-direction: column;

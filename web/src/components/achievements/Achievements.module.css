@@ -1,0 +1,222 @@
+/*
+ * Achievements list styles — Steam-like trophy cabinet in Emil design house style.
+ * Scoped keyframes for CSS modules.
+ */
+
+@keyframes vh-badge-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes vh-badge-glow {
+  0%, 100% {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(255, 255, 255, 0.12), 0 0 0 1px var(--vh-text);
+  }
+}
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+}
+
+.headerBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headerSummary {
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+.testBtn {
+  font-family: var(--vh-font-mono);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface-2);
+  color: var(--vh-text);
+  cursor: pointer;
+  transition: border-color var(--dur-press) var(--ease-out),
+              background var(--dur-press) var(--ease-out);
+}
+
+.testBtn:hover {
+  background: var(--vh-accent-soft);
+  border-color: var(--vh-text-muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--vh-space-3);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--vh-radius-md);
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface);
+  transition: transform var(--dur-press) var(--ease-out),
+              border-color var(--dur-press) var(--ease-out),
+              box-shadow var(--dur-press) var(--ease-out);
+  cursor: pointer;
+  overflow: hidden;
+  animation: vh-badge-fade-up var(--dur-reveal) var(--ease-out) both;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--vh-text-muted);
+  box-shadow: var(--vh-shadow-pop);
+}
+
+.cardUnlocked {
+  border-color: var(--vh-border-strong);
+}
+
+.cardUnlocked:hover {
+  border-color: var(--vh-text);
+}
+
+.cardLocked {
+  opacity: 0.65;
+  background: var(--vh-bg);
+}
+
+.cardLocked:hover {
+  opacity: 0.9;
+}
+
+.topRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.iconSlot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+  color: var(--vh-text);
+  transition: transform var(--dur-press) var(--ease-spring),
+              border-color var(--dur-press) var(--ease-out);
+}
+
+.card:hover .iconSlot {
+  transform: scale(1.08) rotate(-2deg);
+  border-color: var(--vh-text);
+}
+
+.cardLocked .iconSlot {
+  color: var(--vh-text-faint);
+  border-style: dashed;
+}
+
+.statusPill {
+  font-family: var(--vh-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: var(--vh-radius-pill);
+}
+
+.pillUnlocked {
+  background: var(--vh-text);
+  color: var(--vh-bg);
+}
+
+.pillLocked {
+  background: var(--vh-surface-2);
+  color: var(--vh-text-faint);
+  border: 1px solid var(--vh-border);
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--vh-text);
+  letter-spacing: -0.01em;
+}
+
+.desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--vh-text-dim);
+}
+
+.progressSection {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.progressLabelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-family: var(--vh-font-mono);
+  color: var(--vh-text-faint);
+}
+
+.progressBar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-text);
+  transition: width 480ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .iconSlot {
+    animation: none !important;
+    transition: none !important;
+  }
+}

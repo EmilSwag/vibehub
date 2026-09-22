@@ -15,6 +15,7 @@ import { ConnectTools } from "../components/ConnectTools";
 import { ConnectSheet } from "../components/connect/ConnectSheet";
 import { takeConnectDeepLink } from "../lib/connectDeepLink";
 import { FriendListItem, FriendListItemSkeleton } from "../components/FriendListItem";
+import { SocialFeed } from "../components/feed/SocialFeed";
 import { ErrorState } from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
@@ -86,38 +87,51 @@ export function HomePage() {
       <ConnectSheet open={connectOpen} onClose={() => setConnectOpen(false)} />
 
       <div className={styles.grid}>
-        <section className={styles.section}>
-          <SectionTitle icon="sparkles" count={activeFriends.length}>
-            Live now
-          </SectionTitle>
-          <Card className={styles.listCard}>
-            {loading ? (
-              <FriendListItemSkeleton count={3} live />
-            ) : failed ? (
-              <ErrorState onRetry={retry} className={styles.empty}>
-                Couldn't load your friends.
-              </ErrorState>
-            ) : friends.length === 0 ? (
-              <div className={styles.empty}>
-                No friends yet — head to <Link to="/friends">Friends</Link> to add some.
-              </div>
-            ) : activeFriends.length === 0 ? (
-              <div className={styles.empty}>Nobody's coding right now.</div>
-            ) : (
-              <div className="stagger">
-                {activeFriends.map((f, i) => (
-                  <FriendListItem
-                    key={f.user.id}
-                    index={i}
-                    user={f.user}
-                    daysAsFriends={f.daysAsFriends}
-                    presence={presences.get(f.user.username)}
-                  />
-                ))}
-              </div>
-            )}
-          </Card>
-        </section>
+        <div className={styles.mainCol}>
+          <section className={styles.section}>
+            <SectionTitle icon="sparkles" count={activeFriends.length}>
+              Live now
+            </SectionTitle>
+            <Card className={styles.listCard}>
+              {loading ? (
+                <FriendListItemSkeleton count={3} live />
+              ) : failed ? (
+                <ErrorState onRetry={retry} className={styles.empty}>
+                  Couldn't load your friends.
+                </ErrorState>
+              ) : friends.length === 0 ? (
+                <div className={styles.empty}>
+                  No friends yet — head to <Link to="/friends">Friends</Link> to add some.
+                </div>
+              ) : activeFriends.length === 0 ? (
+                <div className={styles.empty}>Nobody's coding right now.</div>
+              ) : (
+                <div className="stagger">
+                  {activeFriends.map((f, i) => (
+                    <FriendListItem
+                      key={f.user.id}
+                      index={i}
+                      user={f.user}
+                      daysAsFriends={f.daysAsFriends}
+                      presence={presences.get(f.user.username)}
+                    />
+                  ))}
+                </div>
+              )}
+            </Card>
+          </section>
+
+          <section className={styles.section}>
+            <SectionTitle icon="commit">
+              Vibe Feed
+            </SectionTitle>
+            <SocialFeed
+              friends={friends}
+              presences={presences}
+              currentUser={user}
+            />
+          </section>
+        </div>
 
         <aside className={styles.side}>
           <section className={styles.section}>

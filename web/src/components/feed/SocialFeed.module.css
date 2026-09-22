@@ -1,0 +1,208 @@
+/*
+ * Social Feed (Vibe Feed) styles.
+ * Scoped keyframes for CSS modules per motion.css rules.
+ */
+
+@keyframes vh-feed-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes vh-flame-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.28) rotate(-4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-3);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  transition: border-color var(--dur-press) var(--ease-out),
+              box-shadow var(--dur-press) var(--ease-out);
+  animation: vh-feed-item-in var(--dur-reveal) var(--ease-out) both;
+}
+
+.item:hover {
+  border-color: var(--vh-text-muted);
+}
+
+.itemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.userLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.userName {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--vh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.userHandle {
+  font-size: 12px;
+  color: var(--vh-text-faint);
+}
+
+.timeBadge {
+  font-family: var(--vh-font-mono);
+  font-size: 11px;
+  color: var(--vh-text-faint);
+  flex: none;
+}
+
+.contentBox {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+}
+
+.badgePreview {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border-strong);
+  color: var(--vh-text);
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring),
+              border-color var(--dur-press) var(--ease-out);
+}
+
+.badgePreview:hover {
+  transform: scale(1.1) rotate(-3deg);
+  border-color: var(--vh-text);
+}
+
+.contentMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.contentTitle {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--vh-text);
+  letter-spacing: -0.01em;
+}
+
+.contentDesc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--vh-text-dim);
+}
+
+.contentMeta {
+  display: inline-block;
+  margin-top: 2px;
+  font-family: var(--vh-font-mono);
+  font-size: 10.5px;
+  color: var(--vh-text-faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.actionBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.reactBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface-2);
+  color: var(--vh-text-dim);
+  font-family: var(--vh-font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--dur-press) var(--ease-out),
+              color var(--dur-press) var(--ease-out),
+              border-color var(--dur-press) var(--ease-out);
+}
+
+.reactBtn:hover {
+  color: var(--vh-text);
+  border-color: var(--vh-text-muted);
+}
+
+.reactBtnActive {
+  background: var(--vh-text);
+  color: var(--vh-bg);
+  border-color: var(--vh-text);
+  animation: vh-flame-pop 320ms var(--ease-spring);
+}
+
+.reactEmoji {
+  font-size: 13px;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item,
+  .badgePreview,
+  .reactBtnActive {
+    animation: none !important;
+    transition: none !important;
+  }
+}

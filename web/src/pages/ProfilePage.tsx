@@ -3,10 +3,10 @@ import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
-import { projectsApi, usersApi, wallApi } from "../lib/api";
+import { projectsApi, statsApi, usersApi, wallApi } from "../lib/api";
 import { safeHostname } from "../lib/format";
 import { publicPresence } from "../lib/publicPresence";
-import type { ExternalLink, LevelBreakdown, PresenceStatus, Project, User, WallComment as WallCommentType } from "../types";
+import type { ExternalLink, LevelBreakdown, PresenceStatus, Project, User, UserStats, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { PresenceBlock } from "../components/ui/PresenceBlock";
@@ -21,6 +21,8 @@ import { WallComment } from "../components/WallComment";
 import { StatsPanel } from "../components/StatsPanel";
 import { RecentModels } from "../components/RecentModels";
 import type { ModelFocus } from "../components/RecentModels";
+import { AchievementsList } from "../components/achievements/AchievementsList";
+import { SocialFeed } from "../components/feed/SocialFeed";
 import { ConnectSheet } from "../components/connect/ConnectSheet";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { ErrorState } from "../components/ui/ErrorState";
@@ -63,6 +65,7 @@ export function ProfilePage() {
   const { presences, watchWall } = useRealtime();
 
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -108,6 +111,11 @@ export function ProfilePage() {
       .get(username)
       .then((data) => active && setProfile(data))
       .catch(() => active && setNotFound(true));
+
+    statsApi
+      .get(username)
+      .then((data) => active && setUserStats(data))
+      .catch(() => {});
 
     projectsApi
       .list(username)
@@ -308,6 +316,25 @@ export function ProfilePage() {
         focus={modelFocus}
         className={styles.section}
       />
+
+      <section className={styles.section}>
+        <SectionTitle icon="sparkles">Achievements</SectionTitle>
+        <Card>
+          <AchievementsList
+            levelBreakdown={profile?.levelBreakdown}
+            userStats={userStats}
+          />
+        </Card>
+      </section>
+
+      <section className={styles.section}>
+        <SectionTitle icon="users">Vibe Feed</SectionTitle>
+        <SocialFeed
+          friends={[]}
+          presences={presences}
+          currentUser={profile?.user}
+        />
+      </section>
 
       <section className={styles.section}>
         <SectionTitle icon="image" count={projects.length}>

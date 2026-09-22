@@ -1,0 +1,225 @@
+/*
+ * Skewed top-center alert notification banner with positive spring animations.
+ * Scoped keyframes for CSS modules per motion.css rules.
+ */
+
+@keyframes vh-toast-spring-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -48px) scale(0.88) skewX(-10deg);
+  }
+  65% {
+    opacity: 1;
+    transform: translate(-50%, 6px) scale(1.02) skewX(-10deg);
+  }
+  85% {
+    transform: translate(-50%, -2px) scale(0.99) skewX(-10deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1) skewX(-10deg);
+  }
+}
+
+@keyframes vh-toast-spring-out {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1) skewX(-10deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -36px) scale(0.92) skewX(-10deg);
+  }
+}
+
+@keyframes vh-toast-glow {
+  0%, 100% {
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--vh-text);
+  }
+  50% {
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 16px rgba(255, 255, 255, 0.3), 0 0 0 1.5px var(--vh-text);
+  }
+}
+
+@keyframes vh-shimmer-pass {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateX(250%) skewX(-20deg);
+    opacity: 0;
+  }
+}
+
+@keyframes vh-icon-pop {
+  0% {
+    transform: scale(0.8) rotate(-6deg);
+  }
+  60% {
+    transform: scale(1.15) rotate(3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.portalContainer {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  z-index: 99999;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.toastWrapper {
+  pointer-events: auto;
+  position: relative;
+  min-width: 360px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 14px 20px 14px 16px;
+  background: var(--vh-surface);
+  color: var(--vh-text);
+  border: 1px solid var(--vh-text);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+
+  /* Slanted / skewed outer shape */
+  transform: translate(-50%, 0) skewX(-10deg);
+  transform-origin: center top;
+
+  animation: vh-toast-spring-in 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+             vh-toast-glow 3.5s ease-in-out infinite;
+
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.toastLeaving {
+  animation: vh-toast-spring-out 260ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+}
+
+/* Light gleam beam racing across the banner */
+.shimmerBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  animation: vh-shimmer-pass 2.4s ease-in-out infinite;
+}
+
+/* Counter-skew inner container to keep text, badge and icon straight and sharp */
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transform: skewX(10deg);
+}
+
+.badgeSlot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border-strong);
+  color: var(--vh-text);
+  animation: vh-icon-pop 540ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.categoryTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vh-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vh-text-faint);
+}
+
+.categoryTag::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--vh-text);
+  border-radius: 1px;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--vh-font-sans);
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--vh-text);
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--vh-text-dim);
+}
+
+.closeBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--vh-text-faint);
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--dur-press) var(--ease-out),
+              background var(--dur-press) var(--ease-out);
+}
+
+.closeBtn:hover {
+  color: var(--vh-text);
+  background: var(--vh-surface-2);
+  border-color: var(--vh-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toastWrapper,
+  .toastLeaving,
+  .shimmerBar,
+  .badgeSlot {
+    animation: none !important;
+  }
+}
