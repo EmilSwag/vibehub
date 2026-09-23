@@ -173,6 +173,7 @@ reconstructed server-side from heartbeats. This is **not** an auth/login session
 | tokensInput | Int | running total, default 0 |
 | tokensOutput | Int | running total, default 0 |
 | coTools | Json? | round 6: latest `tools[]` seen open with this session (§4.3), `[{tool, model, projectAlias}]`, primary first. Presence only. `String?` (JSON-encoded) on the SQLite mirror — SQLite has no Json type, same divergence as `ActivityEvent.payload` (§2.15) |
+| tzOffsetMinutes | Int? | the tracker host's UTC offset as minutes to **add** to UTC for its local wall clock (`-Date#getTimezoneOffset()`, ±840), from `session_start`/`heartbeat`; `null` for a session from an older tracker. Read only by the Night Owl rule (§2.16) — a missing zone is ignored, never guessed |
 
 A session closes (`status = ENDED`, `endedAt` set) when no heartbeat arrives for
 **10 minutes** (`SESSION_IDLE_TIMEOUT_MS`, server-configurable), or immediately on a
@@ -283,12 +284,46 @@ ActivityEventType   = HEARTBEAT | SESSION_START | SESSION_END | GIT_COMMIT
 > (`server/prisma/schema.sqlite.prisma`) represents every enum above as `String`,
 > validated at the application layer (Zod schemas shared between the two). See §6.
 
+### 2.16 UserAchievement
+
+One row per badge a person has earned. Written once by `syncAchievements()`
+(`server/src/lib/achievements.ts`) the first time a rule is seen true; never updated or
+deleted — earned stays earned even if the rows behind it are later removed. Every rule
+reads `DailyStat`, `Session` and `UserStreak` only (§5.10); nothing is inferred from
+unrelated hours or tokens.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | String | PK |
+| userId | String | FK → User |
+| achievementId | String | `token-millionaire \| opus-tamer \| night-owl \| deep-flow \| polyglot \| streak-master` |
+| unlockedAt | DateTime | the sync moment the rule was first seen true — not the session that earned it |
+
+`@@unique([userId, achievementId])`, table `user_achievements`.
+
+### 2.17 FeedReaction
+
+A viewer's toggle on one Vibe Feed event. `target` is the event's stable id (§5.10),
+so a reaction survives reloads and every re-generation of the feed.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | String | PK |
+| userId | String | FK → User |
+| target | String | event id `<type>:<key>` — `session:<id>`, `achievement:<userId>:<achievementId>`, `project:<id>:new`, `project:<id>:upd:<yyyy-mm-dd>`, `commits:<userId>:<yyyy-mm-dd>`, `friendship:<id>` |
+| kind | String | `respect \| flame` |
+| createdAt | DateTime | |
+
+`@@unique([userId, target, kind])`, table `feed_reactions`.
+
 ## 3. Privacy Model (why the data model looks like this)
 
 - The tracker never transmits file contents, diffs, prompts, or commit messages —
-  only `projectAlias` (a name, not a path), `tool`, `model`, token counts, and
-  timestamps. This is enforced at the tracker level (§4) so there is nothing sensitive
-  to leak even if the server were compromised.
+  only `projectAlias` (a name, not a path), `tool`, `model`, token counts, timestamps
+  and the host clock's UTC offset (`tzOffsetMinutes`, §2.8 — so a night session is
+  judged in the person's own time zone instead of guessed from anything else). This is
+  enforced at the tracker level (§4) so there is nothing sensitive to leak even if the
+  server were compromised.
 - `projectAlias` defaults to the folder's basename but is user-remappable/hideable per
   project in `~/.vibehub/config.json` (e.g. map `client-acme-app` → `"a client project"`
   or mark it `"hidden"` to exclude it from presence entirely).
@@ -377,13 +412,18 @@ Request body:
   "model": "claude-sonnet-5",
   "tokensInputDelta": 812,
   "tokensOutputDelta": 340,
-  "occurredAt": "2026-09-03T14:22:10.000Z"
+  "occurredAt": "2026-09-03T14:22:10.000Z",
+  "tzOffsetMinutes": 180
 }
 ```
 
 `eventType` is one of `"heartbeat" | "session_start" | "session_end" | "git_commit"`.
 `session_start`/`session_end` omit the token deltas. `git_commit` additionally carries
 `{ "repoAlias": "neon-app" }` only — no commit hash, message, or diff.
+`tzOffsetMinutes` (optional, integer ±840) is the host's UTC offset as minutes to add to
+UTC for its local wall clock; `session_start` and `heartbeat` carry it, `session_end`
+does not. The server stores it on the `Session` (§2.8) and updates it when a later beat
+carries a different value; the schema is non-strict, so an older server ignores it.
 
 **Model normalization.** `model` is `string | null`; `null` means the tool exposes no
 model (presence-only tools). The strings `""`, `"unknown"` and `"<synthetic>"` (Claude
@@ -1202,6 +1242,35 @@ like §5.7's `/presence/friends` field, never verification time.
 
 Client subscribes to `wall:{username}` implicitly while viewing that profile by sending
 `{ "type": "subscribe", "channels": ["wall:ada"] }`; server unsubscribes on disconnect.
+
+### 5.10 Achievements & Vibe Feed
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/v1/users/:username/achievements` | public, same gate as `/stats` → `{ achievements: [{ id, unlocked, progress, progressLabel, unlockedAt }] }` — always all six, contract order; `progress` 0..1 (1 when unlocked); `progressLabel` is the real figure while locked (`"812k / 1,000k tokens"`, `"1.8h / 2h session"`, `"2 / 3 tools"`); `unlockedAt` ISO or null. The call runs the sync (§2.16), so it is also the moment a new badge is stamped |
+| GET | `/api/v1/feed?limit=30&before=<ISO>` | auth → `{ events: FeedEvent[], nextBefore }` — the viewer plus accepted friends, newest first |
+| GET | `/api/v1/users/:username/feed?limit=30&before=<ISO>` | public → same shape, that person's own events only; `reactions.mine` is all `false` signed out |
+| POST | `/api/v1/feed/reactions` | auth, `{ target, kind: "respect" \| "flame" }` → `{ target, kind, active, count }` — toggles; `target` must match `^(session\|achievement\|project\|commits\|friendship):[A-Za-z0-9:_-]{1,120}$` else 400 |
+
+Achievement rules (`server/src/lib/achievements.ts`, pinned by `lib/__checks__/achievements.check.ts`):
+
+| id | unlocked when |
+|---|---|
+| token-millionaire | Σ tokens over `DailyStat` + open `Session`s, measured tools only (`isTokenlessTool` excluded) ≥ 1,000,000 |
+| opus-tamer | Σ `activeSeconds` on a model whose `normalizeModel()` matches `/opus\|gpt-?5/i` ≥ 36,000 |
+| night-owl | a `Session` **with** `tzOffsetMinutes` overlaps 03:00–06:00 local by ≥ 20 min; sessions without a zone contribute nothing |
+| deep-flow | one `Session` of ≥ 7,200 s (open ones measured to their last beat) |
+| polyglot | ≥ 3 distinct lower-cased tools across `DailyStat` ∪ `Session` (`""`/`"unknown"` are not tools) |
+| streak-master | `UserStreak.longestStreak` ≥ 7; progress shows the current streak |
+
+A `FeedEvent` is `{ id, type, at, live?, user, other?, title, description, badgeId?, projectId?, reactions: { respect, flame, mine } }`.
+`id` is the reaction target (§2.17). Sources and thresholds (`server/src/lib/feed.ts`, pinned by `feed.check.ts`):
+ENDED sessions ≥ 600 s (`"Coded 1h 24m in atlas"`, or without the alias when the tracker had none) and open,
+still-beating ones as `live: true`; `UserAchievement` (`"Unlocked Deep Flow"`); **public** `Project` rows
+(`"New project: …"`, plus one `"Updated …"` per day when `updatedAt` is > 1 h after `createdAt`); `GithubCommitDay`
+with `commitCount > 0`; `Friendship.since`. Window 30 days, cap 200, `before` is strictly-older-than and a page
+never splits an `at` tie. Private projects never appear; a project the tracker was told to hide (§3)
+produces no heartbeat and therefore no session, so nothing of it reaches the feed either.
 
 ## 6. Archetype Algorithm
 

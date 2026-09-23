@@ -41,8 +41,14 @@ export function SkewToastContainer() {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const toast = (e as CustomEvent<ToastData>).detail;
-      if (!toast) return;
+      const detail = (e as CustomEvent<ToastData>).detail;
+      if (!detail) return;
+      // showSkewToast always sets an id; a raw dispatch might not, and the id is the
+      // list key and the dismiss handle — never let one through without it.
+      const toast: ToastData = {
+        ...detail,
+        id: detail.id || `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      };
       setToasts((prev) => [toast, ...prev.slice(0, 2)]);
 
       const isUnlock =

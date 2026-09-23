@@ -31,7 +31,12 @@
   your streak, and the tool you use most.
 - **Projects** — paste a GitHub link and you get a real card: cover, description,
   language, stars, README, file browser, recent pushes.
-- **Friends & feed** — add by username, like projects, see who is online.
+- **Achievements** — six badges earned from real sessions, never inferred: Token
+  Millionaire, Opus Tamer, Night Owl, Deep Flow, Polyglot, Streak Master. A real unlock
+  gets a toast and fireworks; a locked one shows exactly how far you are.
+- **Vibe Feed** — what you and your friends actually did: finished sessions, unlocks,
+  new projects, commit days, new friendships. React with *respect* or *flame*.
+- **Friends** — add by username, like projects, see who is online.
 - **Strictly monochrome.** One colour: green means *coding right now*.
 
 <p align="center">
@@ -104,8 +109,9 @@ record to read, and we would rather say so than guess.
 ## Privacy
 
 The tracker reads **only** the sources in that table. It sends tool, model, timestamps,
-token counts and a project alias — never code, prompts, diffs, window titles or anything
-about other apps. Three of the five tools report no usage at all, so their rows say
+token counts, a project alias and your clock's UTC offset (so a night session is judged
+in your own time zone, not guessed) — never code, prompts, diffs, window titles or
+anything about other apps. Three of the five tools report no usage at all, so their rows say
 *tokens not reported* and stay out of the $ estimate: a number we cannot measure is never
 one we invent. Profiles and stats are public; live presence is for friends. Full model:
 [Architecture §3](docs/ARCHITECTURE.md).
