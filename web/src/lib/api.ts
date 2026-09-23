@@ -2,8 +2,10 @@
 // Base URL from env (never hardcoded), httpOnly cookie auth via credentials: "include".
 
 import type {
+  Achievement,
   Activity,
   Archetype,
+  FeedPage,
   Friend,
   FriendRequest,
   GithubRepoSummary,
@@ -12,6 +14,8 @@ import type {
   Presence,
   PresenceStatus,
   PresenceTool,
+  ReactionKind,
+  ReactionResult,
   RepoActivity,
   RepoDigest,
   RepoTree,
@@ -37,6 +41,14 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
+
+/**
+ * "This route does not exist here." For the achievements and feed endpoints that is
+ * what an older server answers (they shipped after the web that calls them), and the
+ * block hides itself rather than showing an empty card — the same 404 also means an
+ * unknown user, and hiding is right there too.
+ */
+export const isNotFound = (err: unknown): boolean => err instanceof ApiError && err.status === 404;
 
 async function request<T>(path: string, init?: RequestInit, sessionAuth = true): Promise<T> {
   const generation = authGeneration();
@@ -297,6 +309,45 @@ export const statsApi = {
     request<{ a: UserStats; b: UserStats }>(
       `/api/v1/users/${encodeURIComponent(username)}/stats/compare?with=${encodeURIComponent(withUsername)}&range=${range}`
     ),
+};
+
+// ---- Achievements & Vibe Feed (meta/plans/vibehub-honest-achievements-feed.md, "Contract") ----
+
+export interface FeedQuery {
+  /** 1..100; the server defaults to 30. */
+  limit?: number;
+  /** ISO — only events strictly older than it (the previous page's `nextBefore`). */
+  before?: string;
+}
+
+const feedQueryString = (query?: FeedQuery): string => {
+  const params = new URLSearchParams();
+  if (query?.limit !== undefined) params.set("limit", String(query.limit));
+  if (query?.before) params.set("before", query.before);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+};
+
+export const achievementsApi = {
+  /**
+   * Public, same gate as `/stats`. Every read re-evaluates the rules server-side and
+   * persists any badge that just became true, so the owner's own poll
+   * (`hooks/useAchievementUnlocks.ts`) is what stamps `unlockedAt`. Throws
+   * `ApiError(404)` on a server that predates the route — see `isNotFound`.
+   */
+  get: (username: string) =>
+    request<{ achievements: Achievement[] }>(`/api/v1/users/${encodeURIComponent(username)}/achievements`),
+};
+
+export const feedApi = {
+  /** Self + accepted friends, newest first. Signed in only. */
+  list: (query?: FeedQuery) => request<FeedPage>(`/api/v1/feed${feedQueryString(query)}`),
+  /** That person's own events only. Public; `reactions.mine` is all false when signed out. */
+  forUser: (username: string, query?: FeedQuery) =>
+    request<FeedPage>(`/api/v1/users/${encodeURIComponent(username)}/feed${feedQueryString(query)}`),
+  /** Toggles one (viewer, target, kind); the answer carries the target's live count. */
+  react: (target: string, kind: ReactionKind) =>
+    request<ReactionResult>("/api/v1/feed/reactions", json({ target, kind })),
 };
 
 // ---- VibeHub for Mac (§5.10) ----

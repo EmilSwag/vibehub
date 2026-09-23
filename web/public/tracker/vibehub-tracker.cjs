@@ -2675,7 +2675,7 @@ function readJson(filePath) {
 
 // src/privacy.ts
 var COLLECTION_POLICY = "ai-session-metadata-v1";
-var NATIVE_TOOLS = ["claude-code", "codex", "quadcode"], ATTESTED_TOOLS = ["quadcode", "cursor", "windsurf"], TOKENLESS_TOOLS = ["quadcode", "cursor", "windsurf"], SUPPORTED_TOOLS = [...NATIVE_TOOLS, "cursor", "windsurf"], MAX_RECORD_AGE_MS = 1440 * 6e4, MAX_EVENT_AGE_MS = 5 * 6e4, MAX_FUTURE_SKEW_MS = 5e3, MAX_TOKEN_COUNT = 1e9, MAX_USAGE_ENTRIES = 30, CLAUDE_MODELS = /* @__PURE__ */ new Set([
+var NATIVE_TOOLS = ["claude-code", "codex", "quadcode"], ATTESTED_TOOLS = ["quadcode", "cursor", "windsurf"], TOKENLESS_TOOLS = ["quadcode", "cursor", "windsurf"], SUPPORTED_TOOLS = [...NATIVE_TOOLS, "cursor", "windsurf"], MAX_RECORD_AGE_MS = 1440 * 6e4, MAX_EVENT_AGE_MS = 5 * 6e4, MAX_FUTURE_SKEW_MS = 5e3, MAX_TOKEN_COUNT = 1e9, MAX_USAGE_ENTRIES = 30, MAX_TZ_OFFSET_MINUTES = 840, CLAUDE_MODELS = /* @__PURE__ */ new Set([
   "claude-fable-5-1",
   "claude-fable-5",
   "claude-opus-5",
@@ -2749,6 +2749,13 @@ function safeModel(value, tool) {
 function isCount(value, maximum = MAX_TOKEN_COUNT) {
   return typeof value == "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
+function isTzOffsetMinutes(value) {
+  return typeof value == "number" && Number.isInteger(value) && Math.abs(value) <= MAX_TZ_OFFSET_MINUTES;
+}
+function localTzOffsetMinutes(now = /* @__PURE__ */ new Date()) {
+  let offset = -now.getTimezoneOffset();
+  return isTzOffsetMinutes(offset) ? offset : void 0;
+}
 function eventTime(value, now, maxAgeMs = MAX_EVENT_AGE_MS) {
   if (typeof value != "string" || value.length > 35 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
   let at = Date.parse(value);
@@ -2795,7 +2802,7 @@ function projectHeartbeat(value, now = Date.now()) {
     model: safeModel(p.model, p.tool),
     occurredAt: new Date(at).toISOString()
   };
-  if (result.eventType !== "heartbeat") return result;
+  if (result.eventType !== "session_end" && isTzOffsetMinutes(p.tzOffsetMinutes) && (result.tzOffsetMinutes = p.tzOffsetMinutes), result.eventType !== "heartbeat") return result;
   if (!Array.isArray(p.usage) || p.usage.length > MAX_USAGE_ENTRIES) return null;
   let usage = [];
   for (let entry of p.usage) {
@@ -3905,7 +3912,14 @@ async function sendOrQueue(config, payload) {
   sameConfig(safe, readConfig) && (result.ok || result.authRejected) && markAuthRejected(result.authRejected);
 }
 function sessionEvent(eventType, session, occurredAt) {
-  return { eventType, projectAlias: session.projectAlias, tool: session.tool, model: session.model, occurredAt };
+  return {
+    eventType,
+    projectAlias: session.projectAlias,
+    tool: session.tool,
+    model: session.model,
+    occurredAt,
+    ...eventType === "session_start" ? { tzOffsetMinutes: localTzOffsetMinutes() } : {}
+  };
 }
 function buildTools(state, config) {
   let session = state.activeSession;
@@ -4012,6 +4026,7 @@ async function tick(config, state) {
       tokensOutputDelta: detection.tokensOutputDelta,
       usage: detection.usage,
       tools: buildTools(state, safe),
+      tzOffsetMinutes: localTzOffsetMinutes(),
       occurredAt: now
     })) return;
     state.lastActivityAt = detection.lastActivityAt, allowed() && writeSnapshot(state, safe, !0, !1, connection.connectionLastSeenAt);

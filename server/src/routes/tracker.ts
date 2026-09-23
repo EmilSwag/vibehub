@@ -291,6 +291,13 @@ router.post(
       }
     }
 
+    // Honest achievements: the host's local offset rides on the session so Night Owl can
+    // read the wall clock the person saw. Written on create and re-written on every beat
+    // that carries one (a laptop that changed zones mid-session lands on its latest
+    // zone); absent — an older tracker — leaves whatever the row has, which is null for
+    // rows it opened itself, and null is ignored by the rule, never guessed.
+    const tzOffset = body.tzOffsetMinutes !== undefined ? { tzOffsetMinutes: body.tzOffsetMinutes } : {};
+
     if (session) {
       session = await prisma.session.update({
         where: { id: session.id },
@@ -300,6 +307,7 @@ router.post(
           tokensInput: { increment: tokensInputDelta },
           tokensOutput: { increment: tokensOutputDelta },
           ...(coTools ? { coTools: toJsonArrayValue(coTools) as never } : {}),
+          ...tzOffset,
         },
       });
     } else {
@@ -316,6 +324,7 @@ router.post(
           tokensInput: tokensInputDelta,
           tokensOutput: tokensOutputDelta,
           ...(coTools ? { coTools: toJsonArrayValue(coTools) as never } : {}),
+          tzOffsetMinutes: body.tzOffsetMinutes ?? null,
         },
       });
     }

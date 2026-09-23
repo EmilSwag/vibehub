@@ -125,6 +125,7 @@ job. `logout` runs the same `stop` before deleting `config.json`.
   "tool": "claude-code",
   "model": "claude-fable-5-1",
   "occurredAt": "2026-09-04T10:00:00.000Z",
+  "tzOffsetMinutes": 180,
   "tokensInputDelta": 812,
   "tokensOutputDelta": 340,
   "usage": [
@@ -159,7 +160,15 @@ job. `logout` runs the same `stop` before deleting `config.json`.
   to the primary. `projectAlias` is `null` when unknown or when the project is hidden
   by an alias override — the tool shows, its project name does not. Sent on
   `heartbeat` only; a server that predates it ignores the field.
-- `session_start` / `session_end` carry presence only — no deltas, no `usage`, no `tools`.
+- `tzOffsetMinutes` is the host's UTC offset as minutes to **add** to UTC for local
+  time (`-new Date().getTimezoneOffset()`, so `180` for UTC+3), read fresh for every
+  payload. It rides on `session_start` (the event that opens the server-side session)
+  and every `heartbeat`, so an achievement that depends on local time (Night Owl,
+  03:00–06:00) reads the wall clock the person actually saw. Sessions from a tracker
+  that predates it carry no zone and are simply not counted — the server never guesses
+  one. A server that predates the field strips it.
+- `session_start` / `session_end` carry presence only — no deltas, no `usage`, no `tools`
+  (`session_start` additionally carries `tzOffsetMinutes`, see above).
 - Tokens seen while no session is open (or the project is hidden) accumulate
   per `(tool, model)` and ride on the next heartbeat, so spend is never lost and
   never re-attributed to whatever session opens next.

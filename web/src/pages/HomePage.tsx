@@ -121,16 +121,9 @@ export function HomePage() {
             </Card>
           </section>
 
-          <section className={styles.section}>
-            <SectionTitle icon="commit">
-              Vibe Feed
-            </SectionTitle>
-            <SocialFeed
-              friends={friends}
-              presences={presences}
-              currentUser={user}
-            />
-          </section>
+          {/* Self + friends, from GET /feed. Owns its title so it can hide whole
+              against a server that predates the route. */}
+          <SocialFeed scope={{ kind: "home" }} className={styles.section} />
         </div>
 
         <aside className={styles.side}>

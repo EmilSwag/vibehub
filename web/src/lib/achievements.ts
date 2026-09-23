@@ -1,200 +1,104 @@
-import type { LevelBreakdown, UserStats } from "../types";
+import type { Achievement, AchievementId } from "../types";
+import { relativeDay } from "./format";
 
-export type AchievementId =
-  | "token-millionaire"
-  | "opus-tamer"
-  | "night-owl"
-  | "deep-flow"
-  | "polyglot"
-  | "streak-master";
+export type { Achievement, AchievementId } from "../types";
 
-export interface Achievement {
-  id: AchievementId;
+// Badge copy, and nothing else. The rules live on the server
+// (server/src/lib/achievements.ts), where every badge maps to rows: this file has no
+// idea how many hours anyone has, and must not. The `evaluateAchievements` that used to
+// live here unlocked Night Owl from `hours >= 10`, invented three tools for Polyglot and
+// a seven-day streak from `hours > 30`, which put "6 of 6 unlocked" on every account
+// with a few hours (meta/plans/vibehub-honest-achievements-feed.md, F2).
+
+export interface AchievementDefinition {
   title: string;
   tagline: string;
   description: string;
+  /** The threshold in words — the same number the server's rule checks. */
   requirement: string;
-  unlocked: boolean;
-  progress: number; // 0 to 1
-  progressLabel: string;
-  unlockedAt?: string;
 }
 
-export interface UserStatsContext {
-  totalTokens?: number | null;
-  activeHours?: number;
-  streakDays?: number;
-  tools?: string[];
-  models?: { model: string; activeHours?: number; tokens?: number }[];
-  isNightActive?: boolean;
-  maxSessionHours?: number;
-}
+/** Display order, shared with the server. */
+export const ACHIEVEMENT_IDS: readonly AchievementId[] = [
+  "token-millionaire",
+  "opus-tamer",
+  "night-owl",
+  "deep-flow",
+  "polyglot",
+  "streak-master",
+];
 
-export const ACHIEVEMENTS_DEF: Record<AchievementId, {
-  title: string;
-  tagline: string;
-  description: string;
-  requirement: string;
-}> = {
+export const ACHIEVEMENTS_DEF: Record<AchievementId, AchievementDefinition> = {
   "token-millionaire": {
     title: "Token Millionaire",
-    tagline: "1M+ AI Tokens",
-    description: "Burned over 1,000,000 tokens alongside your AI coding pairs.",
-    requirement: "1,000,000 tokens burned",
+    tagline: "1M+ AI tokens",
+    description: "A million tokens through tools that count them.",
+    requirement: "1,000,000 tokens",
   },
   "opus-tamer": {
     title: "Opus Tamer",
-    tagline: "10h on Flagships",
-    description: "Logged over 10 hours of active pairing with flagship models (Claude Opus / GPT-5).",
-    requirement: "10+ hours on Claude Opus or GPT-5",
+    tagline: "10h on flagships",
+    description: "Ten hours of active time on Claude Opus or GPT-5.",
+    requirement: "10 hours on Opus or GPT-5",
   },
   "night-owl": {
     title: "Night Owl",
-    tagline: "Deep Night Ship",
-    description: "Shipped code and burned tokens between 03:00 and 06:00 AM.",
-    requirement: "Late-night session (03:00–06:00)",
+    tagline: "Deep night ship",
+    description: "A session running between 03:00 and 06:00, your local time.",
+    requirement: "20 minutes between 03:00 and 06:00",
   },
   "deep-flow": {
     title: "Deep Flow",
-    tagline: "2h+ Unbroken Focus",
-    description: "Maintained a continuous pairing flow session longer than 2 hours.",
-    requirement: "Single unbroken session ≥ 2 hours",
+    tagline: "2h+ unbroken focus",
+    description: "One session that ran two hours or more.",
+    requirement: "One session of 2 hours",
   },
-  "polyglot": {
+  polyglot: {
     title: "Polyglot",
-    tagline: "3+ Tool Stack",
-    description: "Actively deployed 3 or more distinct AI pair tools in your development workflow.",
-    requirement: "3+ distinct AI pair tools connected",
+    tagline: "3+ tool stack",
+    description: "Three different AI tools, each with real activity.",
+    requirement: "3 different tools",
   },
   "streak-master": {
     title: "Streak Master",
-    tagline: "7-Day AI Streak",
-    description: "Kept the momentum going with an uninterrupted 7-day coding streak.",
-    requirement: "Active coding streak ≥ 7 days",
+    tagline: "7-day streak",
+    description: "Seven days of activity in a row.",
+    requirement: "7 days in a row",
   },
 };
 
-export function evaluateAchievements(ctx: UserStatsContext): Achievement[] {
-  const tokens = ctx.totalTokens ?? 0;
-  const hours = ctx.activeHours ?? 0;
-  const streak = ctx.streakDays ?? 0;
-  const tools = ctx.tools ?? [];
-  const models = ctx.models ?? [];
+export const isAchievementId = (value: unknown): value is AchievementId =>
+  typeof value === "string" && (ACHIEVEMENT_IDS as readonly string[]).includes(value);
 
-  // 1. Token Millionaire (1M tokens)
-  const tokenProgress = Math.min(1, Math.max(0, tokens / 1_000_000));
-  const tokenMillionaireUnlocked = tokens >= 1_000_000;
-
-  // 2. Opus Tamer (10h on opus/gpt-5)
-  const opusHours = models.reduce((acc, m) => {
-    const isFlagship = /opus|gpt-?5/i.test(m.model);
-    return isFlagship ? acc + (m.activeHours ?? 0) : acc;
-  }, 0);
-  const effectiveOpusHours = opusHours > 0 ? opusHours : (hours >= 15 ? 10.5 : hours * 0.4);
-  const opusProgress = Math.min(1, Math.max(0, effectiveOpusHours / 10));
-  const opusTamerUnlocked = effectiveOpusHours >= 10;
-
-  // 3. Night Owl
-  const nightUnlocked = Boolean(ctx.isNightActive || hours >= 10 || tokens >= 100_000);
-
-  // 4. Deep Flow (2h+ session)
-  const maxSession = ctx.maxSessionHours ?? (hours >= 4 ? 2.5 : hours * 0.6);
-  const deepFlowProgress = Math.min(1, Math.max(0, maxSession / 2));
-  const deepFlowUnlocked = maxSession >= 2 || hours >= 5;
-
-  // 5. Polyglot (3+ tools)
-  const toolCount = Math.max(tools.length, hours > 20 ? 3 : tools.length > 0 ? tools.length : 1);
-  const polyglotProgress = Math.min(1, Math.max(0, toolCount / 3));
-  const polyglotUnlocked = toolCount >= 3;
-
-  // 6. Streak Master (7 days)
-  const streakProgress = Math.min(1, Math.max(0, streak / 7));
-  const streakUnlocked = streak >= 7;
-
-  return [
-    {
-      id: "token-millionaire",
-      ...ACHIEVEMENTS_DEF["token-millionaire"],
-      unlocked: tokenMillionaireUnlocked,
-      progress: tokenProgress,
-      progressLabel: tokenMillionaireUnlocked
-        ? "Unlocked"
-        : `${(tokens / 1000).toFixed(0)}k / 1,000k tokens`,
-    },
-    {
-      id: "opus-tamer",
-      ...ACHIEVEMENTS_DEF["opus-tamer"],
-      unlocked: opusTamerUnlocked,
-      progress: opusProgress,
-      progressLabel: opusTamerUnlocked
-        ? "Unlocked"
-        : `${effectiveOpusHours.toFixed(1)}h / 10h`,
-    },
-    {
-      id: "deep-flow",
-      ...ACHIEVEMENTS_DEF["deep-flow"],
-      unlocked: deepFlowUnlocked,
-      progress: deepFlowProgress,
-      progressLabel: deepFlowUnlocked ? "Unlocked" : `${maxSession.toFixed(1)}h / 2h session`,
-    },
-    {
-      id: "polyglot",
-      ...ACHIEVEMENTS_DEF["polyglot"],
-      unlocked: polyglotUnlocked,
-      progress: polyglotProgress,
-      progressLabel: polyglotUnlocked ? "Unlocked" : `${toolCount} / 3 tools`,
-    },
-    {
-      id: "streak-master",
-      ...ACHIEVEMENTS_DEF["streak-master"],
-      unlocked: streakUnlocked,
-      progress: streakProgress,
-      progressLabel: streakUnlocked ? "Unlocked" : `${streak} / 7 days`,
-    },
-    {
-      id: "night-owl",
-      ...ACHIEVEMENTS_DEF["night-owl"],
-      unlocked: nightUnlocked,
-      progress: nightUnlocked ? 1 : 0.6,
-      progressLabel: nightUnlocked ? "Unlocked" : "In progress",
-    },
-  ];
+/**
+ * The rows this build knows how to draw, in the server's order. An id we have no
+ * copy or badge for (a newer server) is skipped, never rendered blank — and the
+ * summary counts only what is shown.
+ */
+export function knownAchievements<T extends { id: string }>(rows: readonly T[]): (T & { id: AchievementId })[] {
+  return rows.filter((row): row is T & { id: AchievementId } => isAchievementId(row.id));
 }
 
-export function extractUserStatsContext(
-  levelBreakdown?: LevelBreakdown,
-  userStats?: UserStats | null
-): UserStatsContext {
-  const totalTokens = userStats?.totalTokens ?? levelBreakdown?.totalTokens ?? 0;
-  const activeHours = levelBreakdown?.activeHours ?? (userStats?.totalActiveSeconds ? userStats.totalActiveSeconds / 3600 : 0);
-  const streakDays = Math.max(userStats?.streak?.currentStreak ?? 0, userStats?.streak?.longestStreak ?? 0, activeHours > 30 ? 7 : 0);
+/**
+ * "Unlocked today" / "Unlocked 5d ago" / "Unlocked Sep 3" from the stored moment —
+ * the same day-grained shape project cards use. Plain "Unlocked" when the server sent
+ * no usable date, never "Invalid Date".
+ */
+export function unlockedLabel(unlockedAt: string | null, now: number = Date.now()): string {
+  const when = unlockedAt ? relativeDay(unlockedAt, now) : "";
+  return when ? `Unlocked ${when}` : "Unlocked";
+}
 
-  const tools: string[] = [];
-  if (userStats?.byTool) {
-    for (const b of userStats.byTool) {
-      if (b.tool && !tools.includes(b.tool)) tools.push(b.tool);
-    }
-  }
-
-  const models: { model: string; activeHours?: number; tokens?: number }[] = [];
-  if (userStats?.byModel) {
-    for (const m of userStats.byModel) {
-      models.push({
-        model: m.model,
-        activeHours: m.activeSeconds / 3600,
-        tokens: m.tokensInput + m.tokensOutput,
-      });
-      if (m.tool && !tools.includes(m.tool)) tools.push(m.tool);
-    }
-  }
-
-  return {
-    totalTokens,
-    activeHours,
-    streakDays,
-    tools,
-    models,
-    isNightActive: activeHours > 10,
-    maxSessionHours: activeHours > 20 ? 3.2 : activeHours > 5 ? 2.1 : 1.2,
-  };
+/**
+ * The badge "Preview alert" shows: the locked one closest to unlocking (the alert the
+ * owner is about to earn), else the most recently unlocked, else null when there is
+ * nothing to show.
+ */
+export function pickPreview(rows: readonly Achievement[]): Achievement | null {
+  const locked = rows.filter((a) => !a.unlocked).sort((a, b) => b.progress - a.progress);
+  if (locked.length > 0) return locked[0];
+  const unlocked = rows
+    .filter((a) => a.unlocked)
+    .sort((a, b) => (Date.parse(b.unlockedAt ?? "") || 0) - (Date.parse(a.unlockedAt ?? "") || 0));
+  return unlocked[0] ?? null;
 }

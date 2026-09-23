@@ -3,10 +3,10 @@ import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useRealtime } from "../context/RealtimeContext";
-import { projectsApi, statsApi, usersApi, wallApi } from "../lib/api";
+import { projectsApi, usersApi, wallApi } from "../lib/api";
 import { safeHostname } from "../lib/format";
 import { publicPresence } from "../lib/publicPresence";
-import type { ExternalLink, LevelBreakdown, PresenceStatus, Project, User, UserStats, WallComment as WallCommentType } from "../types";
+import type { ExternalLink, LevelBreakdown, PresenceStatus, Project, User, WallComment as WallCommentType } from "../types";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { PresenceBlock } from "../components/ui/PresenceBlock";
@@ -65,7 +65,6 @@ export function ProfilePage() {
   const { presences, watchWall } = useRealtime();
 
   const [profile, setProfile] = useState<ProfileData | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -111,11 +110,6 @@ export function ProfilePage() {
       .get(username)
       .then((data) => active && setProfile(data))
       .catch(() => active && setNotFound(true));
-
-    statsApi
-      .get(username)
-      .then((data) => active && setUserStats(data))
-      .catch(() => {});
 
     projectsApi
       .list(username)
@@ -317,24 +311,14 @@ export function ProfilePage() {
         className={styles.section}
       />
 
-      <section className={styles.section}>
-        <SectionTitle icon="sparkles">Achievements</SectionTitle>
-        <Card>
-          <AchievementsList
-            levelBreakdown={profile?.levelBreakdown}
-            userStats={userStats}
-          />
-        </Card>
-      </section>
+      {/* Both blocks read their own endpoint and own their section title, so each can
+          hide whole — title included — on a server that predates it, leaving the rest
+          of the profile exactly as it was. */}
+      <AchievementsList username={username} isSelf={isSelf} className={styles.section} />
 
-      <section className={styles.section}>
-        <SectionTitle icon="users">Vibe Feed</SectionTitle>
-        <SocialFeed
-          friends={[]}
-          presences={presences}
-          currentUser={profile?.user}
-        />
-      </section>
+      {/* This person's own events only (GET /users/:username/feed): every profile
+          used to show the same fixtures. */}
+      <SocialFeed scope={{ kind: "user", username }} className={styles.section} />
 
       <section className={styles.section}>
         <SectionTitle icon="image" count={projects.length}>

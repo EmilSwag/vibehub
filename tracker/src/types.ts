@@ -147,6 +147,14 @@ export interface HeartbeatPayload {
    * is why the server falls back to `[activity]`.
    */
   tools?: HeartbeatTool[];
+  /**
+   * Honest achievements: minutes to ADD to UTC to get this host's local time
+   * (= -Date#getTimezoneOffset(), so +180 for UTC+3). Sent on `session_start` (which
+   * opens the server-side Session) and every `heartbeat`, so a local-time badge can read
+   * the wall clock the person actually saw instead of guessing a zone. An older server
+   * strips it (non-strict schema); a missing value is never inferred server-side.
+   */
+  tzOffsetMinutes?: number;
   occurredAt: string;
 }
 

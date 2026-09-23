@@ -2,7 +2,7 @@ import { attestedToolsFor, configFingerprint, heartbeatIntervalMs, idleThreshold
 import { Detector } from "./detector";
 import type { SeenSource } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
-import { eventTime, isSupportedTool, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
+import { eventTime, isSupportedTool, localTzOffsetMinutes, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
 import type { SendResult } from "./queue";
 import { markAuthRejected, writeOfflineStatus, writeStatus } from "./statusFile";
 import { clearStopRequest, isStopRequested } from "./stopRequest";
@@ -147,7 +147,10 @@ export async function flushOfflineQueue(): Promise<{ delivered: number; remainin
 }
 
 function sessionEvent(eventType: "session_start" | "session_end", session: ActiveSession, occurredAt: string): HeartbeatPayload {
-  return { eventType, projectAlias: session.projectAlias, tool: session.tool, model: session.model, occurredAt };
+  // session_start opens the server-side Session row, so the host's zone rides along from
+  // the first write (honest achievements, Night Owl); session_end writes no row.
+  return { eventType, projectAlias: session.projectAlias, tool: session.tool, model: session.model, occurredAt,
+    ...(eventType === "session_start" ? { tzOffsetMinutes: localTzOffsetMinutes() } : {}) };
 }
 
 function buildTools(state: LoopState, config: TrackerConfig): HeartbeatTool[] {
@@ -244,7 +247,8 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     }
     if (!await send({ eventType: "heartbeat", projectAlias: alias, tool: detection.tool, model,
       tokensInputDelta: detection.tokensInputDelta, tokensOutputDelta: detection.tokensOutputDelta,
-      usage: detection.usage, tools: buildTools(state, safe), occurredAt: now })) return;
+      usage: detection.usage, tools: buildTools(state, safe), tzOffsetMinutes: localTzOffsetMinutes(),
+      occurredAt: now })) return;
     state.lastActivityAt = detection.lastActivityAt;
     if (allowed()) writeSnapshot(state, safe, true, false, connection.connectionLastSeenAt);
   } finally { if (state.requestAbort === controller) state.requestAbort = null; }

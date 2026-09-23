@@ -14,6 +14,8 @@ import statsRoutes from "./routes/stats";
 import presenceRoutes from "./routes/presence";
 import trackerRoutes from "./routes/tracker";
 import macRoutes from "./routes/mac";
+import achievementsRoutes from "./routes/achievements";
+import feedRoutes from "./routes/feed";
 import { attachWebSocketServer } from "./ws";
 import { startSessionRollupJob } from "./jobs/session-rollup";
 import { startArchetypeJob } from "./jobs/archetype";
@@ -124,6 +126,12 @@ app.use("/api/v1", statsRoutes);
 app.use("/api/v1", presenceRoutes);
 app.use("/api/v1", trackerRoutes);
 app.use("/api/v1", macRoutes); // routes/mac.ts defines GET /mac/latest (§5.10) - public, no auth
+// Honest achievements + Vibe Feed (meta/plans/vibehub-honest-achievements-feed.md):
+// GET /users/:username/achievements · GET /feed · GET /users/:username/feed · POST /feed/reactions.
+// Additive: an older web client never asks, and an older server answers 404, which the
+// new web treats as "hide the block".
+app.use("/api/v1", achievementsRoutes);
+app.use("/api/v1", feedRoutes);
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found" });

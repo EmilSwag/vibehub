@@ -136,6 +136,8 @@ const modelSchema = z.string().max(60).nullable().optional();
 // so presence shows the whole stack — but time and tokens still accrue only to the
 // primary (the top-level tool/model). Presence data only; never token accounting.
 export const MAX_TOOL_ENTRIES = 10;
+/** Largest |tzOffsetMinutes| a heartbeat may carry: 14 h, the widest UTC offset in use. */
+export const MAX_TZ_OFFSET_MINUTES = 840;
 export const toolEntrySchema = z.object({
   tool: z.string().min(1).max(60),
   model: modelSchema,
@@ -183,6 +185,14 @@ export const heartbeatSchema = z.object({
   repoAlias: z.string().min(1).max(200).optional(),
   usage: z.array(usageEntrySchema).max(MAX_USAGE_ENTRIES).optional(),
   tools: z.array(toolEntrySchema).max(MAX_TOOL_ENTRIES).optional(),
+  // Honest achievements (meta/plans/vibehub-honest-achievements-feed.md): minutes to ADD
+  // to UTC to get the tracker host's local time (= -Date#getTimezoneOffset(), so +180
+  // for UTC+3). Stored on Session so a local-time rule (Night Owl, 03:00–06:00) can
+  // read the wall clock the person actually saw. Optional: an older tracker omits it
+  // and its sessions stay tz-less, which the rules ignore rather than guess. ±14 h
+  // covers every real zone. This object is non-strict, so an older SERVER simply
+  // strips the field from a newer tracker — verified: zod's default is `strip`.
+  tzOffsetMinutes: z.number().int().min(-MAX_TZ_OFFSET_MINUTES).max(MAX_TZ_OFFSET_MINUTES).optional(),
 }).superRefine((body, ctx) => {
   // Fix F-E. The `usage[]` guard above covers heartbeat v2; this covers the legacy
   // top-level pair, which carried no tool guard at all and so accepted forged Cursor /

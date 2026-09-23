@@ -65,6 +65,8 @@ export const MAX_EVENT_AGE_MS = 5 * 60_000;
 export const MAX_FUTURE_SKEW_MS = 5_000;
 export const MAX_TOKEN_COUNT = 1_000_000_000;
 export const MAX_USAGE_ENTRIES = 30;
+/** Widest UTC offset in use is 14 h; anything beyond it is not a zone and is dropped. */
+export const MAX_TZ_OFFSET_MINUTES = 840;
 
 // Exact IDs already documented in the tracker and the project's reviewed model
 // catalog. This is a data allowlist, NOT model discovery, pricing or an alias map.
@@ -139,6 +141,22 @@ export function isCount(value: unknown, maximum = MAX_TOKEN_COUNT): value is num
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
+/** A whole number of minutes within +-14 h; nothing else is a UTC offset. */
+export function isTzOffsetMinutes(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && Math.abs(value) <= MAX_TZ_OFFSET_MINUTES;
+}
+
+/**
+ * Minutes to ADD to UTC to get this host's local time - the sign-flipped
+ * `Date#getTimezoneOffset()` (+180 for UTC+3). Read fresh for every payload so a
+ * laptop that crosses a zone mid-session reports the zone it is in now. `undefined`
+ * (never a guess) on the off chance the runtime reports something that is not a zone.
+ */
+export function localTzOffsetMinutes(now = new Date()): number | undefined {
+  const offset = -now.getTimezoneOffset();
+  return isTzOffsetMinutes(offset) ? offset : undefined;
+}
+
 /** Never round malformed counters or convert strings to numbers. */
 export function countOrZero(value: unknown): number {
   return isCount(value) ? value : 0;
@@ -209,6 +227,12 @@ export function projectHeartbeat(value: unknown, now = Date.now()): HeartbeatPay
     eventType: p.eventType as HeartbeatPayload["eventType"], projectAlias: alias, tool: p.tool,
     model: safeModel(p.model, p.tool), occurredAt: new Date(at).toISOString(),
   };
+  // The host's zone is metadata about the clock, not about the host: it is the one
+  // extra field a session_start may carry, because that event opens the server-side
+  // Session the local-time badge later reads. Anything that is not a sane offset is
+  // dropped rather than coerced - a missing zone is never inferred, here or upstream.
+  // session_end writes no row, so it carries none.
+  if (result.eventType !== "session_end" && isTzOffsetMinutes(p.tzOffsetMinutes)) result.tzOffsetMinutes = p.tzOffsetMinutes;
   if (result.eventType !== "heartbeat") return result;
   if (!Array.isArray(p.usage) || p.usage.length > MAX_USAGE_ENTRIES) return null;
   const usage: HeartbeatUsage[] = [];

@@ -54,6 +54,8 @@ model User {
   githubCommitDays       GithubCommitDay[]
   trackerTokens          TrackerToken[]
   authSessions           AuthSession[]
+  achievements           UserAchievement[]
+  feedReactions          FeedReaction[]
 
   @@map("users")
 }
@@ -156,6 +158,7 @@ model Session {
   tokensInput     Int      @default(0)
   tokensOutput    Int      @default(0)
   coTools         String?  // round 6: latest tools[] seen open, primary first; JSON-encoded — SQLite has no native Json type (mirror of `Json?` in schema.prisma, same divergence as ActivityEvent.payload)
+  tzOffsetMinutes Int?     // mirror of schema.prisma — tracker host's local offset (minutes to add to UTC); null = unknown, ignored by Night Owl
 
   activityEvents ActivityEvent[]
 
@@ -239,4 +242,30 @@ model AuthSession {
   revokedAt DateTime?
 
   @@map("auth_sessions")
+}
+
+// Mirror of schema.prisma — honest achievements + Vibe Feed. See the comments there.
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([unlockedAt])
+  @@map("user_achievements")
+}
+
+model FeedReaction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  target    String
+  kind      String   // "respect" | "flame" — validated by zod in routes/feed.ts
+  createdAt DateTime @default(now())
+
+  @@unique([userId, target, kind])
+  @@index([target])
+  @@map("feed_reactions")
 }

@@ -1,208 +1,227 @@
 /*
- * Social Feed (Vibe Feed) styles.
- * Scoped keyframes for CSS modules per motion.css rules.
+ * Vibe Feed — one card of divided rows, the same rhythm as the friend lists
+ * (16px padding, hairline dividers, avatar pinned to the top). Rows enter through the
+ * global `.stagger` utility; the only local keyframe is the reaction pop, declared
+ * here because CSS Modules hash animation names (see motion.css).
  */
 
-@keyframes vh-feed-item-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+@keyframes vh-react-pop {
+  0%   { transform: scale(0.85); }
+  60%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
 }
 
-@keyframes vh-flame-pop {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.28) rotate(-4deg); }
-  100% { transform: scale(1) rotate(0deg); }
+/* Rows own their padding; the card's corners clip row hovers. */
+.card {
+  padding: 0;
+  overflow: hidden;
 }
 
-.wrap {
+.row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: flex-start;
+  column-gap: var(--vh-space-3);
+  padding: var(--vh-space-3);
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.avatarLink {
+  display: block;
+  line-height: 0;
+  border-radius: 50%;
+}
+
+.body {
   display: flex;
   flex-direction: column;
-  gap: var(--vh-space-3);
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vh-space-3);
-}
-
-.item {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: var(--vh-surface);
-  border: 1px solid var(--vh-border);
-  border-radius: var(--vh-radius-md);
-  transition: border-color var(--dur-press) var(--ease-out),
-              box-shadow var(--dur-press) var(--ease-out);
-  animation: vh-feed-item-in var(--dur-reveal) var(--ease-out) both;
-}
-
-.item:hover {
-  border-color: var(--vh-text-muted);
-}
-
-.itemHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.userLink {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: inherit;
+  gap: 3px;
   min-width: 0;
 }
 
-.userInfo {
+/* Name · @handle · when — one 12.5px line; the name alone carries weight. */
+.meta {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--vh-text-faint);
 }
 
-.userName {
-  font-size: 13.5px;
+.name {
+  font-size: 14px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--vh-text);
+  text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.userHandle {
-  font-size: 12px;
-  color: var(--vh-text-faint);
+.name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.timeBadge {
-  font-family: var(--vh-font-mono);
-  font-size: 11px;
-  color: var(--vh-text-faint);
+.handle,
+.sep,
+.time {
   flex: none;
+  white-space: nowrap;
 }
 
-.contentBox {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 12px 14px;
-  border-radius: var(--vh-radius-sm);
-  background: var(--vh-surface-2);
-  border: 1px solid var(--vh-border);
+.time {
+  font-variant-numeric: tabular-nums;
 }
 
-.badgePreview {
+.live {
   flex: none;
+  color: var(--vh-text-dim);
+  font-size: 12.5px;
+}
+
+.title {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--vh-radius-sm);
-  background: var(--vh-surface);
-  border: 1px solid var(--vh-border-strong);
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--vh-text);
-  cursor: pointer;
-  transition: transform var(--dur-press) var(--ease-spring),
-              border-color var(--dur-press) var(--ease-out);
 }
 
-.badgePreview:hover {
-  transform: scale(1.1) rotate(-3deg);
-  border-color: var(--vh-text);
+.titleLink {
+  color: inherit;
+  text-decoration: none;
 }
 
-.contentMain {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
+.titleLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.contentTitle {
-  margin: 0;
-  font-size: 13.5px;
-  font-weight: 600;
+.badge {
+  flex: none;
   color: var(--vh-text);
-  letter-spacing: -0.01em;
 }
 
-.contentDesc {
+.desc {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.4;
   color: var(--vh-text-dim);
+  overflow-wrap: anywhere;
 }
 
-.contentMeta {
-  display: inline-block;
-  margin-top: 2px;
-  font-family: var(--vh-font-mono);
-  font-size: 10.5px;
-  color: var(--vh-text-faint);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.actionBar {
+.reactions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-top: 2px;
+  gap: 6px;
+  padding-top: 1px;
 }
 
-.reactBtn {
+/* Reaction pill: glyph + count, 28px tall. Active = inverted, no hue (§3). */
+.react {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
   border-radius: var(--vh-radius-pill);
   border: 1px solid var(--vh-border);
-  background: var(--vh-surface-2);
+  background: transparent;
   color: var(--vh-text-dim);
   font-family: var(--vh-font-mono);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  transition: background var(--dur-press) var(--ease-out),
-              color var(--dur-press) var(--ease-out),
-              border-color var(--dur-press) var(--ease-out);
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out);
 }
 
-.reactBtn:hover {
-  color: var(--vh-text);
-  border-color: var(--vh-text-muted);
+@media (hover: hover) and (pointer: fine) {
+  .react:hover:not(:disabled) {
+    color: var(--vh-text);
+    background: var(--vh-surface-2);
+    border-color: var(--vh-border-strong);
+  }
 }
 
-.reactBtnActive {
+.react:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.reactActive,
+.reactActive:hover:not(:disabled) {
   background: var(--vh-text);
   color: var(--vh-bg);
   border-color: var(--vh-text);
-  animation: vh-flame-pop 320ms var(--ease-spring);
 }
 
-.reactEmoji {
-  font-size: 13px;
-  line-height: 1;
+/* The small pop on turning a reaction on (§4: --ease-spring for selection moments). */
+.reactActive .glyph {
+  animation: vh-react-pop var(--dur-state) var(--ease-spring) both;
+}
+
+.glyph {
+  flex: none;
+}
+
+.count {
+  min-width: 1ch;
+  text-align: left;
+}
+
+.reactError {
+  font-size: 12px;
+  color: var(--vh-text-dim);
+  white-space: nowrap;
+}
+
+/* Skeleton line boxes match the loaded lines' heights, so nothing shifts on arrival. */
+.skelLine {
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+
+.skelLine + .skelLine {
+  height: 20px;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--vh-space-4);
+  font-size: 14px;
+  color: var(--vh-text-faint);
+}
+
+.more {
+  margin-top: var(--vh-space-3);
+}
+
+@media (max-width: 560px) {
+  .row {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+  .reactions {
+    grid-column: 2;
+    padding-top: 8px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .item,
-  .badgePreview,
-  .reactBtnActive {
-    animation: none !important;
-    transition: none !important;
+  .reactActive .glyph {
+    animation: none;
   }
 }

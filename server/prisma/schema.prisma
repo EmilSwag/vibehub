@@ -88,6 +88,8 @@ model User {
   githubCommitDays       GithubCommitDay[]
   trackerTokens          TrackerToken[]
   authSessions           AuthSession[]
+  achievements           UserAchievement[]
+  feedReactions          FeedReaction[]
 
   @@map("users")
 }
@@ -203,6 +205,12 @@ model Session {
   // this row's own tool/model. Null for sessions opened by a tracker that predates it,
   // which readers surface as just [activity].
   coTools          Json?
+  // Honest achievements (meta/plans/vibehub-honest-achievements-feed.md): minutes to ADD
+  // to UTC to get the tracker host's local time (= -Date#getTimezoneOffset()). Optional
+  // in the heartbeat; stored on create, updated when a heartbeat carries a different
+  // value. Null for sessions opened by a tracker that predates it — those are IGNORED
+  // by the local-time rule (Night Owl), never guessed. See lib/achievements.ts.
+  tzOffsetMinutes  Int?
 
   activityEvents ActivityEvent[]
 
@@ -290,4 +298,39 @@ model AuthSession {
   revokedAt   DateTime?
 
   @@map("auth_sessions")
+}
+
+// Honest achievements + Vibe Feed (meta/plans/vibehub-honest-achievements-feed.md).
+// One row per badge a user has earned, inserted by lib/achievements.ts's
+// syncAchievements the first time its rule evaluates true against real rows. Never
+// deleted — earned stays earned — and unlockedAt is the moment the feed and the unlock
+// toast report ("Unlocked 3 Sep").
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  unlockedAt    DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([unlockedAt])
+  @@map("user_achievements")
+}
+
+// A viewer's reaction to one feed event. `target` is the event's stable id
+// (session:<id> | achievement:<userId>:<achievementId> | project:<id>:new |
+// project:<id>:upd:<yyyy-mm-dd> | commits:<userId>:<yyyy-mm-dd> | friendship:<id>) and
+// `kind` is "respect" | "flame" — a plain String so the SQLite mirror stays identical.
+// Toggled by POST /feed/reactions; counts are folded by one groupBy on `target`.
+model FeedReaction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  target    String
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, target, kind])
+  @@index([target])
+  @@map("feed_reactions")
 }

@@ -32,7 +32,9 @@ export type IconName =
   | "arrowLeft"
   | "chevronDown"
   | "folder"
-  | "file";
+  | "file"
+  | "handshake"
+  | "flame";
 
 const PATHS: Record<IconName, JSX.Element> = {
   user: (
@@ -153,6 +155,20 @@ const PATHS: Record<IconName, JSX.Element> = {
     </>
   ),
   chevronDown: <path d="M6 9l6 6 6-6" />,
+  // Feed reactions (skills/emil_design_eng §3): stroke glyphs where the old feed had
+  // colour emoji. Drawn on the same 24 grid so they read at 14px next to a count.
+  handshake: (
+    <>
+      <path d="M11 17l2 2a1.5 1.5 0 0 0 2.1-2.1" />
+      <path d="M14 14l2.5 2.5a1.5 1.5 0 0 0 2.1-2.1l-3.9-3.9a3 3 0 0 0-4.2 0l-.9.9a1.5 1.5 0 0 1-2.1-2.1l2.8-2.8a5.8 5.8 0 0 1 7.1-.9l.5.3a2 2 0 0 0 1.4.2L21 4" />
+      <path d="M21 3l1 11h-2" />
+      <path d="M3 3l-1 11 6.5 6.5a1.5 1.5 0 0 0 2.1-2.1" />
+      <path d="M3 4h8" />
+    </>
+  ),
+  flame: (
+    <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4.1 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+  ),
 };
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {

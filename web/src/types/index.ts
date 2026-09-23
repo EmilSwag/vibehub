@@ -429,3 +429,87 @@ export type WsServerEvent =
       type: "friend-request:incoming";
       request: FriendRequest;
     };
+
+// ---- Achievements & Vibe Feed (meta/plans/vibehub-honest-achievements-feed.md, "Contract") ----
+
+/** Fixed and shared with the server (`server/src/lib/achievements.ts` ACHIEVEMENT_IDS). */
+export type AchievementId =
+  | "token-millionaire"
+  | "opus-tamer"
+  | "night-owl"
+  | "deep-flow"
+  | "polyglot"
+  | "streak-master";
+
+/**
+ * One row of `GET /users/:username/achievements`. Computed server-side from real rows
+ * (DailyStat, Session, UserStreak) — the web never evaluates a rule itself, it only
+ * draws what it is sent. An id this build does not know (a newer server) is skipped.
+ */
+export interface Achievement {
+  id: AchievementId;
+  unlocked: boolean;
+  /** 0..1 — 1 whenever unlocked. */
+  progress: number;
+  /**
+   * The real numbers while locked, floored: "812k / 1,000k tokens", "6.2h / 10h",
+   * "No night session yet". Still sent once unlocked, so read it only for locked rows.
+   */
+  progressLabel: string;
+  /** ISO moment the badge was earned (the stored UserAchievement row); null while locked. */
+  unlockedAt: string | null;
+}
+
+export type FeedEventType = "session" | "achievement" | "project" | "commits" | "friendship";
+export type ReactionKind = "respect" | "flame";
+
+export interface FeedUser {
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+export interface FeedReactions {
+  respect: number;
+  flame: number;
+  /** The viewer's own toggles — all false when signed out. */
+  mine: { respect: boolean; flame: boolean };
+}
+
+/**
+ * One row of `GET /feed` (self + friends) and `GET /users/:username/feed` (one person).
+ * Every event is backed by a row; `id` is stable and doubles as the reaction target
+ * (`session:<id>`, `achievement:<userId>:<badge>`, `project:<id>:new`, …).
+ */
+export interface FeedEvent {
+  id: string;
+  type: FeedEventType;
+  /** ISO — the sort key and the paging cursor. */
+  at: string;
+  /** Present (true) only while the session is still open and its tracker still beating. */
+  live?: boolean;
+  user: FeedUser;
+  /** The other party — friendship events only. */
+  other?: FeedUser;
+  /** "Coded 1h 24m in atlas" | "Coding in atlas" | "Unlocked Deep Flow" | "New project: x" | "Updated x" | "Pushed 9 commits" | "became friends" */
+  title: string;
+  /** session: "Claude Code · Claude Opus 5"; project: its description; otherwise null. */
+  description: string | null;
+  badgeId?: AchievementId;
+  projectId?: string;
+  reactions: FeedReactions;
+}
+
+export interface FeedPage {
+  events: FeedEvent[];
+  /** Pass back as `before` for the next page; null when this was the last one. */
+  nextBefore: string | null;
+}
+
+/** `POST /feed/reactions` — the toggle's new state and the target's live count. */
+export interface ReactionResult {
+  target: string;
+  kind: ReactionKind;
+  active: boolean;
+  count: number;
+}

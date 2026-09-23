@@ -1,0 +1,13 @@
+/* Title band, one sentence, one card — the same top-of-page rhythm as a loaded
+ * page (Home's greeting + subtitle + first card). */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--vh-space-3);
+}
+
+.wrap > :last-child {
+  width: 100%;
+  margin-top: var(--vh-space-3);
+}
