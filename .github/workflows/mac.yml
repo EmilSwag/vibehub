@@ -195,16 +195,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            "dist/VibeHub.pkg" \
-            "dist/VibeHub.pkg.sha256" \
-            "dist/VibeHub-macOS.zip" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "VibeHub for macOS 13+.
+          cat << 'EOF' > "$RUNNER_TEMP/release-notes.md"
+          VibeHub for macOS 13+.
+
+          Connect in Browser — no device key.
 
           **Installer (recommended):** download VibeHub.pkg, open it, follow the prompts.
           VibeHub launches on its own once install finishes.
 
           **Manual:** unzip VibeHub-macOS.zip, drag VibeHub.app to /Applications, then
           open it. If macOS blocks first launch: System Settings -> Privacy & Security ->
-          scroll down and click "Open Anyway" (or right-click -> Open on macOS 14 and earlier)."
+          scroll down and click "Open Anyway" (or right-click -> Open on macOS 14 and earlier).
+          EOF
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/VibeHub.pkg" \
+            "dist/VibeHub.pkg.sha256" \
+            "dist/VibeHub-macOS.zip" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
