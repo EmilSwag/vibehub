@@ -62,7 +62,11 @@ function visibleCopy(text) {
   return copyLiterals(text).join(" ");
 }
 
-for (const [label, text, css] of [["sheet", sheet, sheetCss], ["Settings Add device", settings, settingsCss]]) {
+// Settings Add device checks (Settings retains full controls and disclosures)
+{
+  const label = "Settings Add device";
+  const text = settings;
+  const css = settingsCss;
   const nodes = parse(text);
   const commandAt = text.indexOf('aria-label="Install and start command"');
   check(`${label}: primary command exists`, commandAt >= 0);
@@ -79,6 +83,24 @@ for (const [label, text, css] of [["sheet", sheet, sheetCss], ["Settings Add dev
   check(`${label}: assistant is a place to run setup, not tracking scope`, /where you run setup, not what gets tracked/.test(text));
   check(`${label}: ChatGPT inability is visible`, /ChatGPT can guide you but cannot run commands on your device/.test(text));
   check(`${label}: status/stop/reconnect stay secondary`, text.includes('aria-expanded={controlsOpen}') && text.includes("buildStatusCommand(os)") && text.includes("buildStopCommand(os)") && text.includes("buildStartCommand(os)"));
+  check(`${label}: commands can be keyboard-selected after clipboard failure`, /<pre[^>]+tabIndex=\{0\}/.test(text) && text.includes("select and copy the text above"));
+  check(`${label}: clipboard writes, never command execution`, text.includes("navigator.clipboard.writeText") && !/\beval\(|new Function\(|child_process|\/tracker\/connect\.(?:sh|ps1)/.test(text));
+  check(`${label}: per-user remount prevents old-account state`, text.includes('key={user?.id ?? "signed-out"}'));
+  check(`${label}: visible focus and 44px targets are styled`, css.includes(":focus-visible") && css.includes("min-height: 44px"));
+  check(`${label}: obsolete manual prerequisites and split instructions are gone`, !/Needs Node\.js 18|Run step 2|Redo step 1|Then start it/.test(visibleCopy(text)));
+}
+
+// ConnectSheet checks (Round 21 short modal with zero-typing pairing & accessible details)
+{
+  const label = "sheet";
+  const text = sheet;
+  const css = sheetCss;
+  const commandAt = text.indexOf('aria-label="Install and start command"');
+  check(`${label}: primary command exists`, commandAt >= 0);
+  check(`${label}: tokenless browser pairing command is wired`, /buildPairConnectCommand\(os\)/.test(text));
+  check(`${label}: OS, not provider, is the primary chooser`, text.includes('aria-label="Operating system"') && text.includes('role="group"') && text.includes('aria-pressed={value === os.id}'));
+  check(`${label}: no provider tabs or per-provider target selector`, !/role="tab(?:list)?"|const TARGETS|setTarget\(|pick how you work/i.test(text));
+  check(`${label}: details is an accessible disclosure`, /aria-expanded=\{detailsOpen\}/.test(text) && text.includes('aria-controls={`${id}-data`}') && text.includes('id={`${id}-data`}'));
   check(`${label}: commands can be keyboard-selected after clipboard failure`, /<pre[^>]+tabIndex=\{0\}/.test(text) && text.includes("select and copy the text above"));
   check(`${label}: clipboard writes, never command execution`, text.includes("navigator.clipboard.writeText") && !/\beval\(|new Function\(|child_process|\/tracker\/connect\.(?:sh|ps1)/.test(text));
   check(`${label}: per-user remount prevents old-account state`, text.includes('key={user?.id ?? "signed-out"}'));
@@ -188,9 +210,7 @@ check("a per-source row for a tokenless tool says so instead of printing a zero"
 check("the model rows read tokenless off the grouping, not off a second local list",
   models.includes("tokenless: row.tokenless") && !models.includes("ESTIMATED_TOOL_FAMILIES"));
 
-for (const [label, text] of [["sheet", sheet], ["Settings Add device", settings]]) {
-  check(`${label}: the hook opt-in is mounted beside the primary command`, text.includes("<HookTools />"));
-}
+check("Settings Add device: the hook opt-in is mounted beside the primary command", settings.includes("<HookTools />"));
 check("onboarding keeps one primary action and does not add a second install path", !onboarding.includes("HookTools"));
 check("the opt-in stays a closed secondary disclosure", hooks.includes("aria-expanded={open}") && hooks.includes('aria-controls={`${id}-hooks`}'));
 check("the opt-in enumerates the table, never two hardcoded tools", hooks.includes("HOOK_TOOLS.map("));

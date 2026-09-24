@@ -231,9 +231,22 @@ if [ -n "$SHIM_PATH" ]; then step "Command ready: vibehub-tracker"; fi
 
 bold "  ✓ VibeHub ${VERSION} is installed."
 echo
-echo "  Next, in the VibeHub menu-bar app:"
-echo "    1. paste your tracker token   (${WEB_URL}/settings → Tracker)"
-echo "    2. press Start                (tracker + app then launch at login on their own)"
+case "$VERSION" in
+  1.0.*|0.*)
+    echo "  Next, in the VibeHub menu-bar app:"
+    echo "    1. open VibeHub from Applications (or menu bar)"
+    echo "    2. paste your device key (from ${WEB_URL}/connect) into the app"
+    echo "    3. press Start                (tracker + app then launch at login on their own)"
+    ;;
+  *)
+    echo "  Next, in the VibeHub menu-bar app:"
+    echo "    1. click 'Connect in Browser' to sign in with one click"
+    echo "    2. press Start                (tracker + app then launch at login on their own)"
+    ;;
+esac
+echo
+echo "  If macOS blocks first launch:"
+echo "    System Settings → Privacy & Security → scroll down and click 'Open Anyway'."
 echo
 case "$SHIM_HINT" in
   path)

@@ -5,6 +5,7 @@ import type {
   Achievement,
   Activity,
   Archetype,
+  FeedEvent,
   FeedPage,
   Friend,
   FriendRequest,
@@ -350,6 +351,15 @@ export const feedApi = {
     request<ReactionResult>("/api/v1/feed/reactions", json({ target, kind })),
 };
 
+// ---- Posts (§5.8) — Round 21 ----
+
+export const postsApi = {
+  create: (content: string) => request<{ post: FeedEvent }>("/api/v1/posts", json({ content })),
+  delete: (id: string) => request<void>(`/api/v1/posts/${id}`, { method: "DELETE" }),
+  recordView: (id: string, viewerKey?: string) =>
+    request<{ postId: string; views: number }>(`/api/v1/posts/${id}/view`, json({ viewerKey }), false),
+};
+
 // ---- VibeHub for Mac (§5.10) ----
 
 export const macApi = {
@@ -368,6 +378,27 @@ export const macApi = {
    */
   latest: (signal?: AbortSignal) =>
     request<unknown>("/api/v1/mac/latest", { signal, headers: { Accept: "application/json" } }, false),
+};
+
+// ---- Device Pairing ----
+
+export const pairingApi = {
+  info: (code: string, signal?: AbortSignal) =>
+    request<{
+      valid: boolean;
+      userCode?: string;
+      deviceName?: string;
+      os?: "mac" | "windows" | "linux" | "unknown";
+      expiresAt?: number;
+      alreadyApproved?: boolean;
+    }>(`/api/v1/tracker/pair/info?code=${encodeURIComponent(code)}`, { signal }, false),
+  approve: (code: string) =>
+    request<{
+      ok: boolean;
+      deviceName?: string;
+      os?: string;
+      username?: string;
+    }>("/api/v1/tracker/pair/approve", json({ code }), true),
 };
 
 // ---- Presence (§5.7) ----

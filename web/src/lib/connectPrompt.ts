@@ -47,6 +47,22 @@ export const PRIVATE_COMMAND_NOTICE =
 export const COPY_ONLY_NOTICE = "Copying does not run anything. Paste into your own terminal when you choose to start.";
 export const CONNECT_COMMAND_ERROR = "Could not prepare a connection command. Reopen setup or contact support.";
 
+/** Full truthful disclosure text for the "Details" expander in Connect modal & Settings -> Tracker. */
+export const TRACKER_FULL_DISCLOSURE = [
+  DEVICE_CONNECT_SCOPE,
+  NODE_SETUP_NOTICE,
+  INSTALL_START_MEANS,
+  BACKGROUND_START_MEANS,
+  TRACKER_LOCAL_READS,
+  TRACKER_UPLOADS,
+  TRACKER_VISIBILITY,
+  TRACKER_SUPPORT_NOTICE,
+  TRACKER_SUPPORT_DETAILS,
+  TRACKER_STATE_NOTICE,
+  TRACKER_HISTORY_NOTICE,
+  TRACKER_CONTROL_NOTICE,
+].join("\n\n");
+
 // Canonical paths agreed with the connector owner. Prefer the private runtime if
 // present, so an older global Node cannot shadow the runtime the connector prepared.
 // Otherwise use the compatible global Node that the connector reused. Quoted $HOME
@@ -205,6 +221,17 @@ function scriptCommand(
 /** Primary manual path. Running it explicitly consents to both install and start. */
 export function buildOneCommandConnect(os: InstallOs, token: string, apiUrl: string, webUrl: string): string {
   return scriptCommand(os, token, apiUrl, webUrl, "connect", true);
+}
+
+/** Tokenless pairing command for zero-typing device setup. Opens browser to approve. */
+export function buildPairConnectCommand(os: InstallOs, apiUrl?: string, webUrl?: string): string {
+  checkOs(os);
+  const web = assertOrigin(webUrl ?? (typeof window !== "undefined" ? window.location.origin : "https://web-production-da778.up.railway.app"));
+  if (os === "windows") {
+    return `& ([scriptblock]::Create((irm ${quotePs(`${web}/tracker/connect.ps1`)} -TimeoutSec 60))) -Start`;
+  }
+  const protocols = web.startsWith("http:") ? "=http,https" : "=https";
+  return `(set -o pipefail; curl -q --fail --silent --show-error --location --max-redirs 0 --proto ${quoteSh(protocols)} --connect-timeout 20 --max-time 60 ${quoteSh(`${web}/tracker/connect.sh`)} | bash -s -- --start)`;
 }
 
 /** Legacy setup-only path: no start flag, no runtime bootstrap promise. */

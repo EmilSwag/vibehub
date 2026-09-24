@@ -34,7 +34,7 @@ download, in the command, in a URL or in the environment.
 | Releases come from | `github.com/EmilSwag/vibehub` — the `mac-v*` tags. Server-side this is `MAC_RELEASE_REPO`. |
 | Installs | `/Applications/VibeHub.app` plus, after you start tracking, `~/Library/LaunchAgents/com.vibehub.tracker.plist`. |
 | Tracking starts | Only when you start it in the app — installing and opening track nothing. |
-| First launch blocked | Open it once from Finder with right-click → **Open**. |
+| First launch blocked | System Settings → Privacy & Security → scroll to Security → click **Open Anyway** (or right-click → **Open** on older macOS). |
 | Not released yet | Before the first `mac-v*` release the endpoint answers 404 and Settings says *not released yet* instead of offering a dead button. Use the connector below on that Mac meanwhile. |
 
 Everything from section 1 onward describes the cross-platform connector

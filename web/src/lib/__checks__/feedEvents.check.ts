@@ -39,7 +39,7 @@ const event = (id: string, overrides: Partial<FeedEvent> = {}): FeedEvent => ({
   user: { username: "ada", displayName: "Ada Lovelace", avatarUrl: null },
   title: "Coded 1h 24m in atlas",
   description: "Claude Code · Claude Opus 5",
-  reactions: { respect: 2, flame: 0, mine: { respect: false, flame: false } },
+  reactions: { like: 0, respect: 2, flame: 0, mine: { like: false, respect: false, flame: false } },
   ...overrides,
 });
 
@@ -63,14 +63,17 @@ eq("garbage → empty, never Invalid Date", feedTimeLabel({ at: "not-a-date" }, 
 {
   const off = event("session:1");
   const on = toggleReactionLocally(off, "respect");
-  eq("off → on: count +1, mine true", on.reactions, { respect: 3, flame: 0, mine: { respect: true, flame: false } });
-  eq("input not mutated", off.reactions, { respect: 2, flame: 0, mine: { respect: false, flame: false } });
+  eq("off → on: count +1, mine true", on.reactions, { like: 0, respect: 3, flame: 0, mine: { like: false, respect: true, flame: false } });
+  eq("input not mutated", off.reactions, { like: 0, respect: 2, flame: 0, mine: { like: false, respect: false, flame: false } });
   eq("on → off: count -1, mine false", toggleReactionLocally(on, "respect").reactions, off.reactions);
   eq("toggling twice restores the original (the rollback)", toggleReactionLocally(toggleReactionLocally(off, "flame"), "flame"), off);
   eq("the other kind is untouched", toggleReactionLocally(off, "flame").reactions.respect, 2);
+
+  const liked = toggleReactionLocally(off, "like");
+  eq("off → on like: count +1, mine true", liked.reactions, { like: 1, respect: 2, flame: 0, mine: { like: true, respect: false, flame: false } });
 }
 {
-  const stale = event("session:2", { reactions: { respect: 0, flame: 0, mine: { respect: true, flame: false } } });
+  const stale = event("session:2", { reactions: { like: 0, respect: 0, flame: 0, mine: { like: false, respect: true, flame: false } } });
   eq("a count never drops below 0 (stale mine=true with count 0)", toggleReactionLocally(stale, "respect").reactions.respect, 0);
 }
 
@@ -78,9 +81,9 @@ eq("garbage → empty, never Invalid Date", feedTimeLabel({ at: "not-a-date" }, 
 {
   const guessed = toggleReactionLocally(event("achievement:u:deep-flow"), "respect"); // respect 3, mine true
   const settled = applyReactionResult(guessed, { target: "achievement:u:deep-flow", kind: "respect", active: true, count: 5 });
-  eq("server count wins over the optimistic guess", settled.reactions, { respect: 5, flame: 0, mine: { respect: true, flame: false } });
+  eq("server count wins over the optimistic guess", settled.reactions, { like: 0, respect: 5, flame: 0, mine: { like: false, respect: true, flame: false } });
   const raced = applyReactionResult(guessed, { target: "achievement:u:deep-flow", kind: "respect", active: false, count: 2 });
-  eq("server active wins too (a raced double tap)", raced.reactions, { respect: 2, flame: 0, mine: { respect: false, flame: false } });
+  eq("server active wins too (a raced double tap)", raced.reactions, { like: 0, respect: 2, flame: 0, mine: { like: false, respect: false, flame: false } });
   eq("a result for another target is ignored", applyReactionResult(guessed, { target: "session:9", kind: "respect", active: false, count: 0 }), guessed);
   eq("a negative count is clamped", applyReactionResult(guessed, { target: "achievement:u:deep-flow", kind: "flame", active: true, count: -1 }).reactions.flame, 0);
 }

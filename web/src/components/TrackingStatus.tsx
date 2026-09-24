@@ -33,6 +33,10 @@ import { Skeleton } from "./ui/Skeleton";
 import { StaleTrackerHint } from "./ui/StaleTrackerHint";
 import { StatusDot } from "./ui/StatusDot";
 import { ToolGlyph } from "./ui/ToolGlyph";
+import { Icon } from "./ui/Icon";
+import { TokenCost } from "./ui/TokenCost";
+import { estimateSourceCost, estimateTodayCost } from "../lib/trackerCost";
+import { presentTokenCost } from "../lib/tokenCost";
 import styles from "./TrackingStatus.module.css";
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
@@ -133,6 +137,7 @@ function SourceRow({ source, now, index }: { source: TrackerSource; now: number;
   const label = modelRowLabel(source.tool, source.model);
   const tool = toolLabel(source.tool);
   const named = humanizeModel(source.model) !== null;
+  const cost = estimateSourceCost(source);
 
   return (
     <div className={cx(styles.row, styles.rowSource)} style={stagger(index)}>
@@ -160,6 +165,7 @@ function SourceRow({ source, now, index }: { source: TrackerSource; now: number;
         <span className={styles.rowTokens} title={isTokenlessTool(source.tool) ? TOKENS_NOT_REPORTED_TITLE : undefined}>
           {isTokenlessTool(source.tool) && source.tokensToday === 0 ? TOKENS_NOT_REPORTED : `${formatTokens(source.tokensToday)} today`}
         </span>
+        <TokenCost estimate={cost} />
         <span className={styles.sep} aria-hidden="true">
           ·
         </span>
@@ -207,6 +213,7 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
   const activity = presence.status !== "offline" ? presence.activity : null;
   const parts = activity ? presenceParts(activity, now) : null;
   const today = sumToday(status.sources);
+  const todayCost = estimateTodayCost(status.sources, today.tokens);
   const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
 
   return (
@@ -263,6 +270,7 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
                 {formatTokens(today.tokens)}
               </span>
               <span className={styles.counterUnit}>tokens</span>
+              <TokenCost estimate={todayCost} />
             </span>
           ) : (
             <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
@@ -426,50 +434,96 @@ export function TrackingStatus({
   // opening the sheet is not one); Settings lists every non-revoked token — Revoke lives there.
   const devices = variant === "settings" ? status.devices : homeDevices(status.devices);
   const showDevices = variant === "settings" || showHomeDevices(status.devices);
-  const capSources = variant === "home" && !allSources && status.sources.length > HOME_SOURCE_ROWS;
-  const sources = capSources ? status.sources.slice(0, HOME_SOURCE_ROWS) : status.sources;
   const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
   const today = sumToday(status.sources);
+  const todayCost = estimateTodayCost(status.sources, today.tokens);
+  const todayCostFormatted = todayCost && todayCost.usd !== null && todayCost.usd > 0
+    ? presentTokenCost(todayCost).amount
+    : "≈ $0";
+
+  // For compact models:
+  // "compact models (top few + "Show all", hide zero rows)"
+  const isZeroRow = (s: TrackerSource) => s.tokensToday === 0 && s.activeSecondsToday === 0;
+  const nonZeroSources = status.sources.filter((s) => !isZeroRow(s));
+  const hasZeroRows = nonZeroSources.length < status.sources.length;
+
+  let sources: TrackerSource[];
+  let canShowMore = false;
+
+  if (variant === "home") {
+    const capSources = !allSources && status.sources.length > HOME_SOURCE_ROWS;
+    sources = capSources ? status.sources.slice(0, HOME_SOURCE_ROWS) : status.sources;
+    canShowMore = status.sources.length > HOME_SOURCE_ROWS;
+  } else {
+    if (allSources) {
+      sources = status.sources;
+    } else {
+      sources = (nonZeroSources.length > 0 ? nonZeroSources : status.sources).slice(0, 3);
+    }
+    canShowMore = status.sources.length > sources.length || hasZeroRows;
+  }
 
   return (
     <Card className={cx(styles.panel, className)} data-live={live || undefined}>
       <div className={styles.head}>
-        {/* Dot, word and the soft live tint behind both — one badge, the same one the
-            strip wears. Everything below it is grayscale. */}
-        <span className={styles.statusPill}>
-          <StatusDot status={status.presence.status} pulse={live} size={8} className={styles.headDot} />
-          <strong className={cx(styles.title, live && styles.titleLive)}>{trackerTitle(status)}</strong>
-        </span>
-        <span className={styles.meta}>
-          {heartbeat} · {everyLabel(status.heartbeatIntervalMs)}
-        </span>
-        {/* Directly under the status word, because it is what "Offline" is failing to
-            explain. Shared by both variants: Settings' permanent panel and Home's
-            first-run explainer ask the same question, and only one is ever on screen. */}
+        <div className={styles.headRow}>
+          <span className={cx(styles.statusPill, variant === "settings" && styles.statusPillBig)}>
+            <StatusDot status={status.presence.status} pulse={live} size={variant === "settings" ? 10 : 8} className={styles.headDot} />
+            <strong className={cx(styles.title, variant === "settings" && styles.titleBig, live && styles.titleLive)}>{trackerTitle(status)}</strong>
+          </span>
+          <span className={styles.meta}>
+            {variant === "settings" ? heartbeat : `${heartbeat} · ${everyLabel(status.heartbeatIntervalMs)}`}
+          </span>
+        </div>
         <StaleTrackerHint status={status} className={styles.headHint} />
       </div>
 
-      {/* The same counter the celebration layer showed, so closing it reveals the
-          numbers already filled in rather than an empty panel. */}
       <section className={styles.section} aria-label="Today">
         <span className={styles.label}>Today</span>
-        <span className={styles.counter}>
-          {today.tokensReported ? (
-            <span className={styles.metric}>
-              <span className={styles.counterValue}>
-                {today.estimated ? "~" : ""}
-                {formatTokens(today.tokens)}
+        {variant === "settings" ? (
+          <div className={styles.bigNumbersRow}>
+            <div className={styles.bigStatGroup}>
+              <span className={styles.bigStatValue}>
+                {today.tokensReported ? (
+                  <>
+                    {today.estimated ? "~" : ""}
+                    {formatTokens(today.tokens)}
+                  </>
+                ) : (
+                  <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
+                )}
               </span>
-              <span className={styles.counterUnit}>tokens</span>
+              <span className={styles.bigStatLabel}>tokens</span>
+            </div>
+            <div className={styles.bigStatGroup}>
+              <span className={styles.bigStatValue}>{todayCostFormatted}</span>
+              <span className={styles.bigStatLabel}>cost</span>
+            </div>
+            <div className={styles.bigStatGroup}>
+              <span className={styles.bigStatValue}>{formatActiveTime(today.activeSeconds)}</span>
+              <span className={styles.bigStatLabel}>active</span>
+            </div>
+          </div>
+        ) : (
+          <span className={styles.counter}>
+            {today.tokensReported ? (
+              <span className={styles.metric}>
+                <span className={styles.counterValue}>
+                  {today.estimated ? "~" : ""}
+                  {formatTokens(today.tokens)}
+                </span>
+                <span className={styles.counterUnit}>tokens</span>
+                <TokenCost estimate={todayCost} />
+              </span>
+            ) : (
+              <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
+            )}
+            <span className={styles.metric}>
+              <span className={styles.counterValue}>{formatActiveTime(today.activeSeconds)}</span>
+              <span className={styles.counterUnit}>active</span>
             </span>
-          ) : (
-            <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
-          )}
-          <span className={styles.metric}>
-            <span className={styles.counterValue}>{formatActiveTime(today.activeSeconds)}</span>
-            <span className={styles.counterUnit}>active</span>
           </span>
-        </span>
+        )}
       </section>
 
       <section className={styles.section} aria-label="Now">
@@ -477,14 +531,18 @@ export function TrackingStatus({
         {running ? (
           <PresenceBlock presence={status.presence} variant="row" />
         ) : (
-          <span className={styles.dim}>No recent supported AI activity</span>
+          <span className={styles.dim}>
+            {variant === "settings" ? "No recent activity" : "No recent supported AI activity"}
+          </span>
         )}
       </section>
 
       <section className={styles.section} aria-label="Models">
         <span className={styles.label}>Models</span>
         {status.sources.length === 0 ? (
-          <span className={styles.dim}>No supported AI activity yet.</span>
+          <span className={styles.dim}>
+            {variant === "settings" ? "No activity yet" : "No supported AI activity yet."}
+          </span>
         ) : (
           <>
             <div className={cx(styles.rows, "stagger")}>
@@ -492,9 +550,11 @@ export function TrackingStatus({
                 <SourceRow key={`${s.tool}|${s.model ?? "no-model"}`} source={s} now={now} index={i} />
               ))}
             </div>
-            {variant === "home" && status.sources.length > HOME_SOURCE_ROWS && (
+            {canShowMore && (
               <button type="button" className={styles.more} onClick={() => setAllSources((v) => !v)}>
-                {capSources ? `${status.sources.length - HOME_SOURCE_ROWS} more` : "Show fewer"}
+                {variant === "home"
+                  ? allSources ? "Show fewer" : `${status.sources.length - HOME_SOURCE_ROWS} more`
+                  : allSources ? "Show fewer" : "Show all"}
               </button>
             )}
           </>
@@ -503,27 +563,55 @@ export function TrackingStatus({
 
       {showDevices && (
         <section className={styles.section} aria-label="Devices">
-          <span className={styles.label}>Devices</span>
-          {/* Home lists devices so a second machine is visible, but revoking one is
-              destructive and belongs with the rest of the tracker controls. */}
-          <DeviceList devices={devices} now={now} onRevoke={variant === "settings" ? onRevoke : undefined} />
-          {onAddDevice && !addDeviceBlock && (
-            <div>
-              <Button size="sm" variant="secondary" onClick={onAddDevice} loading={addingDevice}>
-                Add device
-              </Button>
-            </div>
+          {variant === "settings" ? (
+            <details className={styles.devicesExpander}>
+              <summary className={styles.devicesSummary}>
+                <span className={styles.label}>Devices · {devices.length}</span>
+                <Icon name="chevronDown" size={13} className={styles.devicesChevron} />
+              </summary>
+              <div className={styles.devicesBody}>
+                <DeviceList devices={devices} now={now} onRevoke={onRevoke} />
+                {onAddDevice && !addDeviceBlock && (
+                  <div className={styles.addDeviceRow}>
+                    <Button size="sm" variant="secondary" onClick={onAddDevice} loading={addingDevice}>
+                      Add device
+                    </Button>
+                  </div>
+                )}
+                {addDeviceBlock}
+              </div>
+            </details>
+          ) : (
+            <>
+              <span className={styles.label}>Devices</span>
+              <DeviceList devices={devices} now={now} />
+              {onAddDevice && !addDeviceBlock && (
+                <div>
+                  <Button size="sm" variant="secondary" onClick={onAddDevice} loading={addingDevice}>
+                    Add device
+                  </Button>
+                </div>
+              )}
+              {addDeviceBlock}
+            </>
           )}
-          {addDeviceBlock}
         </section>
       )}
 
       {error && <p className={styles.error}>{error}</p>}
 
       <footer className={styles.footer}>
-        <p className={styles.privacy}>
-          {TRACKER_LOCAL_READS} {TRACKER_UPLOADS} {TRACKER_VISIBILITY} {TRACKER_SUPPORT_NOTICE} {TRACKER_STATE_NOTICE} {TRACKER_HISTORY_NOTICE} Stop locally from Status, Stop &amp; reconnect. Revoke removes reporting authorization, not guaranteed local shutdown or history erasure.
-        </p>
+        <div className={styles.privacy}>
+          <p className={styles.privacyShort}>
+            Usage activity only: code and prompts are not sent. Profiles and stats are public.
+          </p>
+          <details className={styles.privacyDetails}>
+            <summary className={styles.privacySummary}>Details</summary>
+            <p className={styles.privacyFull}>
+              {TRACKER_LOCAL_READS} {TRACKER_UPLOADS} {TRACKER_VISIBILITY} {TRACKER_SUPPORT_NOTICE} {TRACKER_STATE_NOTICE} {TRACKER_HISTORY_NOTICE} Stop locally from Status, Stop &amp; reconnect. Revoke removes reporting authorization, not guaranteed local shutdown or history erasure.
+            </p>
+          </details>
+        </div>
         {(onDismiss || settingsHref || onGoOnline) && (
           <div className={styles.actions}>
             {!offline && onGoOnline && (

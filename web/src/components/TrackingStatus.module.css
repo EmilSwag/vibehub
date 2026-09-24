@@ -51,6 +51,22 @@
   padding-bottom: 16px;
 }
 
+.headRow {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.statusPillBig {
+  padding: 5px 14px 5px 12px;
+}
+
+.titleBig {
+  font-size: 16px;
+  line-height: 22px;
+}
+
 /* The one place the two live tokens meet: --vh-live on the word and the dot,
  * --vh-live-soft behind them. Offline and idle get the neutral tint, so the badge
  * is the same object in every state and only its lightness changes. */
@@ -170,6 +186,38 @@
 
 .counterUnit {
   font-size: 13px;
+  color: var(--vh-text-faint);
+}
+
+/* Big numbers row for zoomer-friendly settings glance */
+.bigNumbersRow {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+}
+
+.bigStatGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bigStatValue {
+  font-family: var(--vh-font-mono);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vh-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.bigStatLabel {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--vh-text-faint);
 }
 
@@ -434,6 +482,83 @@
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--vh-text-faint);
+}
+
+.privacyShort {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-dim);
+}
+
+.privacyDetails {
+  margin-top: 6px;
+}
+
+.privacySummary {
+  font-size: 12px;
+  color: var(--vh-text-faint);
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color var(--dur-press) var(--ease-out);
+}
+
+.privacySummary:hover {
+  color: var(--vh-text-dim);
+}
+
+.privacyFull {
+  margin: 8px 0 0;
+  max-width: 72ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--vh-text-faint);
+}
+
+.devicesExpander {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.devicesSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+  list-style: none;
+}
+
+.devicesSummary::-webkit-details-marker {
+  display: none;
+}
+
+.devicesSummary:hover .label {
+  color: var(--vh-text);
+}
+
+.devicesChevron {
+  color: var(--vh-text-faint);
+  transition: transform var(--dur-state) var(--ease-out);
+}
+
+.devicesExpander[open] .devicesChevron {
+  transform: rotate(180deg);
+}
+
+.devicesBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.addDeviceRow {
+  padding-top: 4px;
 }
 
 .actions {

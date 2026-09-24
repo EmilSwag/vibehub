@@ -18,6 +18,7 @@ import {
 import type { ModelSelection, PricedRecentModelRow } from "../lib/recentModels";
 import { isValidTokenCount } from "../lib/tokenCost";
 import { TOKENS_NOT_REPORTED, TOKENS_NOT_REPORTED_TITLE } from "../lib/supportedTools";
+import { ensureModelRowsPriced } from "../lib/trackerCost";
 import { TokenCost, TokenCostDetails } from "./ui/TokenCost";
 import type { UserStats } from "../types";
 import type { PresenceLike } from "./ui/PresenceBlock";
@@ -123,6 +124,7 @@ function Row({
   const glyph = row.model ? modelFamily(row.model) : toolFamily(row.tools[0]);
   const namedAfterTool = row.model === null && row.tools.length === 1;
   const rowFlags = rowTokenFlags(row);
+  const isZeroTime = row.activeSeconds < 60;
   const item = useRef<HTMLLIElement>(null);
   const selected = selectedAt !== null;
   const aria = modelRowAria({ reveals, open, listId, detailId });
@@ -151,7 +153,7 @@ function Row({
       : `${row.label} — show its tools`;
 
   return (
-    <li ref={item} className={cx(styles.item, muted && styles.itemMuted)} style={stagger(index)}>
+    <li ref={item} className={cx(styles.item, muted && styles.itemMuted, isZeroTime && styles.itemZero)} style={stagger(index)}>
       <div className={cx(styles.row, selected && styles.rowSelected)}>
         {/* The row is a real button stretched over the whole band. It is a sibling
             behind the content rather than a wrapper because the tool chips are buttons
@@ -217,7 +219,7 @@ function Row({
         </span>
 
         <span className={styles.right}>
-          <span className={styles.hours}>
+          <span className={cx(styles.hours, isZeroTime && styles.hoursMuted)}>
             {formatHoursOnRecord(row.activeSeconds)}
             {dated ? " on record" : ""}
           </span>
@@ -380,7 +382,10 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
     };
   }, [username, attempt]);
 
-  const rows = useMemo(() => (lifetime ? groupStatsByModelWithCosts(lifetime.byModel) : []), [lifetime]);
+  const rows = useMemo(
+    () => (lifetime ? ensureModelRowsPriced(groupStatsByModelWithCosts(lifetime.byModel), lifetime.byModel) : []),
+    [lifetime],
+  );
   const live = useMemo(() => liveLabels(presence), [presence]);
   // A server older than round 7 dates nothing and silently answers `range=all` with
   // its 30-day default, so the dates go away and the hours stop claiming to be a

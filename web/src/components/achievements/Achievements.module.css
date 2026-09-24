@@ -29,6 +29,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--vh-space-3);
+  align-items: stretch;
 }
 
 .card {
@@ -42,6 +43,8 @@
   background: var(--vh-surface);
   cursor: pointer;
   overflow: hidden;
+  height: 100%;
+  box-sizing: border-box;
   transition:
     border-color var(--dur-press) var(--ease-out),
     opacity var(--dur-press) var(--ease-out);
@@ -56,7 +59,8 @@
     border-color: var(--vh-text);
   }
   .cardLocked:hover {
-    opacity: 0.9;
+    opacity: 0.88;
+    border-color: var(--vh-border-strong);
   }
   .card:hover .iconSlot {
     transform: scale(1.06);
@@ -66,11 +70,39 @@
 
 .cardUnlocked {
   border-color: var(--vh-border-strong);
+  background: var(--vh-surface);
 }
 
 .cardLocked {
-  opacity: 0.65;
+  opacity: 0.7;
+  border-style: dashed;
   background: var(--vh-bg);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.unlockedBadge {
+  font-family: var(--vh-font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: var(--vh-radius-pill);
+  border: 1px solid var(--vh-border-strong);
+  color: var(--vh-text);
+  background: var(--vh-surface-2);
+}
+
+.lockedBadge {
+  font-family: var(--vh-font-mono);
+  font-size: 11px;
+  color: var(--vh-text-faint);
 }
 
 /* Same box as a loaded card, no pointer — it is not a control yet. */
@@ -91,8 +123,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--vh-radius-sm);
   background: var(--vh-surface-2);
   border: 1px solid var(--vh-border);
@@ -105,18 +137,20 @@
 .cardLocked .iconSlot {
   color: var(--vh-text-faint);
   border-style: dashed;
+  background: var(--vh-surface);
 }
 
 .info {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1 0 auto;
 }
 
 .title {
   margin: 0;
   font-family: var(--vh-font-sans);
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--vh-text);
   letter-spacing: -0.01em;
@@ -124,7 +158,7 @@
 
 .desc {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--vh-text-dim);
 }
@@ -134,7 +168,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-top: 4px;
+  padding-top: 6px;
 }
 
 .progressLabelRow {
@@ -178,6 +212,10 @@
   height: 100%;
   border-radius: var(--vh-radius-pill);
   background: var(--vh-text);
+}
+
+.cardLocked .progressFill {
+  background: var(--vh-text-dim);
 }
 
 .empty {

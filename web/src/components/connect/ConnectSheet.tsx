@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { createPortal } from "react-dom";
-import { API_BASE } from "../../lib/api";
 import {
   BACKGROUND_START_MEANS,
   CONNECT_COMMAND_ERROR,
-  COPY_ONLY_NOTICE,
   DEVICE_CONNECT_SCOPE,
   INSTALL_START_MEANS,
   NODE_SETUP_NOTICE,
-  PRIVATE_COMMAND_NOTICE,
   TRACKER_CONTROL_NOTICE,
   TRACKER_HISTORY_NOTICE,
   TRACKER_LOCAL_READS,
@@ -18,15 +15,9 @@ import {
   TRACKER_SUPPORT_NOTICE,
   TRACKER_UPLOADS,
   TRACKER_VISIBILITY,
-  buildConnectPrompt,
-  buildOneCommandConnect,
-  buildStartCommand,
-  buildStatusCommand,
-  buildStopCommand,
+  buildPairConnectCommand,
 } from "../../lib/connectPrompt";
-import type { InstallOs } from "../../lib/connectPrompt";
 import { claimConnectCelebration, deviceLabel, detectOs, ensureConnectToken } from "../../lib/connectToken";
-import type { StoredConnectToken } from "../../lib/connectToken";
 import { detectInstallChoice, scriptOs } from "../../lib/macInstall";
 import type { InstallChoice } from "../../lib/macInstall";
 import { useExitTransition } from "../../lib/motion";
@@ -39,32 +30,24 @@ import { agoShort } from "../TrackingStatus";
 import type { TrackerStatus } from "../../types";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
-import { Skeleton } from "../ui/Skeleton";
 import { ConnectCelebration } from "../ui/ConnectCelebration";
 import { MacInstall } from "../MacInstall";
-import { HookTools } from "./HookTools";
 import styles from "./ConnectSheet.module.css";
 
-const WEB_URL = window.location.origin;
 const EXIT_MS = 200;
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
-// Three install surfaces, one chooser. "macOS app" is the native VibeHub.app lane (its
-// own panel, its own disclosures); the other two are the unchanged shell-script flows —
-// same ids, same commands, same copy as before.
+
 const OSES: { id: InstallChoice; label: string }[] = [
   { id: "mac-app", label: "macOS app" },
-  { id: "mac", label: "macOS / Linux" },
   { id: "windows", label: "Windows" },
+  { id: "mac", label: "macOS / Linux" },
 ];
 
-type AttemptCopy = "connect" | "assistant" | "start";
-type Copied = AttemptCopy | "status" | "stop";
-const firstStep = (copied: AttemptCopy | null) => copied === "connect"
-  ? "Install & start command copied"
-  : copied === "assistant" ? "Assistant prompt copied"
-  : copied === "start" ? "Start command copied" : "Copy or select the command above";
+type AttemptCopy = "connect" | "start";
+type Copied = AttemptCopy;
+const firstStep = (copied: AttemptCopy | null) =>
+  copied === "connect" ? "Command copied" : "Copy or run the command above";
 
-// These are buttons choosing a command format, not provider tabs or incomplete tabs.
 function OsPicker({ value, onChange }: { value: InstallChoice; onChange: (os: InstallChoice) => void }) {
   return (
     <div className={styles.seg} role="group" aria-label="Operating system">
@@ -83,50 +66,16 @@ function OsPicker({ value, onChange }: { value: InstallChoice; onChange: (os: In
   );
 }
 
-/**
- * Everything the shell-script tabs must say before their command — and nothing the
- * macOS app tab may borrow.
- *
- * `INSTALL_START_MEANS`, `BACKGROUND_START_MEANS` and `PRIVATE_COMMAND_NOTICE` describe
- * the connector exactly: it installs *and* starts tracking, never touches OS autostart,
- * and carries a device key. All three are false of VibeHub.app, which installs without
- * tracking anything, does resume at login once started, and is tokenless — so the app
- * tab renders `MacInstall`'s own disclosures instead of these.
- *
- * Extracted from the sheet body so the disclosure travels with the command it explains:
- * wherever a script command renders, this renders above it, unconditionally. Its
- * disclosure state is local, which is also how it resets — the sheet unmounts on close.
- */
-function ScriptConsent({ os }: { os: InstallOs }) {
-  const id = useId();
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  return (
-    <>
-      <p className={styles.explain}>{os === "windows" ? "Paste in PowerShell." : "Paste in Terminal."} {NODE_SETUP_NOTICE}</p>
-
-      {/* Load-bearing consent is visible before the command and Copy. */}
-      <div className={styles.consent} aria-label="Before you start">
-        <p>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
-        <p>{TRACKER_LOCAL_READS}</p>
-        <p>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
-      </div>
-      <button type="button" className={styles.helpToggle} aria-expanded={detailsOpen} aria-controls={`${id}-data`} onClick={() => setDetailsOpen((v) => !v)}>
-        Data access and supported sources
-      </button>
-      {detailsOpen && (
-        <div id={`${id}-data`} className={styles.stepDetails}>
-          <p className={styles.explain}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
-          <p className={styles.explain}>{TRACKER_STATE_NOTICE} A needed Node.js runtime stays in VibeHub's folder. System PATH and OS startup settings stay unchanged.</p>
-          <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
-        </div>
-      )}
-      <p className={styles.note}>{PRIVATE_COMMAND_NOTICE}</p>
-      <p className={styles.explain}>{COPY_ONLY_NOTICE}</p>
-    </>
-  );
-}
-
-function Progress({ stage, elapsedMs, stalled, device, tool, copied, anchor, stale }: {
+function Progress({
+  stage,
+  elapsedMs,
+  stalled,
+  device,
+  tool,
+  copied,
+  anchor,
+  stale,
+}: {
   stage: "waiting" | "pinged" | "live";
   elapsedMs: number;
   stalled: boolean;
@@ -138,11 +87,13 @@ function Progress({ stage, elapsedMs, stalled, device, tool, copied, anchor, sta
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const helpId = useId();
-  // A failed clipboard operation never earns a checkmark. The remaining two rows
-  // require a server observation; neither a key nor a copied command counts.
   const rows = [
     { label: firstStep(copied), done: copied !== null, active: false },
-    { label: stage === "waiting" ? stale?.lead ?? "Waiting for a tracker connection…" : "Server accepted connection", done: stage !== "waiting", active: stage === "waiting" },
+    {
+      label: stage === "waiting" ? stale?.lead ?? "Waiting for connection…" : "Server accepted connection",
+      done: stage !== "waiting",
+      active: stage === "waiting",
+    },
     { label: "Tracker connected", done: stage === "live", active: stage === "pinged" },
   ];
   return (
@@ -156,11 +107,18 @@ function Progress({ stage, elapsedMs, stalled, device, tool, copied, anchor, sta
             </span>
             <span className={styles.plabel}>
               {row.label}
-              {i === 1 && (stage === "waiting" ? (
-                <span className={styles.elapsed} aria-label={`${formatElapsed(elapsedMs)} elapsed`}>{formatElapsed(elapsedMs)}</span>
-              ) : device && (
-                <span className={styles.stepMeta}>{[device, tool && toolLabel(tool)].filter(Boolean).join(" · ")}</span>
-              ))}
+              {i === 1 &&
+                (stage === "waiting" ? (
+                  <span className={styles.elapsed} aria-label={`${formatElapsed(elapsedMs)} elapsed`}>
+                    {formatElapsed(elapsedMs)}
+                  </span>
+                ) : (
+                  device && (
+                    <span className={styles.stepMeta}>
+                      {[device, tool && toolLabel(tool)].filter(Boolean).join(" · ")}
+                    </span>
+                  )
+                ))}
             </span>
             {row.active && <span className={styles.pline} aria-hidden="true" />}
           </li>
@@ -169,15 +127,20 @@ function Progress({ stage, elapsedMs, stalled, device, tool, copied, anchor, sta
       {stage === "waiting" && stale && <p className={styles.staleFix}>{stale.fix}</p>}
       {stalled && (
         <div className={styles.help}>
-          <button type="button" className={styles.helpToggle} aria-expanded={helpOpen} aria-controls={helpId} onClick={() => setHelpOpen((v) => !v)}>
+          <button
+            type="button"
+            className={styles.helpToggle}
+            aria-expanded={helpOpen}
+            aria-controls={helpId}
+            onClick={() => setHelpOpen((v) => !v)}
+          >
             Still waiting? Common fixes
           </button>
           {helpOpen && (
             <ul id={helpId} className={cx(styles.helpList, "fade-in")}>
-              <li>Copying does not run setup. Paste the install & start command in your terminal.</li>
-              <li>Your assistant may be waiting for your yes or may have declined. A refusal is not a connection.</li>
-              <li>Check the terminal for download, device-key or start errors. Keep it open until setup finishes.</li>
-              <li>Already installed? Use Start / reconnect under Status, Stop & reconnect.</li>
+              <li>Copying does not run setup. Run the command in PowerShell or Terminal.</li>
+              <li>A browser window will open to approve this device. Click &ldquo;Allow this device&rdquo;.</li>
+              <li>Keep your terminal open until pairing completes.</li>
             </ul>
           )}
         </div>
@@ -189,13 +152,10 @@ function Progress({ stage, elapsedMs, stalled, device, tool, copied, anchor, sta
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** A copy attempt means begin watching; never that an installer ran. */
   onStarted?: () => void;
   onCelebrated?: () => void;
 }
 
-/** One OS-matched device command. Bottom sheet on phones, existing modal on desktop.
- * The sheet owns copy/minting; the unchanged heartbeat hook owns connection evidence. */
 export function ConnectSheet(props: Props) {
   const { user } = useAuth();
   return <ConnectSheetForUser key={user?.id ?? "signed-out"} {...props} />;
@@ -205,27 +165,19 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const id = useId();
-  // `detectOs` stays the only Windows authority; `detectInstallChoice` adds the macOS
-  // vs Linux split it cannot make, so only a real Mac lands on the app tab.
   const [choice, setChoice] = useState<InstallChoice>(() => detectInstallChoice(detectOs()));
   const os = scriptOs(choice);
-  const [minted, setMinted] = useState<{ userId: string; token: StoredConnectToken } | null>(null);
-  // Render-time ownership prevents a previous account's key appearing for one frame.
-  const token = minted?.userId === userId ? minted.token : null;
-  const [mintError, setMintError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
+  const [retry] = useState(0);
   const [copied, setCopied] = useState<Copied | null>(null);
   const [attemptCopy, setAttemptCopy] = useState<AttemptCopy | null>(null);
   const [error, setError] = useState<{ what: Copied; message: string } | null>(null);
   const [celebrationState, setCelebrationState] = useState<{ userId: string; status: TrackerStatus | null } | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [controlsOpen, setControlsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [started, setStarted] = useState(false);
 
   const { render, closing } = useExitTransition(open, EXIT_MS);
   const ping = useTrackerPing(open, started);
-  // An account already live at open is informational, not a new completed attempt.
   const showProgress = !ping.liveAtOpen && ping.stage !== "idle";
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -243,63 +195,47 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   useEffect(() => {
     if (!open) return;
     setStarted(false);
-    setMintError(null);
     setNoteOpen(false);
-    setAssistantOpen(false);
-    setControlsOpen(false);
+    setDetailsOpen(false);
   }, [open, userId]);
 
   // Keep per-user token deduplication and cancel old opens, users and retry attempts.
   useEffect(() => {
     if (!open || !userId) return;
     let cancelled = false;
-    setMinted(null);
-    setMintError(null);
     ensureConnectToken(userId, deviceLabel(detectOs()))
-      .then((next) => { if (!cancelled) setMinted({ userId, token: next }); })
-      .catch(() => { if (!cancelled) setMintError("Could not prepare your private command."); });
+      .then(() => { if (!cancelled) { /* token cached */ } })
+      .catch(() => { if (!cancelled) { /* ignore */ } });
     return () => { cancelled = true; };
   }, [open, userId, retry]);
 
-  const commands = useMemo(() => {
-    if (!token) return null;
+  const command = useMemo(() => {
     try {
-      return {
-        command: buildOneCommandConnect(os, token.token, API_BASE, WEB_URL),
-        prompt: buildConnectPrompt("assistant", token.token, API_BASE, WEB_URL, os),
-        error: null,
-      };
+      return buildPairConnectCommand(os);
     } catch {
-      return { command: null, prompt: null, error: CONNECT_COMMAND_ERROR };
+      return null;
     }
-  }, [token, os]);
-  const startCmd = buildStartCommand(os);
-  const statusCmd = buildStatusCommand(os);
-  const stopCmd = buildStopCommand(os);
+  }, [os]);
 
   const copy = async (what: Copied, value: string) => {
     const mine = ++generation.current;
     const stale = () => generation.current !== mine;
-    const isAttempt = what === "connect" || what === "assistant" || what === "start";
-    if (isAttempt) {
-      setStarted(true);
-      setAttemptCopy(null);
-      onStarted?.();
-    }
+    setStarted(true);
+    setAttemptCopy(null);
+    onStarted?.();
     setCopied(null);
     setError(null);
     try {
       await navigator.clipboard.writeText(value);
       if (stale()) return;
       setCopied(what);
-      if (isAttempt) setAttemptCopy(what);
+      setAttemptCopy(what);
     } catch {
       if (stale()) return;
       setError({ what, message: "Copy failed — select and copy the text above." });
     }
   };
 
-  // The existing fresh-heartbeat and per-user once gates remain authoritative.
   useEffect(() => {
     if (!open || !userId || !shouldCelebrate(ping.stage, ping.liveAtOpen)) return;
     if (claimConnectCelebration(userId)) setCelebrationState({ userId, status: ping.status });
@@ -314,14 +250,11 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
     dialog.current?.focus();
     return () => {
       document.body.style.overflow = overflow;
-      // Do not steal focus from the celebration's Enter button.
       const active = document.activeElement;
       if (!active || active === document.body || dialog.current?.contains(active)) opener.current?.focus();
     };
   }, [open]);
 
-  // Successful copy may reveal progress. On clipboard denial keep the command and
-  // inline recovery in view instead of scrolling away from the text to select.
   const progressScrolled = useRef(false);
   useEffect(() => { progressScrolled.current = false; }, [open, userId]);
   useEffect(() => {
@@ -379,9 +312,15 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const installed = installedNote(ping.status, agoShort);
   const staleHint = staleTrackerHint(ping.status);
   const staleNow = staleSinceWaiting(staleHint, ping.waitingSince);
-  const setupError = mintError ?? commands?.error;
-  const copyError = (what: Copied) => error?.what === what
-    ? <p className={styles.error} role="alert">{error.message}</p> : null;
+  const copyError = (what: Copied) =>
+    error?.what === what ? <p className={styles.error} role="alert">{error.message}</p> : null;
+
+  const honestLine =
+    choice === "mac-app"
+      ? "Carries the tracker. No terminal setup."
+      : choice === "windows"
+        ? "Installs VibeHub and connects via browser approval. No tokens needed."
+        : "Installs VibeHub and connects via browser approval. No tokens needed.";
 
   return createPortal(
     <>
@@ -403,13 +342,20 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
             </button>
           </header>
           <div className={styles.body}>
-            <p className={styles.scope}>{DEVICE_CONNECT_SCOPE}</p>
+            <p className={styles.scope}>{honestLine}</p>
+
             {installed && (
               <div className={styles.installed}>
                 <p className={styles.installedLead}>{installed.lead}</p>
                 {installed.detail && (
                   <>
-                    <button type="button" className={styles.helpToggle} aria-expanded={noteOpen} aria-controls={`${id}-installed`} onClick={() => setNoteOpen((v) => !v)}>
+                    <button
+                      type="button"
+                      className={styles.helpToggle}
+                      aria-expanded={noteOpen}
+                      aria-controls={`${id}-installed`}
+                      onClick={() => setNoteOpen((v) => !v)}
+                    >
                       Already installed?
                     </button>
                     {noteOpen && <p id={`${id}-installed`} className={styles.installedDetail}>{installed.detail}</p>}
@@ -419,93 +365,54 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
             )}
 
             <div className={styles.step}>
-              <h3 className={styles.stepTitle}>
-                {choice === "mac-app" ? "Install VibeHub for Mac" : "Install and start VibeHub"}
-              </h3>
               <OsPicker value={choice} onChange={setChoice} />
-              {/* No `token` here on purpose: the sheet's key comes from
-                  `ensureConnectToken`, which caches it in localStorage. FC4 keeps that
-                  entry with the Windows/Linux flow, so the Mac panel issues its own. */}
-              {choice === "mac-app" ? <MacInstall /> : (
-                <>
-              <ScriptConsent os={os} />
-              {commands?.command ? (
-                <>
-                  <pre className={styles.text} tabIndex={0} aria-label="Install and start command">{commands.command}</pre>
-                  <Button className={styles.copy} onClick={() => void copy("connect", commands.command!)}>
-                    <Icon name={copied === "connect" ? "check" : "copy"} size={14} />
-                    {copied === "connect" ? "Command copied" : "Copy install & start"}
-                  </Button>
-                </>
-              ) : setupError ? (
-                <div className={styles.stepDetails}>
-                  <p className={styles.error} role="alert">{setupError}</p>
-                  <Button variant="secondary" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
-                </div>
+
+              {choice === "mac-app" ? (
+                <MacInstall />
               ) : (
-                <div className={styles.stepDetails} aria-busy="true" aria-label="Preparing your private command">
-                  <Skeleton variant="block" height={96} width="100%" />
-                  <Skeleton variant="pill" height={44} width="100%" />
-                </div>
-              )}
-              {copyError("connect")}
+                <>
+                  {command ? (
+                    <div className={styles.step}>
+                      <pre className={styles.text} tabIndex={0} aria-label="Install and start command">
+                        {command}
+                      </pre>
+                      <Button className={styles.copy} onClick={() => void copy("connect", command)}>
+                        <Icon name={copied === "connect" ? "check" : "copy"} size={14} />
+                        {copied === "connect" ? "Command copied" : "Copy install command"}
+                      </Button>
+                      {copyError("connect")}
+                    </div>
+                  ) : (
+                    <p className={styles.error} role="alert">{CONNECT_COMMAND_ERROR}</p>
+                  )}
                 </>
               )}
             </div>
 
-            {/* CLI-only helpers: an assistant prompt that carries the device key, and
-                the tracker's own start/status/stop verbs. Neither applies to the app,
-                which is driven from its menu bar, so the app tab hides both. */}
-            {choice !== "mac-app" && (<>
+            {/* Accessible Details disclosure */}
             <div className={styles.help}>
-              <button type="button" className={styles.helpToggle} aria-expanded={assistantOpen} aria-controls={`${id}-assistant`} onClick={() => setAssistantOpen((value) => !value)}>
-                Ask your AI assistant
+              <button
+                type="button"
+                className={styles.helpToggle}
+                aria-expanded={detailsOpen}
+                aria-controls={`${id}-data`}
+                onClick={() => setDetailsOpen((v) => !v)}
+              >
+                Details {detailsOpen ? "▴" : "▾"}
               </button>
-              {assistantOpen && (
-                <div id={`${id}-assistant`} className={styles.stepDetails}>
-                  <p className={styles.explain}>This only changes where you run setup, not what gets tracked. A local coding assistant must ask for your yes before starting. ChatGPT can guide you but cannot run commands on your device.</p>
-                  <p className={styles.explain}>If an assistant declines, stop automation. You may choose to use the terminal command above yourself; do not change its permissions to force a start.</p>
-                  {commands?.prompt && (
-                    <>
-                      <pre className={styles.text} tabIndex={0} aria-label="Assistant setup prompt">{commands.prompt}</pre>
-                      <Button variant="secondary" className={styles.copy} onClick={() => void copy("assistant", commands.prompt!)}>
-                        {copied === "assistant" ? "Prompt copied" : "Copy assistant prompt"}
-                      </Button>
-                    </>
-                  )}
-                  {copyError("assistant")}
+              {detailsOpen && (
+                <div id={`${id}-data`} className={styles.stepDetails}>
+                  <p className={styles.explain}>{DEVICE_CONNECT_SCOPE}</p>
+                  <p className={styles.explain}>{NODE_SETUP_NOTICE}</p>
+                  <p className={styles.explain}>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
+                  <p className={styles.explain}>{TRACKER_LOCAL_READS}</p>
+                  <p className={styles.explain}>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
+                  <p className={styles.explain}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
+                  <p className={styles.explain}>{TRACKER_STATE_NOTICE}</p>
+                  <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
                 </div>
               )}
             </div>
-
-            <div className={styles.help}>
-              <button type="button" className={styles.helpToggle} aria-expanded={controlsOpen} aria-controls={`${id}-controls`} onClick={() => setControlsOpen((value) => !value)}>
-                Status, Stop & reconnect
-              </button>
-              {controlsOpen && (
-                <div id={`${id}-controls`} className={styles.stepDetails}>
-                  <p className={styles.explain}>{TRACKER_CONTROL_NOTICE}</p>
-                  <p className={styles.explain}>Already installed? Start / reconnect uses the saved key and replaces a running tracker. It has the same background data access described above.</p>
-                  {([
-                    ["status", "Check status", statusCmd],
-                    ["stop", "Stop", stopCmd],
-                    ["start", "Start / reconnect", startCmd],
-                  ] as const).map(([what, label, command]) => (
-                    <div key={what} className={styles.control}>
-                      <h4 className={styles.stepTitle}>{label}</h4>
-                      <pre className={styles.text} tabIndex={0} aria-label={`${label} command`}>{command}</pre>
-                      <Button variant="secondary" className={styles.copy} onClick={() => void copy(what, command)}>
-                        {copied === what ? "Command copied" : `Copy ${label.toLowerCase()}`}
-                      </Button>
-                      {copyError(what)}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <HookTools />
-            </>)}
 
             {showProgress && (
               <Progress

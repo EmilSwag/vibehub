@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { ACHIEVEMENTS_DEF, knownAchievements, pickPreview, unlockedLabel } from "../../lib/achievements";
+import { ACHIEVEMENTS_DEF, knownAchievements, unlockedLabel } from "../../lib/achievements";
 import type { Achievement } from "../../lib/achievements";
 import { achievementsApi, isNotFound } from "../../lib/api";
 import { stagger } from "../../lib/motion";
 import { BadgeIcon } from "./BadgeIcon";
-import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { ErrorState } from "../ui/ErrorState";
 import { SectionTitle } from "../ui/SectionTitle";
@@ -91,20 +90,6 @@ export function AchievementsList({ username, isSelf, className }: AchievementsLi
     });
   };
 
-  const previewAlert = () => {
-    const badge = pickPreview(rows);
-    if (!badge) return;
-    const def = ACHIEVEMENTS_DEF[badge.id];
-    showSkewToast({
-      badgeId: badge.id,
-      category: "Achievement unlocked",
-      title: def.title,
-      subtitle: `${def.tagline} · ${def.requirement}`,
-      duration: 10_000,
-      fireworks: true,
-    });
-  };
-
   const onCardKey = (event: KeyboardEvent<HTMLDivElement>, a: Achievement) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -128,13 +113,6 @@ export function AchievementsList({ username, isSelf, className }: AchievementsLi
               <span className={styles.headerSummary}>
                 Unlocked {unlockedCount} of {rows.length}
               </span>
-              {/* Owner only: what an unlock looks like, with the fireworks. Visitors
-                  never see the control (B3). */}
-              {isSelf && (
-                <Button size="sm" variant="secondary" onClick={previewAlert}>
-                  Preview alert
-                </Button>
-              )}
             </div>
 
             <div className={cx(styles.grid, "stagger")}>
@@ -152,8 +130,15 @@ export function AchievementsList({ username, isSelf, className }: AchievementsLi
                     tabIndex={0}
                     aria-label={`${def.title}: ${item.unlocked ? unlockedLabel(item.unlockedAt) : item.progressLabel}`}
                   >
-                    <div className={styles.iconSlot}>
-                      <BadgeIcon id={item.id} size={30} unlocked={item.unlocked} />
+                    <div className={styles.cardHeader}>
+                      <div className={styles.iconSlot}>
+                        <BadgeIcon id={item.id} size={28} unlocked={item.unlocked} />
+                      </div>
+                      {item.unlocked ? (
+                        <span className={styles.unlockedBadge}>Unlocked</span>
+                      ) : (
+                        <span className={styles.lockedBadge}>{def.tagline}</span>
+                      )}
                     </div>
 
                     <div className={styles.info}>

@@ -13,6 +13,7 @@ import projectsRoutes from "./routes/projects";
 import statsRoutes from "./routes/stats";
 import presenceRoutes from "./routes/presence";
 import trackerRoutes from "./routes/tracker";
+import pairingRoutes from "./routes/pairing";
 import macRoutes from "./routes/mac";
 import achievementsRoutes from "./routes/achievements";
 import feedRoutes from "./routes/feed";
@@ -103,6 +104,9 @@ app.use("/api/v1/auth", (req, res, next) => {
 const TRACKER_LOGGED_ROUTES = new Set([
   "POST /api/v1/users/me/tracker-tokens",
   "POST /api/v1/tracker/heartbeat",
+  "POST /api/v1/tracker/pair/request",
+  "POST /api/v1/tracker/pair/approve",
+  "POST /api/v1/tracker/pair/poll",
 ]);
 app.use((req, res, next) => {
   const key = `${req.method} ${req.originalUrl.split("?")[0]}`;
@@ -125,6 +129,7 @@ app.use("/api/v1", projectsRoutes);
 app.use("/api/v1", statsRoutes);
 app.use("/api/v1", presenceRoutes);
 app.use("/api/v1", trackerRoutes);
+app.use("/api/v1", pairingRoutes);
 app.use("/api/v1", macRoutes); // routes/mac.ts defines GET /mac/latest (§5.10) - public, no auth
 // Honest achievements + Vibe Feed (meta/plans/vibehub-honest-achievements-feed.md):
 // GET /users/:username/achievements · GET /feed · GET /users/:username/feed · POST /feed/reactions.

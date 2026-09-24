@@ -41,11 +41,10 @@ it and opens the app. It carries **no token** — neither entrance does. The app
 for the token once, on first run, whichever way it was installed.
 
 **Manual:** download `VibeHub-macOS.zip` from the same release, unzip it, drag
-**VibeHub.app** to `/Applications`, then **right-click → Open** the first time if this
-build isn't notarised (ad-hoc signed until Developer ID secrets are configured — see
-Signing below). Gatekeeper otherwise blocks a plain double-click with "cannot be opened
-because the developer cannot be verified"; right-click → Open is macOS's supported
-override, and after that it launches normally.
+**VibeHub.app** to `/Applications`, then open it. If macOS blocks first launch (unnotarised
+ad-hoc build), go to **System Settings → Privacy & Security**, scroll down to Security,
+and click **Open Anyway** (on macOS 14 and earlier, right-click → Open in Finder also works).
+After that it launches normally.
 
 `/Applications` (or `~/Applications`) is required for tracking, not just recommended:
 the LaunchAgent records the app bundle's absolute paths, and `SMAppService` refuses to
@@ -54,12 +53,12 @@ register a login item for an app running from `~/Downloads`, a disk image or `.b
 
 ## First run
 
-Welcome → paste a tracker token → Start tracking → Done. Mint the token on the web
-under **Settings → Tracker** — it's shown once. The app verifies it against the server
-before saving it anywhere; then it goes into the login Keychain (this device only,
-never synced) and, via the embedded CLI's `login --token-stdin`, into the tracker's own
-`~/.vibehub/config.json`. It is never placed in a preferences file, an argument vector,
-an environment variable, a URL or a log.
+Welcome → click "Connect in Browser" to pair with one click → Start tracking → Done.
+(Manual device key entry from Settings → Tracker is also supported if needed).
+The app verifies the token against the server before saving it anywhere; then it goes
+into the login Keychain (this device only, never synced) and, via the embedded CLI's
+`login --token-stdin`, into the tracker's own `~/.vibehub/config.json`. It is never placed
+in a preferences file, an argument vector, an environment variable, a URL or a log.
 
 A `~/.vibehub/handoff.json` written by the one-command installer, or a
 `vibehub://connect?apiUrl=…&webUrl=…` link, can only point the app at a different
@@ -137,7 +136,8 @@ step refuses a bundle that lacks either.
 
 ## Signing
 
-Ad-hoc by default (no Developer ID, no notarisation) — right-click → Open once, as
+Ad-hoc by default (no Developer ID, no notarisation) — if blocked on first launch, allow via
+**System Settings → Privacy & Security → Open Anyway** (or right-click → Open on macOS 14 and earlier), as
 above. CI (`.github/workflows/mac.yml`) signs and notarises for real once these repo
 secrets exist; until then it silently falls back to ad-hoc, same as running the scripts
 locally with no environment variables set:

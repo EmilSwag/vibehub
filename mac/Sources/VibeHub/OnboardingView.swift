@@ -1,72 +1,172 @@
 import AppKit
 import SwiftUI
 
-/// First run — or a returning user who cleared their token in Settings. One sentence,
-/// one field, one button — and an explicit pointer to where the token actually comes
-/// from, because nothing else in the app can work until it's here.
-///
-/// Doubles as step 2 of `OnboardingWizard`, which is the only caller that passes
-/// `onSaved`; used bare (as the plain `.needsToken` state) it defaults to `nil`.
-///
-/// Routes through `TrackerManager.connect(token:)` — the same verify-then-save flow a
-/// `vibehub://connect` link or an installer handoff uses — so a pasted token is never
-/// treated any differently from one that arrived some other way.
+/// First run — connects the Mac to VibeHub via browser pairing (zero typing),
+/// with manual token entry available as a fallback.
 struct OnboardingView: View {
     @ObservedObject var store: StatusStore
     @ObservedObject var settings: AppSettings
     @ObservedObject var tracker: TrackerManager
-    /// `viaKeyboard` is true when Return in the field submitted the token, so the
-    /// wizard can advance without motion — a keyboard-driven step must not animate
-    /// (N6). A click passes false and gets the ordinary transition.
     var onSaved: ((_ viaKeyboard: Bool) -> Void)? = nil
 
     @State private var token = ""
     @State private var isVerifying = false
+    @State private var isPairing = false
+    @State private var pairingCode: String?
     @State private var errorMessage: String?
+    @State private var showManual = false
+    @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                // The real mark, not a system chevron (Lumi, first-start review).
                 BrandMark(size: 15)
                 Text("VibeHub").font(.system(size: 14, weight: .semibold))
             }
 
-            Text("Paste your tracker token to see your activity here.")
+            Text("Connect your Mac to see your AI coding activity.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            SecureField("Tracker token", text: $token)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
-                .onSubmit { verify(viaKeyboard: true) }
-
-            Button(isVerifying ? "Verifying\u{2026}" : "Verify") { verify(viaKeyboard: false) }
+            // Primary flow: One-click browser pairing
+            if !isPairing {
+                Button("Connect in Browser") {
+                    startBrowserPairing()
+                }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Waiting for approval in browser\u{2026}")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+
+                    if let pairingCode {
+                        HStack(spacing: 6) {
+                            Text("Pairing code:")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            Text(pairingCode)
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        }
+                    }
+
+                    Button("Cancel") {
+                        cancelPairing()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.04))
+                .cornerRadius(6)
+            }
 
             if let username = tracker.connectedUsername {
-                Text("Verified as \(username)").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Connected as @\(username)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
             } else if let errorMessage {
-                Text(errorMessage).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(errorMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
 
             Divider().padding(.vertical, 2)
 
-            // This is load-bearing copy — a first-run user genuinely cannot guess it —
-            // so it earns more words than a banner would.
-            Text("Tokens are minted on the web, under Settings → Tracker.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // Secondary manual path
+            DisclosureGroup(isExpanded: $showManual) {
+                VStack(alignment: .leading, spacing: 8) {
+                    SecureField("Paste device token", text: $token)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11, design: .monospaced))
+                        .onSubmit { verify(viaKeyboard: true) }
 
-            Button("Open Settings → Tracker") {
-                NSWorkspace.shared.open(settings.webUrl.appendingPathComponent("settings"))
+                    Button(isVerifying ? "Verifying\u{2026}" : "Verify token") {
+                        verify(viaKeyboard: false)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(.top, 4)
+            } label: {
+                Text("Or enter token manually")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 11))
         }
+        .onDisappear {
+            pollTask?.cancel()
+            pollTask = nil
+        }
+    }
+
+    private func startBrowserPairing() {
+        isPairing = true
+        errorMessage = nil
+        let client = APIClient(baseURL: settings.apiUrl)
+        let deviceName = Host.current().localizedName ?? "Mac"
+
+        pollTask = Task {
+            let requestResult = await client.pairRequest(deviceName: deviceName, os: "mac")
+            guard !Task.isCancelled else { return }
+
+            switch requestResult {
+            case .failure(let error):
+                isPairing = false
+                errorMessage = error.errorDescription
+                return
+            case .success(let pair):
+                pairingCode = pair.userCode
+                if let url = URL(string: pair.verificationUri) {
+                    NSWorkspace.shared.open(url)
+                }
+
+                // Poll every 2 seconds until approved or cancelled
+                let deadline = Date().addingTimeInterval(Double(pair.expiresIn))
+                while !Task.isCancelled && Date() < deadline {
+                    try? await Task.sleep(nanoseconds: UInt64(max(1, pair.interval)) * 1_000_000_000)
+                    guard !Task.isCancelled else { return }
+
+                    let pollResult = await client.pairPoll(deviceCode: pair.deviceCode)
+                    guard !Task.isCancelled else { return }
+
+                    if case .success(let poll) = pollResult {
+                        if poll.status == "approved", let token = poll.token {
+                            let connectResult = await tracker.connect(token: token)
+                            if case .success = connectResult {
+                                isPairing = false
+                                store.wake()
+                                onSaved?(false)
+                                return
+                            } else if case .failure(let error) = connectResult {
+                                isPairing = false
+                                errorMessage = error.errorDescription
+                                return
+                            }
+                        } else if poll.status == "expired" {
+                            isPairing = false
+                            errorMessage = "Pairing expired. Try again."
+                            return
+                        }
+                    }
+                }
+
+                if !Task.isCancelled {
+                    isPairing = false
+                    errorMessage = "Pairing timed out."
+                }
+            }
+        }
+    }
+
+    private func cancelPairing() {
+        pollTask?.cancel()
+        pollTask = nil
+        isPairing = false
+        pairingCode = nil
     }
 
     private func verify(viaKeyboard: Bool) {

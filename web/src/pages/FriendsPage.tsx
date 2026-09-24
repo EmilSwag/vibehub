@@ -15,6 +15,7 @@ import { SkeletonRow } from "../components/ui/Skeleton";
 import { SectionTitle } from "../components/ui/SectionTitle";
 import { rolesLabel } from "../components/ui/RoleGlyph";
 import { FriendListItem, FriendListItemSkeleton } from "../components/FriendListItem";
+import { FriendRowMenu } from "../components/FriendRowMenu";
 import styles from "./FriendsPage.module.css";
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
@@ -228,16 +229,10 @@ export function FriendsPage() {
                     daysAsFriends={f.daysAsFriends}
                     presence={presences.get(f.user.username)}
                     action={
-                      <button
-                        type="button"
-                        className={styles.unfriendBtn}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          void unfriend(f.user.username);
-                        }}
-                      >
-                        Unfriend
-                      </button>
+                      <FriendRowMenu
+                        username={f.user.username}
+                        onUnfriend={unfriend}
+                      />
                     }
                   />
                 ))}

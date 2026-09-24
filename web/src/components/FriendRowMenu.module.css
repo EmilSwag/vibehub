@@ -1,0 +1,104 @@
+.wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--vh-radius-sm);
+  background: transparent;
+  color: var(--vh-text-faint);
+  cursor: pointer;
+  transition:
+    background var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
+}
+
+.trigger:hover {
+  background: var(--vh-surface-2);
+  border-color: var(--vh-border);
+  color: var(--vh-text);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--vh-focus-ring);
+  outline-offset: 2px;
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  z-index: 20;
+  min-width: 140px;
+  padding: 4px;
+  border-radius: var(--vh-radius-sm);
+  border: 1px solid var(--vh-border);
+  background: var(--vh-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  animation: dropdownIn var(--dur-enter) var(--ease-out);
+}
+
+@keyframes dropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--vh-radius-xs);
+  background: transparent;
+  font-family: var(--vh-font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--vh-text-dim);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--vh-surface-2);
+  color: var(--vh-text);
+  outline: none;
+}
+
+.menuIcon {
+  flex: none;
+  color: var(--vh-text-faint);
+  transition: color var(--dur-press) var(--ease-out);
+}
+
+.menuItem:hover .menuIcon {
+  color: var(--vh-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown {
+    animation: none;
+  }
+}

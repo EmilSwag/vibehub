@@ -56,6 +56,8 @@ model User {
   authSessions           AuthSession[]
   achievements           UserAchievement[]
   feedReactions          FeedReaction[]
+  posts                  Post[]            @relation("UserPosts")
+  postViews              PostView[]        @relation("UserPostViews")
 
   @@map("users")
 }
@@ -268,4 +270,37 @@ model FeedReaction {
   @@unique([userId, target, kind])
   @@index([target])
   @@map("feed_reactions")
+}
+
+// People's posts feed (Round 21).
+// Pure user-created posts (Home and Profile).
+model Post {
+  id        String     @id @default(cuid())
+  authorId  String
+  author    User       @relation("UserPosts", fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  views     PostView[]
+
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+  @@map("posts")
+}
+
+// Unique post views by viewer (logged-in or anonymous key).
+// Author views are never recorded.
+model PostView {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation("UserPostViews", fields: [userId], references: [id], onDelete: SetNull)
+  viewerKey String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, viewerKey])
+  @@index([postId])
+  @@map("post_views")
 }

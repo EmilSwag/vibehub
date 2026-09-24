@@ -20,9 +20,11 @@ import {
   feedReactionSchema,
   foldReactions,
   formatDuration,
+  interleaveRecommended,
   isReactionTarget,
   modelLabel,
   pageEvents,
+  scoreRecommendedPost,
   toolLabel,
   type FeedEventCore,
   type FeedProjectRow,
@@ -103,16 +105,17 @@ const project = (overrides: Partial<FeedProjectRow> = {}): FeedProjectRow => ({
 eq("window / cap / limits / thresholds", [FEED_WINDOW_DAYS, FEED_CAP, FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT, FEED_MIN_SESSION_SECONDS, PROJECT_UPDATE_GAP_MS], [30, 200, 30, 100, 600, 3_600_000]);
 
 // ---- target regex ----
-for (const target of ["session:abc", "achievement:u1:deep-flow", "project:p1:new", "project:p1:upd:2026-09-22", "commits:u1:2026-09-22", "friendship:f1", `session:${"x".repeat(120)}`]) {
+for (const target of ["post:p123", "session:abc", "achievement:u1:deep-flow", "project:p1:new", "project:p1:upd:2026-09-22", "commits:u1:2026-09-22", "friendship:f1", `post:${"x".repeat(120)}`]) {
   eq(`target ok: ${target.slice(0, 40)}`, isReactionTarget(target), true);
 }
-for (const target of ["like:1", "session:", "session:has space", `session:${"x".repeat(121)}`, "SESSION:abc", "session:a/b", "session:a.b", "", "session", ":abc", 7, null]) {
+for (const target of ["bad:1", "session:", "session:has space", `session:${"x".repeat(121)}`, "SESSION:abc", "session:a/b", "session:a.b", "", "session", ":abc", 7, null]) {
   eq(`target refused: ${JSON.stringify(target).slice(0, 40)}`, isReactionTarget(target), false);
 }
-eq("REACTION_TARGET_RE is the contract regex", REACTION_TARGET_RE.source, "^(session|achievement|project|commits|friendship):[A-Za-z0-9:_-]{1,120}$");
-eq("reaction body: kind must be respect|flame", feedReactionSchema.safeParse({ target: "session:abc", kind: "heart" }).success, false);
-eq("reaction body: a bad target is refused", feedReactionSchema.safeParse({ target: "like:1", kind: "flame" }).success, false);
-eq("reaction body: ok", feedReactionSchema.parse({ target: "session:abc", kind: "respect" }), { target: "session:abc", kind: "respect" });
+eq("REACTION_TARGET_RE is the contract regex", REACTION_TARGET_RE.source, "^(post|session|achievement|project|commits|friendship):[A-Za-z0-9:_-]{1,120}$");
+eq("reaction body: kind unknown refused", feedReactionSchema.safeParse({ target: "post:abc", kind: "angry" }).success, false);
+eq("reaction body: a bad target is refused", feedReactionSchema.safeParse({ target: "bad:1", kind: "flame" }).success, false);
+eq("reaction body: like ok", feedReactionSchema.parse({ target: "post:abc", kind: "like" }), { target: "post:abc", kind: "like" });
+eq("reaction body: respect ok", feedReactionSchema.parse({ target: "post:abc", kind: "respect" }), { target: "post:abc", kind: "respect" });
 
 // ---- query parsing ----
 eq("query defaults", feedQuerySchema.parse({}), { limit: 30 });
@@ -248,17 +251,29 @@ const folded = foldReactions(
   [
     { target: "session:s1", kind: "respect", count: 3 },
     { target: "session:s1", kind: "flame", count: 1 },
-    { target: "session:s1", kind: "heart", count: 99 },
+    { target: "session:s1", kind: "like", count: 99 },
     { target: "session:elsewhere", kind: "flame", count: 7 },
   ],
-  [{ target: "session:s1", kind: "flame" }, { target: "session:s1", kind: "heart" }]
+  [{ target: "session:s1", kind: "flame" }, { target: "session:s1", kind: "like" }]
 );
 eq("reactions folded onto the right event, unknown kinds ignored", folded.map((e) => [e.id, e.reactions]), [
-  ["session:s1", { respect: 3, flame: 1, mine: { respect: false, flame: true } }],
-  ["session:s2", { respect: 0, flame: 0, mine: { respect: false, flame: false } }],
+  ["session:s1", { like: 99, respect: 3, flame: 1, mine: { like: true, respect: false, flame: true } }],
+  ["session:s2", { like: 0, respect: 0, flame: 0, mine: { like: false, respect: false, flame: false } }],
 ]);
-eq("signed-out viewer: mine is all false", foldReactions(core, [{ target: "session:s2", kind: "respect", count: 2 }], [])[1].reactions, { respect: 2, flame: 0, mine: { respect: false, flame: false } });
-eq("event keys with reactions", Object.keys(folded[0]), ["id", "type", "at", "user", "title", "description", "reactions"]);
+eq("signed-out viewer: mine is all false", foldReactions(core, [{ target: "session:s2", kind: "respect", count: 2 }], [])[1].reactions, { like: 0, respect: 2, flame: 0, mine: { like: false, respect: false, flame: false } });
+eq("event keys with reactions and views", Object.keys(folded[0]), ["id", "type", "at", "user", "title", "description", "views", "reactions"]);
+
+// ---- ranking and interleave ----
+const pFresh = { likes: 10, reactions: 5, views: 20, createdAt: new Date(T0) };
+const pOld = { likes: 10, reactions: 5, views: 20, createdAt: new Date(T0 - 48 * H) };
+const scoreFresh = scoreRecommendedPost(pFresh, T0, 0.5);
+const scoreOld = scoreRecommendedPost(pOld, T0, 0.5);
+eq("fresh post ranks higher than 48h old post with same engagement", scoreFresh > scoreOld, true);
+
+const conn = [{ id: "c1" }, { id: "c2" }, { id: "c3" }, { id: "c4" }, { id: "c5" }, { id: "c6" }];
+const rec = [{ id: "r1" }, { id: "r2" }];
+const mixedPosts = interleaveRecommended(conn, rec, 10);
+eq("interleave inserts recommended ~1 in 4 (at index 3 and 7)", mixedPosts.map((p) => p.id), ["c1", "c2", "c3", "r1", "c4", "c5", "c6", "r2"]);
 
 // ---- inputs are not mutated ----
 const frozen = rows({ sessions: [session()], projects: [project()] });

@@ -20,6 +20,7 @@ const FriendsPage = lazy(() => import("./pages/FriendsPage").then((m) => ({ defa
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage").then((m) => ({ default: m.ProjectsPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const ProjectPage = lazy(() => import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
+const PairPage = lazy(() => import("./pages/PairPage").then((m) => ({ default: m.PairPage })));
 const OnboardingPage = lazy(() =>
   import("./pages/onboarding/OnboardingPage").then((m) => ({ default: m.OnboardingPage }))
 );
@@ -84,6 +85,16 @@ export default function App() {
             <ProtectedRoute>
               <Suspense fallback={<RouteFallback />}>
                 <SettingsPage />
+              </Suspense>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pair"
+          element={
+            <ProtectedRoute>
+              <Suspense fallback={<RouteFallback />}>
+                <PairPage />
               </Suspense>
             </ProtectedRoute>
           }

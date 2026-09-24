@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import * as os from "node:os";
 import * as path from "node:path";
 
 // Wire format for heartbeats: ../docs/ARCHITECTURE.md §4.3.
@@ -202,6 +203,81 @@ program
       console.log(`Tracker is running (pid ${daemon.pid}): it picks up this token within 30 s.`);
       console.log("Run `start` anyway - it replaces a tracker started from an older build.");
     }
+  });
+
+program
+  .command("pair")
+  .description("pair this device with your VibeHub account via browser approval (zero typing)")
+  .option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL)
+  .option("--no-browser", "do not open the browser automatically")
+  .action(async (options: { apiUrl: string; browser: boolean }) => {
+    const origin = safeApiOrigin(options.apiUrl);
+    if (!origin) {
+      console.error("Pairing failed: invalid API URL.");
+      process.exit(1);
+    }
+    const osName = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "windows" : "linux";
+    const hostname = os.hostname();
+    console.log("Requesting pairing code from VibeHub...");
+    const reqRes = await fetch(`${origin}/api/v1/tracker/pair/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceName: hostname, os: osName }),
+    });
+    if (!reqRes.ok) {
+      console.error(`Pairing failed: server returned ${reqRes.status}`);
+      process.exit(1);
+    }
+    const session = (await reqRes.json()) as {
+      deviceCode: string;
+      userCode: string;
+      verificationUri: string;
+      expiresIn: number;
+      interval: number;
+    };
+    console.log(`Pairing code: ${session.userCode}`);
+    console.log(`Approve in browser: ${session.verificationUri}`);
+    if (options.browser) {
+      const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+      import("node:child_process").then(({ exec }) => {
+        exec(`${openCmd} ${JSON.stringify(session.verificationUri)}`);
+      });
+    }
+    console.log("Waiting for approval in browser...");
+    const deadline = Date.now() + session.expiresIn * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, Math.max(1, session.interval) * 1000));
+      const pollRes = await fetch(`${origin}/api/v1/tracker/pair/poll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceCode: session.deviceCode }),
+      });
+      if (pollRes.ok) {
+        const poll = (await pollRes.json()) as { status: string; token?: string; username?: string };
+        if (poll.status === "approved" && poll.token) {
+          const existing = readConfig();
+          const config: TrackerConfig = {
+            apiUrl: options.apiUrl,
+            deviceToken: poll.token,
+            projectAliases: existing?.projectAliases ?? {},
+            heartbeatIntervalMs: existing?.heartbeatIntervalMs,
+            idleThresholdMs: existing?.idleThresholdMs,
+            toolProcessNames: existing?.toolProcessNames,
+            attestedMetadata: existing?.attestedMetadata,
+            autostart: existing?.autostart,
+          };
+          writeConfig(config);
+          console.log(`Logged in as @${poll.username ?? "user"}. Wrote ${CONFIG_PATH_LABEL}.`);
+          console.log("Run `vibehub-tracker start` to start tracking.");
+          return;
+        } else if (poll.status === "expired") {
+          console.error("Pairing code expired. Run `vibehub-tracker pair` again to retry.");
+          process.exit(1);
+        }
+      }
+    }
+    console.error("Pairing timed out. Run `vibehub-tracker pair` again to retry.");
+    process.exit(1);
   });
 
 program

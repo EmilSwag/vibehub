@@ -293,8 +293,6 @@ vibehub_connect_main() (
   for arg in "$@"; do
     case "$arg" in --start) [ "$START" -eq 0 ] || fail 'Pass --start only once.'; START=1 ;; *) fail 'Unknown option. Use --start to explicitly allow background tracking, or omit it for setup only.' ;; esac
   done
-  # BSD/Git Bash regex engines can cap {m,n} at 255. Check length separately.
-  [[ "$TOKEN" =~ ^[A-Za-z0-9_][A-Za-z0-9_-]+$ ]] && [ "${#TOKEN}" -ge 8 ] && [ "${#TOKEN}" -le 512 ] || fail 'Set VIBEHUB_TOKEN to a device token from VibeHub Settings > Tracker.'
   WEB_URL="$(origin "$WEB_URL")"
   API_URL="$(origin "$API_URL")"
   [ -n "${HOME:-}" ] && [[ "$HOME" = /* ]] && [ "$HOME" != / ] && [ -d "$HOME" ] || fail 'An existing absolute HOME directory is required; do not run as an administrator.'
@@ -306,6 +304,46 @@ vibehub_connect_main() (
   esac
   case "$(uname -m)" in x86_64|amd64) ARCH=x64 ;; arm64|aarch64) ARCH=arm64 ;; *) fail 'Only x64 and arm64 devices are supported. No runtime was installed.' ;; esac
   command -v curl >/dev/null 2>&1 || fail 'curl is required; this connector does not install system packages.'
+
+  if [ -z "$TOKEN" ]; then
+    printf '%s\n' "${C_BOLD}Pairing this device with VibeHub${C_RESET}"
+    HOSTNAME_LABEL="$(hostname 2>/dev/null || echo "My Device")"
+    PAIR_PAYLOAD="{\"deviceName\":\"$HOSTNAME_LABEL\",\"os\":\"$PLATFORM\"}"
+    PAIR_RESP="$(curl -q --fail --silent --show-error --proto '=https,http' -H 'Content-Type: application/json' -d "$PAIR_PAYLOAD" "$API_URL/api/v1/tracker/pair/request" 2>/dev/null)" || fail 'Could not reach pairing service.'
+    DEVICE_CODE="$(printf '%s' "$PAIR_RESP" | sed -n 's/.*"deviceCode":"\([^"]*\)".*/\1/p')"
+    USER_CODE="$(printf '%s' "$PAIR_RESP" | sed -n 's/.*"userCode":"\([^"]*\)".*/\1/p')"
+    VERIFY_URI="$(printf '%s' "$PAIR_RESP" | sed -n 's/.*"verificationUri":"\([^"]*\)".*/\1/p')"
+    [ -n "$DEVICE_CODE" ] && [ -n "$USER_CODE" ] || fail 'Invalid pairing response from server.'
+    printf '  Opening browser to approve pairing...\n'
+    printf '  Code: %s%s%s\n' "$C_BOLD" "$USER_CODE" "$C_RESET"
+    printf '  If browser does not open, visit: %s\n' "$VERIFY_URI"
+    if [ "$PLATFORM" = darwin ]; then
+      open "$VERIFY_URI" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$VERIFY_URI" 2>/dev/null || true
+    fi
+    printf '  Waiting for approval in your browser...\n'
+    PAIR_START_TS=$(date +%s 2>/dev/null || echo 0)
+    while :; do
+      sleep 2
+      NOW_TS=$(date +%s 2>/dev/null || echo 0)
+      if [ $((NOW_TS - PAIR_START_TS)) -gt 300 ]; then
+        fail 'Pairing timed out. Run the command again to retry.'
+      fi
+      POLL_RESP="$(curl -q --fail --silent --show-error --proto '=https,http' -H 'Content-Type: application/json' -d "{\"deviceCode\":\"$DEVICE_CODE\"}" "$API_URL/api/v1/tracker/pair/poll" 2>/dev/null || echo '{}')"
+      POLL_STATUS="$(printf '%s' "$POLL_RESP" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')"
+      if [ "$POLL_STATUS" = "approved" ]; then
+        TOKEN="$(printf '%s' "$POLL_RESP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+        APPROVED_USER="$(printf '%s' "$POLL_RESP" | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')"
+        printf '%s%s%s Approved by @%s!\n' "$C_GREEN" "$G_CHECK" "$C_RESET" "$APPROVED_USER"
+        break
+      elif [ "$POLL_STATUS" = "expired" ]; then
+        fail 'Pairing code expired. Run the command again to retry.'
+      fi
+    done
+  elif ! [[ "$TOKEN" =~ ^[A-Za-z0-9_][A-Za-z0-9_-]+$ ]] || [ "${#TOKEN}" -lt 8 ] || [ "${#TOKEN}" -gt 512 ]; then
+    fail 'Set VIBEHUB_TOKEN to a device token from VibeHub Settings > Tracker.'
+  fi
   BASE="$HOME/.vibehub"
   APP="$BASE/app"
   BIN="$APP/vibehub-tracker.cjs"

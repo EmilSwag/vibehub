@@ -3,7 +3,7 @@
 
 export const env = {
   port: Number(process.env.PORT ?? 4000),
-  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173,http://localhost:5174",
   databaseProvider: (process.env.DATABASE_PROVIDER === "sqlite" ? "sqlite" : "postgresql") as
     | "postgresql"
     | "sqlite",

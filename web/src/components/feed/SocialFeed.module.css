@@ -1,8 +1,6 @@
 /*
- * Vibe Feed — one card of divided rows, the same rhythm as the friend lists
- * (16px padding, hairline dividers, avatar pinned to the top). Rows enter through the
- * global `.stagger` utility; the only local keyframe is the reaction pop, declared
- * here because CSS Modules hash animation names (see motion.css).
+ * Vibe Feed — posts-only feed (meta/plans/vibehub-round21-feed-posts-polish.md).
+ * Strict monochrome, tactile interactions, hairline borders, responsive layout.
  */
 
 @keyframes vh-react-pop {
@@ -11,17 +9,90 @@
   100% { transform: scale(1); }
 }
 
-/* Rows own their padding; the card's corners clip row hovers. */
+/* ---- Composer ---- */
+
+.composerCard {
+  margin-bottom: var(--vh-space-3);
+  padding: var(--vh-space-3);
+}
+
+.composer {
+  display: flex;
+  gap: var(--vh-space-3);
+  align-items: flex-start;
+}
+
+.composerAvatar {
+  flex: none;
+  line-height: 0;
+}
+
+.composerBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vh-space-2);
+  min-width: 0;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: var(--vh-space-2) var(--vh-space-3);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  color: var(--vh-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--dur-press) var(--ease-out);
+  box-sizing: border-box;
+}
+
+.textarea:focus {
+  border-color: var(--vh-text-dim);
+}
+
+.textarea::placeholder {
+  color: var(--vh-text-faint);
+}
+
+.composerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vh-space-2);
+}
+
+.composerHint {
+  font-size: 12px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.composerError {
+  font-size: 12.5px;
+  color: var(--vh-text);
+  background: var(--vh-surface-2);
+  padding: 4px 8px;
+  border-radius: var(--vh-radius-sm);
+  border: 1px solid var(--vh-border);
+}
+
+/* ---- Feed Card & Rows ---- */
+
 .card {
   padding: 0;
   overflow: hidden;
 }
 
 .row {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  display: flex;
   align-items: flex-start;
-  column-gap: var(--vh-space-3);
+  gap: var(--vh-space-3);
   padding: var(--vh-space-3);
   border-bottom: 1px solid var(--vh-border);
 }
@@ -31,19 +102,20 @@
 }
 
 .avatarLink {
-  display: block;
+  flex: none;
   line-height: 0;
   border-radius: 50%;
 }
 
 .body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
-/* Name · @handle · when — one 12.5px line; the name alone carries weight. */
+/* Meta: Name · @handle · when · suggested badge · ⋯ menu */
 .meta {
   display: flex;
   align-items: center;
@@ -81,59 +153,153 @@
   font-variant-numeric: tabular-nums;
 }
 
-.live {
+.suggestedBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  height: 16px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: var(--vh-radius-pill);
+  background: var(--vh-surface-2);
+  border: 1px solid var(--vh-border);
+  color: var(--vh-text-faint);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   flex: none;
-  color: var(--vh-text-dim);
-  font-size: 12.5px;
 }
 
-.title {
+/* Menu (⋯ → Delete) */
+.menuWrapper {
+  margin-left: auto;
+  position: relative;
+  flex: none;
+}
+
+.menuBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--vh-radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--vh-text-faint);
+  cursor: pointer;
+  transition: color var(--dur-press) var(--ease-out), background-color var(--dur-press) var(--ease-out);
+}
+
+.menuBtn:hover {
+  color: var(--vh-text);
+  background: var(--vh-surface-2);
+}
+
+.menuDropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--vh-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  z-index: 20;
+  min-width: 100px;
+}
+
+.menuItem {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
-  font-size: 14px;
-  line-height: 20px;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--vh-text);
+  background: transparent;
+  border: none;
+  border-radius: var(--vh-radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.menuItem:hover {
+  background: var(--vh-surface-2);
+}
+
+.deleteConfirm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--vh-text-dim);
+}
+
+.deleteConfirmBtn {
+  background: var(--vh-text);
+  color: var(--vh-bg);
+  border: none;
+  padding: 2px 7px;
+  border-radius: var(--vh-radius-sm);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.deleteCancelBtn {
+  background: transparent;
+  color: var(--vh-text-faint);
+  border: none;
+  padding: 2px 5px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.deleteCancelBtn:hover {
   color: var(--vh-text);
 }
 
-.titleLink {
-  color: inherit;
+/* Post text */
+.projectTitleLink {
+  display: inline-block;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--vh-text);
   text-decoration: none;
+  margin: 3px 0 2px 0;
+  line-height: 1.4;
 }
 
-.titleLink:hover {
+.projectTitleLink:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
-.badge {
-  flex: none;
+.postContent {
+  margin: 3px 0 6px 0;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--vh-text);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.desc {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.4;
-  color: var(--vh-text-dim);
-  overflow-wrap: anywhere;
-}
-
-.reactions {
+/* Actions footer (like, respect, flame, views) */
+.actionsRow {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top: 1px;
+  padding-top: 2px;
 }
 
-/* Reaction pill: glyph + count, 28px tall. Active = inverted, no hue (§3). */
 .react {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 28px;
-  padding: 0 9px;
+  height: 26px;
+  padding: 0 8px;
   border-radius: var(--vh-radius-pill);
   border: 1px solid var(--vh-border);
   background: transparent;
@@ -168,7 +334,6 @@
   border-color: var(--vh-text);
 }
 
-/* The small pop on turning a reaction on (§4: --ease-spring for selection moments). */
 .reactActive .glyph {
   animation: vh-react-pop var(--dur-state) var(--ease-spring) both;
 }
@@ -182,13 +347,32 @@
   text-align: left;
 }
 
+.viewsIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  color: var(--vh-text-faint);
+  font-family: var(--vh-font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.viewsGlyph {
+  flex: none;
+  opacity: 0.8;
+}
+
 .reactError {
   font-size: 12px;
   color: var(--vh-text-dim);
   white-space: nowrap;
+  margin-left: 4px;
 }
 
-/* Skeleton line boxes match the loaded lines' heights, so nothing shifts on arrival. */
+/* Skeleton */
 .skelLine {
   display: flex;
   align-items: center;
@@ -206,17 +390,25 @@
   color: var(--vh-text-faint);
 }
 
+.emptyFocusBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--vh-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
 .more {
   margin-top: var(--vh-space-3);
 }
 
 @media (max-width: 560px) {
-  .row {
-    grid-template-columns: 36px minmax(0, 1fr);
-  }
-  .reactions {
-    grid-column: 2;
-    padding-top: 8px;
+  .actionsRow {
+    flex-wrap: wrap;
+    gap: 4px;
   }
 }
 

@@ -343,12 +343,82 @@ function Show-Controls {
 try {
   Remove-Item Env:NODE_OPTIONS, Env:NODE_PATH -ErrorAction SilentlyContinue
   if ($args.Count -ne 0) { Stop-Connect 'Unknown option. Use -Start to explicitly allow background tracking, or omit it for setup only.' }
-  if (-not $Token -or $Token -cnotmatch '^[A-Za-z0-9_][A-Za-z0-9_-]{7,511}\z') { Stop-Connect 'Set VIBEHUB_TOKEN to a device token from VibeHub Settings > Tracker.' }
   if ($PSVersionTable.PSVersion -lt [version]'5.1' -or [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     Stop-Connect 'Use Windows PowerShell 5.1+ on Windows, or the macOS/Linux connector on those systems.'
   }
   $WebUrl = Get-Origin $(if ($env:VIBEHUB_WEB_URL) { $env:VIBEHUB_WEB_URL } else { 'https://web-production-da778.up.railway.app' })
   $ApiUrl = Get-Origin $(if ($env:VIBEHUB_API_URL) { $env:VIBEHUB_API_URL } else { 'https://server-production-cc06.up.railway.app' })
+  Add-Type -AssemblyName System.Net.Http
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [Net.ServicePointManager]::SecurityProtocol = $OldTls -bor [Net.SecurityProtocolType]::Tls12
+
+  if (-not $Token) {
+    Write-Host "${CBold}Pairing this PC with VibeHub${CReset}"
+    $computerName = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { 'Windows PC' }
+    $pairPayload = '{"deviceName":"' + $computerName.Replace('\','\\').Replace('"','\"') + '","os":"windows"}'
+    $pHandler = New-Object Net.Http.HttpClientHandler
+    $pHandler.AllowAutoRedirect = $false
+    $pClient = New-Object Net.Http.HttpClient($pHandler)
+    $pClient.Timeout = [TimeSpan]::FromSeconds(20)
+    $pReq = New-Object Net.Http.HttpRequestMessage([Net.Http.HttpMethod]::Post, "$ApiUrl/api/v1/tracker/pair/request")
+    $pReq.Content = New-Object Net.Http.StringContent($pairPayload, [Text.Encoding]::UTF8, 'application/json')
+    $pResp = $null
+    $pairData = $null
+    try {
+      $pResp = $pClient.SendAsync($pReq).GetAwaiter().GetResult()
+      if (-not $pResp.IsSuccessStatusCode) { Stop-Connect 'Could not initiate device pairing with server.' }
+      $pairData = ($pResp.Content.ReadAsStringAsync().GetAwaiter().GetResult()) | ConvertFrom-Json
+    } catch {
+      if ($_.Exception.Data['VibeHubSafe']) { throw }
+      Stop-Connect 'Could not reach pairing service. Ensure network connection.'
+    } finally {
+      if ($pResp) { $pResp.Dispose() }
+      $pClient.Dispose()
+    }
+    if (-not $pairData -or -not $pairData.deviceCode -or -not $pairData.userCode) {
+      Stop-Connect 'Invalid pairing response from server.'
+    }
+    $deviceCode = $pairData.deviceCode
+    $userCode = $pairData.userCode
+    $verificationUri = $pairData.verificationUri
+    Write-Host "  Opening browser to approve pairing..."
+    Write-Host "  Code: ${CBold}$userCode${CReset}"
+    Write-Host "  If browser does not open, visit: $verificationUri"
+    try { Start-Process $verificationUri } catch {}
+    Write-Host "  Waiting for approval in your browser..."
+    $pollStart = Get-Date
+    while ($true) {
+      Start-Sleep -Seconds 2
+      if (((Get-Date) - $pollStart).TotalSeconds -gt 300) {
+        Stop-Connect 'Pairing timed out. Run the command again to retry.'
+      }
+      $pollClient = New-Object Net.Http.HttpClient($pHandler)
+      $pollClient.Timeout = [TimeSpan]::FromSeconds(10)
+      $pollReq = New-Object Net.Http.HttpRequestMessage([Net.Http.HttpMethod]::Post, "$ApiUrl/api/v1/tracker/pair/poll")
+      $pollReq.Content = New-Object Net.Http.StringContent(('{"deviceCode":"' + $deviceCode + '"}'), [Text.Encoding]::UTF8, 'application/json')
+      $pollResp = $null
+      $pollData = $null
+      try {
+        $pollResp = $pollClient.SendAsync($pollReq).GetAwaiter().GetResult()
+        if ($pollResp.IsSuccessStatusCode) {
+          $pollData = ($pollResp.Content.ReadAsStringAsync().GetAwaiter().GetResult()) | ConvertFrom-Json
+        }
+      } catch {} finally {
+        if ($pollResp) { $pollResp.Dispose() }
+        $pollClient.Dispose()
+      }
+      if ($pollData -and $pollData.status -eq 'approved') {
+        $Token = $pollData.token
+        Write-Host "${CGreen}${GCheck}${CReset} Approved by @$($pollData.username)!"
+        break
+      }
+      if ($pollData -and $pollData.status -eq 'expired') {
+        Stop-Connect 'Pairing code expired. Run the command again to retry.'
+      }
+    }
+  } elseif ($Token -cnotmatch '^[A-Za-z0-9_][A-Za-z0-9_-]{7,511}\z') {
+    Stop-Connect 'Set VIBEHUB_TOKEN to a device token from VibeHub Settings > Tracker.'
+  }
   if ($HOME -notmatch '^[A-Za-z]:[\\/].+' -or -not (Test-Path -LiteralPath $HOME -PathType Container)) { Stop-Connect 'An existing local user HOME directory is required; do not run as an administrator.' }
   try { $osArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch {
     $osArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -369,9 +439,6 @@ try {
   $Lock = $lockPath
   $Stage = Join-Path $Base ('.connect.' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $Stage | Out-Null
-  Add-Type -AssemblyName System.Net.Http
-  Add-Type -AssemblyName System.IO.Compression.FileSystem
-  [Net.ServicePointManager]::SecurityProtocol = $OldTls -bor [Net.SecurityProtocolType]::Tls12
 
   Write-Host "${CBold}What this does${CReset}"
   foreach ($line in @(

@@ -2,93 +2,728 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { env } from "../env";
 import { ACHIEVEMENT_TITLES, isAchievementId, type AchievementId } from "./achievements";
+import { HttpError } from "./http-error";
 import { normalizeModel } from "./sessions";
 
-// Vibe Feed — meta/plans/vibehub-honest-achievements-feed.md, "Contract" → REST.
+// Vibe Feed — posts-only feed (meta/plans/vibehub-round21-feed-posts-polish.md).
 //
-// Real events of self + friends, each backed by a row: finished sessions (Session),
-// badge unlocks (UserAchievement), new / updated projects (Project), GitHub commit days
-// (GithubCommitDay) and new friendships (Friendship). No event type exists that a row
-// cannot back — the web used to ship hard-coded fixtures ("Phil Mac unlocked Opus
-// Tamer", "12m ago") on a public site, and this replaces them.
-//
-// Every event has a stable `id` that doubles as its reaction target, so a reaction
-// survives reloads and is visible from any account (FeedReaction rows, folded in with
-// one groupBy). The shaping (`buildFeedEvents`, `pageEvents`, `foldReactions`) is pure
-// so lib/__checks__/feed.check.ts pins ids, thresholds, ordering and paging without a
-// database; `listFeed` / `toggleReaction` are the Prisma-touching entry points.
+// People's posts only: compose on Home and Profile, friends as followers, algorithmic
+// recommendations (~1 in 4, suggested), likes (heart), reactions (respect, flame),
+// unique on-screen views, delete own post.
+// Existing event sources (sessions, achievements, projects) are preserved for profile/stats
+// data, but the feed surfaces exclusively posts written by people.
 
-export const FEED_EVENT_TYPES = ["session", "achievement", "project", "commits", "friendship"] as const;
+export const FEED_EVENT_TYPES = ["post", "session", "achievement", "project", "commits", "friendship"] as const;
 export type FeedEventType = (typeof FEED_EVENT_TYPES)[number];
 
-export const REACTION_KINDS = ["respect", "flame"] as const;
+export const REACTION_KINDS = ["like", "respect", "flame"] as const;
 export type ReactionKind = (typeof REACTION_KINDS)[number];
 
 /** A reaction target is an event id: `<type>:<key>` with a bounded, URL-safe key. */
-export const REACTION_TARGET_RE = /^(session|achievement|project|commits|friendship):[A-Za-z0-9:_-]{1,120}$/;
+export const REACTION_TARGET_RE = /^(post|session|achievement|project|commits|friendship):[A-Za-z0-9:_-]{1,120}$/;
 export const isReactionTarget = (value: unknown): value is string =>
   typeof value === "string" && REACTION_TARGET_RE.test(value);
 
-// Window, cap and thresholds — the contract, as constants so the check pins the same numbers.
+// Window, cap and thresholds — the contract constants.
 export const FEED_WINDOW_DAYS = 30;
 export const FEED_CAP = 200;
 export const FEED_DEFAULT_LIMIT = 30;
 export const FEED_MAX_LIMIT = 100;
-/** A finished session shorter than this is not worth a line; open sessions show as live regardless. */
 export const FEED_MIN_SESSION_SECONDS = 600;
-/** Project.updatedAt within this of createdAt is the creation itself, not an update. */
 export const PROJECT_UPDATE_GAP_MS = 3_600_000;
 
 export const feedQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(FEED_MAX_LIMIT).default(FEED_DEFAULT_LIMIT),
-  /** ISO instant; only events strictly older than it are returned (the previous page's nextBefore). */
+  /** ISO instant; only events strictly older than it are returned. */
   before: z.string().datetime({ offset: true }).optional(),
 });
 export type FeedQuery = z.infer<typeof feedQuerySchema>;
 
 export const feedReactionSchema = z.object({
-  target: z.string().regex(REACTION_TARGET_RE, "target must be <session|achievement|project|commits|friendship>:<key>"),
+  target: z.string().regex(REACTION_TARGET_RE, "target must be <post|session|achievement|project|commits|friendship>:<key>"),
   kind: z.enum(REACTION_KINDS),
 });
 
 // ---- wire shapes ----
 
 export interface FeedUser {
+  id?: string;
   username: string;
   displayName: string;
   avatarUrl: string | null;
 }
 
 export interface FeedReactionSummary {
+  like: number;
   respect: number;
   flame: number;
-  mine: { respect: boolean; flame: boolean };
+  mine: { like: boolean; respect: boolean; flame: boolean };
 }
 
-/** An event before its reactions are folded in — what the pure shaping produces. */
+/** An event before its reactions are folded in. */
 export interface FeedEventCore {
-  /** Stable target key, also the reaction target — see REACTION_TARGET_RE. */
   id: string;
   type: FeedEventType;
-  /** ISO — the sort key and the paging cursor. */
   at: string;
-  /** Present (true) only while the session is still open and its tracker still beating. */
   live?: true;
   user: FeedUser;
-  /** The other party — friendship events only. */
   other?: FeedUser;
   title: string;
-  /** session: "Claude Code · Claude Opus 5"; project: its description; otherwise null. */
+  content?: string;
   description: string | null;
+  suggested?: boolean;
+  views?: number;
+  canDelete?: boolean;
   badgeId?: AchievementId;
   projectId?: string;
 }
 
 export interface FeedEvent extends FeedEventCore {
   reactions: FeedReactionSummary;
+  views: number;
 }
 
-// ---- row shapes the shaping reads (selected by loadFeedRows, built by the check) ----
+// ---- Algorithmic recommendation ranking ----
+
+/**
+ * Ranks candidate recommended posts.
+ * Score combines engagement (likes * 3 + reactions * 2 + views * 0.5 + 1),
+ * exponential recency decay (1 / (1 + ageHours / 24)^1.5),
+ * plus a small random jitter (+-10%) so the feed varies on refresh.
+ */
+export function scoreRecommendedPost(
+  post: {
+    likes: number;
+    reactions: number;
+    views: number;
+    createdAt: Date;
+  },
+  now = Date.now(),
+  jitter = Math.random()
+): number {
+  const ageHours = Math.max(0, (now - post.createdAt.getTime()) / 3_600_000);
+  const engagement = post.likes * 3 + post.reactions * 2 + post.views * 0.5 + 1;
+  const recencyDecay = 1 / Math.pow(1 + ageHours / 24, 1.5);
+  const randomFactor = 0.9 + jitter * 0.2; // 0.9 to 1.1 (+-10% jitter)
+  return engagement * recencyDecay * randomFactor;
+}
+
+/**
+ * Mixes recommended posts into connected posts at approximately 1 in 4.
+ * Guarantees no duplicates within a page, preserves connected ordering, and places
+ * suggested posts at positions 3, 7, 11, ... (0-indexed). If connected posts run out,
+ * remaining recommended posts append to avoid an empty feed.
+ */
+export function interleaveRecommended<T extends { id: string }>(
+  connected: readonly T[],
+  recommended: readonly T[],
+  limit: number
+): T[] {
+  const result: T[] = [];
+  const seen = new Set<string>();
+  let cIdx = 0;
+  let rIdx = 0;
+
+  while (result.length < limit && (cIdx < connected.length || rIdx < recommended.length)) {
+    // Every 4th item (indices 3, 7, 11, ...) takes from recommended if available
+    const wantRecommended = result.length % 4 === 3 && rIdx < recommended.length;
+    if (wantRecommended || cIdx >= connected.length) {
+      while (rIdx < recommended.length && seen.has(recommended[rIdx].id)) {
+        rIdx++;
+      }
+      if (rIdx < recommended.length) {
+        const item = recommended[rIdx++];
+        seen.add(item.id);
+        result.push(item);
+        continue;
+      }
+    }
+
+    while (cIdx < connected.length && seen.has(connected[cIdx].id)) {
+      cIdx++;
+    }
+    if (cIdx < connected.length) {
+      const item = connected[cIdx++];
+      seen.add(item.id);
+      result.push(item);
+    } else if (rIdx < recommended.length) {
+      while (rIdx < recommended.length && seen.has(recommended[rIdx].id)) {
+        rIdx++;
+      }
+      if (rIdx < recommended.length) {
+        const item = recommended[rIdx++];
+        seen.add(item.id);
+        result.push(item);
+      }
+    }
+  }
+
+  return result;
+}
+
+// ---- reactions and views fold ----
+
+const USER_SELECT = { id: true, username: true, displayName: true, avatarUrl: true } as const;
+
+// In-memory unique views tracking for projects: Map<projectId, Set<viewerKey>>
+const projectViewsMap = new Map<string, Set<string>>();
+
+export interface ReactionCountRow {
+  target: string;
+  kind: string;
+  count: number;
+}
+export interface ReactionMineRow {
+  target: string;
+  kind: string;
+}
+
+/** Attach counts (one groupBy row per target × kind) and the viewer's own toggles. */
+export function foldReactions(
+  events: readonly FeedEventCore[],
+  counts: readonly ReactionCountRow[],
+  mine: readonly ReactionMineRow[]
+): FeedEvent[] {
+  const summary = new Map<string, FeedReactionSummary>();
+  const of = (target: string): FeedReactionSummary => {
+    let s = summary.get(target);
+    if (!s) {
+      s = { like: 0, respect: 0, flame: 0, mine: { like: false, respect: false, flame: false } };
+      summary.set(target, s);
+    }
+    return s;
+  };
+  const isKind = (kind: string): kind is ReactionKind => (REACTION_KINDS as readonly string[]).includes(kind);
+  for (const row of counts) if (isKind(row.kind)) of(row.target)[row.kind] = Math.max(0, row.count);
+  for (const row of mine) if (isKind(row.kind)) of(row.target).mine[row.kind] = true;
+  return events.map((event) => ({
+    ...event,
+    views: event.views ?? 0,
+    reactions: of(event.id),
+  }));
+}
+
+/** Attach unique view counts and folded reactions in single batch queries. */
+export async function attachViewsAndReactions(
+  events: readonly FeedEventCore[],
+  viewerId: string | null
+): Promise<FeedEvent[]> {
+  if (events.length === 0) return [];
+  const targets = events.map((e) => e.id);
+  const postIds = events
+    .filter((e) => e.type === "post")
+    .map((e) => (e.id.startsWith("post:") ? e.id.slice(5) : e.id));
+  const projectIds = events
+    .filter((e) => e.type === "project")
+    .map((e) => (e.id.startsWith("project:") ? e.id.slice(8) : e.id));
+
+  const [counts, mine, viewCounts, projectLikes, projectRows] = await Promise.all([
+    prisma.feedReaction.groupBy({
+      by: ["target", "kind"],
+      where: { target: { in: targets } },
+      _count: { _all: true },
+    }),
+    viewerId
+      ? prisma.feedReaction.findMany({
+          where: { userId: viewerId, target: { in: targets } },
+          select: { target: true, kind: true },
+        })
+      : Promise.resolve([]),
+    postIds.length > 0
+      ? prisma.postView.groupBy({
+          by: ["postId"],
+          where: { postId: { in: postIds } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
+    viewerId && projectIds.length > 0
+      ? prisma.like.findMany({
+          where: { userId: viewerId, projectId: { in: projectIds } },
+          select: { projectId: true },
+        })
+      : Promise.resolve([]),
+    projectIds.length > 0
+      ? prisma.project.findMany({
+          where: { id: { in: projectIds } },
+          select: { id: true, likeCount: true },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const viewMap = new Map<string, number>();
+  for (const v of viewCounts) {
+    viewMap.set(v.postId, v._count._all);
+  }
+
+  const projectLikeCountMap = new Map<string, number>();
+  for (const p of projectRows) {
+    projectLikeCountMap.set(p.id, p.likeCount);
+  }
+  const userLikedProjects = new Set(projectLikes.map((l) => l.projectId));
+
+  const withViews: FeedEventCore[] = events.map((e) => {
+    let views = e.views ?? 0;
+    if (e.type === "post") {
+      const rawId = e.id.startsWith("post:") ? e.id.slice(5) : e.id;
+      views = viewMap.get(rawId) ?? views;
+    } else if (e.type === "project") {
+      const rawId = e.id.startsWith("project:") ? e.id.slice(8) : e.id;
+      views = projectViewsMap.get(rawId)?.size ?? views;
+    }
+    return { ...e, views };
+  });
+
+  const folded = foldReactions(
+    withViews,
+    counts.map((row) => ({ target: row.target, kind: row.kind, count: row._count._all })),
+    mine
+  );
+
+  return folded.map((ev) => {
+    if (ev.type === "project") {
+      const rawId = ev.id.startsWith("project:") ? ev.id.slice(8) : ev.id;
+      const baseLikes = projectLikeCountMap.get(rawId) ?? 0;
+      const alreadyLiked = userLikedProjects.has(rawId);
+      return {
+        ...ev,
+        reactions: {
+          ...ev.reactions,
+          like: ev.reactions.like + baseLikes,
+          mine: {
+            ...ev.reactions.mine,
+            like: ev.reactions.mine.like || alreadyLiked,
+          },
+        },
+      };
+    }
+    return ev;
+  });
+}
+
+// ---- Post operations (CRUD, view) ----
+
+export async function createPost(authorId: string, content: string): Promise<FeedEvent> {
+  const author = await prisma.user.findUnique({
+    where: { id: authorId },
+    select: { id: true, username: true, displayName: true, avatarUrl: true },
+  });
+  if (!author) throw new HttpError(404, "User not found");
+
+  const post = await prisma.post.create({
+    data: {
+      authorId,
+      content,
+    },
+  });
+
+  return {
+    id: `post:${post.id}`,
+    type: "post",
+    at: post.createdAt.toISOString(),
+    user: author,
+    title: post.content,
+    content: post.content,
+    description: null,
+    suggested: false,
+    views: 0,
+    canDelete: true,
+    reactions: {
+      like: 0,
+      respect: 0,
+      flame: 0,
+      mine: { like: false, respect: false, flame: false },
+    },
+  };
+}
+
+export async function deletePost(postId: string, userId: string): Promise<void> {
+  const rawId = postId.startsWith("project:")
+    ? postId.slice(8)
+    : postId.startsWith("post:")
+    ? postId.slice(5)
+    : postId;
+
+  // Try post
+  const post = await prisma.post.findUnique({
+    where: { id: rawId },
+    select: { authorId: true },
+  });
+  if (post) {
+    if (post.authorId !== userId) {
+      throw new HttpError(403, "You can only delete your own posts");
+    }
+    await prisma.feedReaction.deleteMany({ where: { target: `post:${rawId}` } });
+    await prisma.post.delete({ where: { id: rawId } });
+    return;
+  }
+
+  // Try project
+  const project = await prisma.project.findUnique({
+    where: { id: rawId },
+    select: { ownerId: true },
+  });
+  if (project) {
+    if (project.ownerId !== userId) {
+      throw new HttpError(403, "You can only delete your own posts");
+    }
+    await prisma.feedReaction.deleteMany({ where: { target: `project:${rawId}` } });
+    await prisma.project.delete({ where: { id: rawId } });
+    return;
+  }
+
+  throw new HttpError(404, "Post not found");
+}
+
+export async function recordPostView(
+  postId: string,
+  viewerId: string | null,
+  viewerKey: string
+): Promise<{ postId: string; views: number }> {
+  const rawId = postId.startsWith("project:")
+    ? postId.slice(8)
+    : postId.startsWith("post:")
+    ? postId.slice(5)
+    : postId;
+
+  // 1. Try post
+  const post = await prisma.post.findUnique({
+    where: { id: rawId },
+    select: { id: true, authorId: true },
+  });
+
+  if (post) {
+    // Never count the author's own views
+    if (viewerId && viewerId === post.authorId) {
+      const views = await prisma.postView.count({ where: { postId: post.id } });
+      return { postId: rawId, views };
+    }
+
+    await prisma.postView
+      .create({
+        data: {
+          postId: post.id,
+          userId: viewerId,
+          viewerKey,
+        },
+      })
+      .catch((err: unknown) => {
+        if ((err as { code?: string }).code !== "P2002") throw err;
+      });
+
+    const views = await prisma.postView.count({ where: { postId: post.id } });
+    return { postId: rawId, views };
+  }
+
+  // 2. Try project
+  const project = await prisma.project.findUnique({
+    where: { id: rawId },
+    select: { id: true, ownerId: true },
+  });
+
+  if (project) {
+    if (viewerId && viewerId === project.ownerId) {
+      const views = projectViewsMap.get(project.id)?.size ?? 0;
+      return { postId: rawId, views };
+    }
+
+    let set = projectViewsMap.get(project.id);
+    if (!set) {
+      set = new Set<string>();
+      projectViewsMap.set(project.id, set);
+    }
+    set.add(viewerKey);
+    return { postId: rawId, views: set.size };
+  }
+
+  throw new HttpError(404, "Post not found");
+}
+
+// ---- Feed listing ----
+
+/** Home feed: mine + friends' posts/projects + recommended posts/projects from others (~1 in 4). */
+export async function listFeed(
+  connectedUserIds: readonly string[],
+  viewerId: string | null,
+  query: FeedQuery
+): Promise<{ events: FeedEvent[]; nextBefore: string | null }> {
+  const limit = query.limit;
+  const beforeDate = query.before ? new Date(query.before) : null;
+
+  // 1. Fetch connected posts and public projects (mine + friends)
+  const connectedPostWhere: Record<string, unknown> = {
+    authorId: { in: [...connectedUserIds] },
+  };
+  const connectedProjectWhere: Record<string, unknown> = {
+    ownerId: { in: [...connectedUserIds] },
+    isPublic: true,
+  };
+  if (beforeDate) {
+    connectedPostWhere.createdAt = { lt: beforeDate };
+    connectedProjectWhere.createdAt = { lt: beforeDate };
+  }
+
+  const [connectedPosts, connectedProjects] = await Promise.all([
+    prisma.post.findMany({
+      where: connectedPostWhere,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: {
+        author: { select: USER_SELECT },
+      },
+    }),
+    prisma.project.findMany({
+      where: connectedProjectWhere,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: {
+        owner: { select: USER_SELECT },
+      },
+    }),
+  ]);
+
+  const toPostCore = (p: typeof connectedPosts[0], suggested = false): FeedEventCore => ({
+    id: `post:${p.id}`,
+    type: "post",
+    at: p.createdAt.toISOString(),
+    user: {
+      id: p.author.id,
+      username: p.author.username,
+      displayName: p.author.displayName,
+      avatarUrl: p.author.avatarUrl,
+    },
+    title: p.content,
+    content: p.content,
+    description: null,
+    suggested,
+    views: 0,
+    canDelete: viewerId === p.authorId,
+  });
+
+  const toProjectCore = (p: typeof connectedProjects[0], suggested = false): FeedEventCore => ({
+    id: `project:${p.id}`,
+    type: "project",
+    at: p.createdAt.toISOString(),
+    user: {
+      id: p.owner.id,
+      username: p.owner.username,
+      displayName: p.owner.displayName,
+      avatarUrl: p.owner.avatarUrl,
+    },
+    title: p.name,
+    content: p.description ?? "",
+    description: p.description,
+    projectId: p.id,
+    suggested,
+    views: 0,
+    canDelete: viewerId === p.ownerId,
+  });
+
+  const allConnectedCores: FeedEventCore[] = [
+    ...connectedPosts.map((p) => toPostCore(p, false)),
+    ...connectedProjects.map((p) => toProjectCore(p, false)),
+  ]
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, limit);
+
+  // 2. Fetch candidate recommended posts and projects from others (skip connected, skip self)
+  const recommendedPostWhere: Record<string, unknown> = {
+    authorId: { notIn: [...connectedUserIds] },
+  };
+  const recommendedProjectWhere: Record<string, unknown> = {
+    ownerId: { notIn: [...connectedUserIds] },
+    isPublic: true,
+  };
+  if (beforeDate) {
+    recommendedPostWhere.createdAt = { lt: beforeDate };
+    recommendedProjectWhere.createdAt = { lt: beforeDate };
+  }
+
+  const [candidatePosts, candidateProjects] = await Promise.all([
+    prisma.post.findMany({
+      where: recommendedPostWhere,
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      include: {
+        author: { select: USER_SELECT },
+        views: { select: { id: true } },
+      },
+    }),
+    prisma.project.findMany({
+      where: recommendedProjectWhere,
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      include: {
+        owner: { select: USER_SELECT },
+      },
+    }),
+  ]);
+
+  // Score candidate recommended posts and projects
+  type ScoredCore = FeedEventCore & { score: number };
+  let scoredRecommended: ScoredCore[] = [];
+
+  const candidateTargets = [
+    ...candidatePosts.map((p) => `post:${p.id}`),
+    ...candidateProjects.map((p) => `project:${p.id}`),
+  ];
+
+  if (candidateTargets.length > 0) {
+    const reactionCounts = await prisma.feedReaction.groupBy({
+      by: ["target", "kind"],
+      where: { target: { in: candidateTargets } },
+      _count: { _all: true },
+    });
+
+    const reactionMap = new Map<string, { likes: number; reactions: number }>();
+    for (const r of reactionCounts) {
+      const cur = reactionMap.get(r.target) ?? { likes: 0, reactions: 0 };
+      if (r.kind === "like") cur.likes += r._count._all;
+      else cur.reactions += r._count._all;
+      reactionMap.set(r.target, cur);
+    }
+
+    const now = Date.now();
+
+    const scoredPosts: ScoredCore[] = candidatePosts.map((p) => {
+      const r = reactionMap.get(`post:${p.id}`) ?? { likes: 0, reactions: 0 };
+      const views = p.views.length;
+      const score = scoreRecommendedPost(
+        { likes: r.likes, reactions: r.reactions, views, createdAt: p.createdAt },
+        now
+      );
+      return { ...toPostCore(p, true), score };
+    });
+
+    const scoredProjects: ScoredCore[] = candidateProjects.map((p) => {
+      const r = reactionMap.get(`project:${p.id}`) ?? { likes: 0, reactions: 0 };
+      const views = projectViewsMap.get(p.id)?.size ?? 0;
+      const totalLikes = r.likes + p.likeCount;
+      const score = scoreRecommendedPost(
+        { likes: totalLikes, reactions: r.reactions, views, createdAt: p.createdAt },
+        now
+      );
+      return { ...toProjectCore(p, true), score };
+    });
+
+    scoredRecommended = [...scoredPosts, ...scoredProjects].sort((a, b) => b.score - a.score);
+  }
+
+  // Interleave recommended posts (~1 in 4)
+  const interleaved = interleaveRecommended(allConnectedCores, scoredRecommended, limit);
+
+  // Attach views and reactions
+  const events = await attachViewsAndReactions(interleaved, viewerId);
+
+  // Determine nextBefore cursor from the last item
+  const nextBefore = events.length >= limit ? events[events.length - 1].at : null;
+
+  return { events, nextBefore };
+}
+
+/** Profile feed: that user's own posts and projects only. */
+export async function listUserPosts(
+  username: string,
+  viewerId: string | null,
+  query: FeedQuery
+): Promise<{ events: FeedEvent[]; nextBefore: string | null }> {
+  const user = await prisma.user.findUnique({
+    where: { username },
+    select: USER_SELECT,
+  });
+  if (!user) throw new HttpError(404, "User not found");
+
+  const limit = query.limit;
+  const beforeDate = query.before ? new Date(query.before) : null;
+
+  const postWhere: Record<string, unknown> = { authorId: user.id };
+  const projectWhere: Record<string, unknown> = {
+    ownerId: user.id,
+    ...(viewerId === user.id ? {} : { isPublic: true }),
+  };
+  if (beforeDate) {
+    postWhere.createdAt = { lt: beforeDate };
+    projectWhere.createdAt = { lt: beforeDate };
+  }
+
+  const [posts, projects] = await Promise.all([
+    prisma.post.findMany({
+      where: postWhere,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    }),
+    prisma.project.findMany({
+      where: projectWhere,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    }),
+  ]);
+
+  const postCores: FeedEventCore[] = posts.map((p) => ({
+    id: `post:${p.id}`,
+    type: "post",
+    at: p.createdAt.toISOString(),
+    user,
+    title: p.content,
+    content: p.content,
+    description: null,
+    suggested: false,
+    views: 0,
+    canDelete: viewerId === user.id,
+  }));
+
+  const projectCores: FeedEventCore[] = projects.map((p) => ({
+    id: `project:${p.id}`,
+    type: "project",
+    at: p.createdAt.toISOString(),
+    user,
+    title: p.name,
+    content: p.description ?? "",
+    description: p.description,
+    projectId: p.id,
+    suggested: false,
+    views: 0,
+    canDelete: viewerId === user.id,
+  }));
+
+  const allCores = [...postCores, ...projectCores]
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, limit);
+
+  const events = await attachViewsAndReactions(allCores, viewerId);
+  const nextBefore = events.length >= limit ? events[events.length - 1].at : null;
+
+  return { events, nextBefore };
+}
+
+/** Toggle one (viewer, target, kind); returns the new state and the target's live count. */
+export async function toggleReaction(
+  userId: string,
+  target: string,
+  kind: ReactionKind
+): Promise<{ target: string; kind: ReactionKind; active: boolean; count: number }> {
+  const where = { userId_target_kind: { userId, target, kind } };
+  const existing = await prisma.feedReaction.findUnique({ where, select: { id: true } });
+  let active: boolean;
+  if (existing) {
+    await prisma.feedReaction.deleteMany({ where: { id: existing.id } });
+    active = false;
+  } else {
+    // Two fast taps race the unique index; the second create is the same "on" state.
+    await prisma.feedReaction.create({ data: { userId, target, kind } }).catch((err: unknown) => {
+      if ((err as { code?: string }).code !== "P2002") throw err;
+    });
+    active = true;
+  }
+  let count = await prisma.feedReaction.count({ where: { target, kind } });
+  if (target.startsWith("project:") && kind === "like") {
+    const rawProjectId = target.slice(8);
+    const proj = await prisma.project.findUnique({ where: { id: rawProjectId }, select: { likeCount: true } });
+    if (proj) count += proj.likeCount;
+  }
+  return { target, kind, active, count };
+}
+
+// ---- Backward-compatible helpers & row types (used by existing checks) ----
 
 export interface FeedSessionRow {
   id: string;
@@ -96,20 +731,16 @@ export interface FeedSessionRow {
   projectAlias: string;
   tool: string;
   model: string | null;
-  /** "ACTIVE" | "IDLE" | "ENDED" */
   status: string;
   startedAt: Date;
   endedAt: Date | null;
   lastHeartbeatAt: Date;
 }
-
 export interface FeedAchievementRow {
   userId: string;
   achievementId: string;
   unlockedAt: Date;
 }
-
-/** Only public projects are ever loaded — a friend's private project must not leak. */
 export interface FeedProjectRow {
   id: string;
   ownerId: string;
@@ -118,23 +749,18 @@ export interface FeedProjectRow {
   createdAt: Date;
   updatedAt: Date;
 }
-
 export interface FeedCommitDayRow {
   userId: string;
-  /** UTC midnight of the day (GithubCommitDay.date). */
   date: Date;
   commitCount: number;
 }
-
 export interface FeedFriendshipRow {
   id: string;
   userAId: string;
   userBId: string;
   since: Date;
 }
-
 export interface FeedRows {
-  /** Every user an event may name — the scope plus the other side of each friendship. */
   users: ReadonlyMap<string, FeedUser>;
   sessions: readonly FeedSessionRow[];
   achievements: readonly FeedAchievementRow[];
@@ -142,17 +768,11 @@ export interface FeedRows {
   commitDays: readonly FeedCommitDayRow[];
   friendships: readonly FeedFriendshipRow[];
 }
-
 export interface FeedScope {
-  /** Whose events: the viewer + accepted friends (/feed) or one user (/users/:u/feed). */
   userIds: readonly string[];
   now: Date;
-  /** An open session silent for longer than this is not live — same edge presence uses. */
   idleTimeoutMs: number;
 }
-
-// ---- labels: the same human names the web prints (web/src/lib/format.ts), so a feed line
-// ---- and the profile never disagree about what "codex" or "claude-opus-5" is called.
 
 const TOOL_LABELS: Record<string, string> = {
   "claude-code": "Claude Code",
@@ -166,7 +786,6 @@ const TOOL_LABELS: Record<string, string> = {
   grok: "Grok",
 };
 const CLAUDE_FAMILIES = new Set(["fable", "opus", "sonnet", "haiku", "instant"]);
-
 const capWord = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
 const titleCase = (id: string): string => id.split(/[-_\s]+/).filter(Boolean).map(capWord).join(" ");
 const isDateish = (t: string): boolean => /^\d{2,}$/.test(t);
@@ -188,7 +807,6 @@ function humanizeClaude(id: string): string {
       continue;
     }
     if (/^\d+$/.test(t)) {
-      // 1–2 digit tokens are version parts; anything longer is a date stamp.
       if (t.length <= 2 && version.length < 2) version.push(t);
       continue;
     }
@@ -217,7 +835,6 @@ function humanizeBranded(brand: string, key: string, id: string): string {
   return [brand, ...words].join(" ");
 }
 
-/** "claude-opus-5" → "Claude Opus 5", "gpt-5-codex" → "GPT-5 Codex"; null for no model. */
 export function modelLabel(model: string | null | undefined): string | null {
   const id = (normalizeModel(model) ?? "")
     .toLowerCase()
@@ -235,7 +852,6 @@ export function modelLabel(model: string | null | undefined): string | null {
   return titleCase(id);
 }
 
-/** "1h 24m" / "10m" — whole minutes, the resolution a feed line needs. */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds / 60));
   const h = Math.floor(total / 60);
@@ -246,12 +862,6 @@ export function formatDuration(seconds: number): string {
 const ymd = (date: Date): string => date.toISOString().slice(0, 10);
 const DAY_MS = 86_400_000;
 
-// ---- shaping ----
-
-/**
- * Every event the rows support for the scope, newest first, deduped by id, inside the
- * 30-day window and capped at FEED_CAP. Pure: no clock but `scope.now`.
- */
 export function buildFeedEvents(rows: FeedRows, scope: FeedScope): FeedEventCore[] {
   const inScope = new Set(scope.userIds);
   const now = scope.now.getTime();
@@ -266,14 +876,11 @@ export function buildFeedEvents(rows: FeedRows, scope: FeedScope): FeedEventCore
   for (const s of rows.sessions) {
     const user = userOf(s.userId);
     if (!user) continue;
-    // Live means open AND still beating: a row the sweep has not closed yet but whose
-    // tracker vanished is a finished session that ended at its last beat, not a pulse.
     const live = s.status !== "ENDED" && now - s.lastHeartbeatAt.getTime() <= scope.idleTimeoutMs;
     const end = live ? s.lastHeartbeatAt : s.endedAt ?? s.lastHeartbeatAt;
     const seconds = Math.max(0, Math.round((end.getTime() - s.startedAt.getTime()) / 1000));
     if (!live && seconds < FEED_MIN_SESSION_SECONDS) continue;
     const model = modelLabel(s.model);
-    // A session the tracker could not name gets no "in …" — never a literal "unknown".
     const alias = s.projectAlias.trim();
     const where = alias && alias.toLowerCase() !== "unknown" ? ` in ${alias}` : "";
     push({
@@ -313,7 +920,6 @@ export function buildFeedEvents(rows: FeedRows, scope: FeedScope): FeedEventCore
       description: p.description,
       projectId: p.id,
     });
-    // One "updated" line per project per day — the id carries the day so reactions stick.
     if (p.updatedAt.getTime() - p.createdAt.getTime() > PROJECT_UPDATE_GAP_MS) {
       push({
         id: `project:${p.id}:upd:${ymd(p.updatedAt)}`,
@@ -341,8 +947,6 @@ export function buildFeedEvents(rows: FeedRows, scope: FeedScope): FeedEventCore
   }
 
   for (const f of rows.friendships) {
-    // The in-scope side is `user`; when both are (two friends of the viewer, or the
-    // viewer and a friend) the A side wins, so the same row always yields one event.
     const [userId, otherId] = inScope.has(f.userAId) ? [f.userAId, f.userBId] : [f.userBId, f.userAId];
     const user = userOf(userId);
     const other = rows.users.get(otherId);
@@ -363,14 +967,6 @@ export function buildFeedEvents(rows: FeedRows, scope: FeedScope): FeedEventCore
     .slice(0, FEED_CAP);
 }
 
-/**
- * Cursor paging over an already-sorted list: strictly older than `before`, then `limit`.
- * A page never splits an `at` tie: the cursor is strictly-older-than, so an event that
- * shares the last one's instant but fell past `limit` would never be reachable (one sync
- * stamps several unlocks with the same `now`; every commit day of a date is midnight).
- * The page extends over the whole tie instead — bounded by FEED_CAP, and in practice a
- * handful of rows.
- */
 export function pageEvents<T extends { at: string }>(
   events: readonly T[],
   limit: number,
@@ -383,41 +979,6 @@ export function pageEvents<T extends { at: string }>(
   const page = older.slice(0, end);
   return { events: page, nextBefore: older.length > page.length ? page[page.length - 1].at : null };
 }
-
-export interface ReactionCountRow {
-  target: string;
-  kind: string;
-  count: number;
-}
-export interface ReactionMineRow {
-  target: string;
-  kind: string;
-}
-
-/** Attach counts (one groupBy row per target × kind) and the viewer's own toggles. */
-export function foldReactions(
-  events: readonly FeedEventCore[],
-  counts: readonly ReactionCountRow[],
-  mine: readonly ReactionMineRow[]
-): FeedEvent[] {
-  const summary = new Map<string, FeedReactionSummary>();
-  const of = (target: string): FeedReactionSummary => {
-    let s = summary.get(target);
-    if (!s) {
-      s = { respect: 0, flame: 0, mine: { respect: false, flame: false } };
-      summary.set(target, s);
-    }
-    return s;
-  };
-  const isKind = (kind: string): kind is ReactionKind => (REACTION_KINDS as readonly string[]).includes(kind);
-  for (const row of counts) if (isKind(row.kind)) of(row.target)[row.kind] = Math.max(0, row.count);
-  for (const row of mine) if (isKind(row.kind)) of(row.target).mine[row.kind] = true;
-  return events.map((event) => ({ ...event, reactions: of(event.id) }));
-}
-
-// ---- Prisma: rows in, page out ----
-
-const USER_SELECT = { id: true, username: true, displayName: true, avatarUrl: true } as const;
 
 export async function loadFeedRows(userIds: readonly string[], since: Date): Promise<FeedRows> {
   const ids = [...userIds];
@@ -441,7 +1002,6 @@ export async function loadFeedRows(userIds: readonly string[], since: Date): Pro
       where: { userId: { in: ids }, unlockedAt: { gte: since } },
       select: { userId: true, achievementId: true, unlockedAt: true },
     }),
-    // updatedAt ≥ createdAt always, so this one filter covers both the new and the updated event.
     prisma.project.findMany({
       where: { ownerId: { in: ids }, isPublic: true, updatedAt: { gte: since } },
       select: { id: true, ownerId: true, name: true, description: true, createdAt: true, updatedAt: true },
@@ -458,7 +1018,6 @@ export async function loadFeedRows(userIds: readonly string[], since: Date): Pro
 
   const users = new Map<string, FeedUser>();
   for (const u of scopeUsers) users.set(u.id, { username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl });
-  // The other side of a friendship may be outside the scope (a friend's new friend).
   const missing = new Set<string>();
   for (const f of friendships) for (const id of [f.userAId, f.userBId]) if (!users.has(id)) missing.add(id);
   if (missing.size > 0) {
@@ -467,60 +1026,4 @@ export async function loadFeedRows(userIds: readonly string[], since: Date): Pro
   }
 
   return { users, sessions, achievements, projects, commitDays, friendships };
-}
-
-/** Counts via one groupBy over the page's targets, plus the viewer's own rows when signed in. */
-export async function attachReactions(events: readonly FeedEventCore[], viewerId: string | null): Promise<FeedEvent[]> {
-  if (events.length === 0) return [];
-  const targets = events.map((e) => e.id);
-  const [counts, mine] = await Promise.all([
-    prisma.feedReaction.groupBy({
-      by: ["target", "kind"],
-      where: { target: { in: targets } },
-      _count: { _all: true },
-    }),
-    viewerId
-      ? prisma.feedReaction.findMany({ where: { userId: viewerId, target: { in: targets } }, select: { target: true, kind: true } })
-      : Promise.resolve([]),
-  ]);
-  return foldReactions(
-    events,
-    counts.map((row) => ({ target: row.target, kind: row.kind, count: row._count._all })),
-    mine
-  );
-}
-
-export async function listFeed(
-  userIds: readonly string[],
-  viewerId: string | null,
-  query: FeedQuery
-): Promise<{ events: FeedEvent[]; nextBefore: string | null }> {
-  const now = new Date();
-  const rows = await loadFeedRows(userIds, new Date(now.getTime() - FEED_WINDOW_DAYS * DAY_MS));
-  const all = buildFeedEvents(rows, { userIds, now, idleTimeoutMs: env.sessionIdleTimeoutMs });
-  const page = pageEvents(all, query.limit, query.before ? new Date(query.before) : null);
-  return { events: await attachReactions(page.events, viewerId), nextBefore: page.nextBefore };
-}
-
-/** Toggle one (viewer, target, kind); returns the new state and the target's live count. */
-export async function toggleReaction(
-  userId: string,
-  target: string,
-  kind: ReactionKind
-): Promise<{ target: string; kind: ReactionKind; active: boolean; count: number }> {
-  const where = { userId_target_kind: { userId, target, kind } };
-  const existing = await prisma.feedReaction.findUnique({ where, select: { id: true } });
-  let active: boolean;
-  if (existing) {
-    await prisma.feedReaction.deleteMany({ where: { id: existing.id } });
-    active = false;
-  } else {
-    // Two fast taps race the unique index; the second create is the same "on" state.
-    await prisma.feedReaction.create({ data: { userId, target, kind } }).catch((err: unknown) => {
-      if ((err as { code?: string }).code !== "P2002") throw err;
-    });
-    active = true;
-  }
-  const count = await prisma.feedReaction.count({ where: { target, kind } });
-  return { target, kind, active, count };
 }

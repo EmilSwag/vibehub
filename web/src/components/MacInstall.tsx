@@ -31,6 +31,7 @@ import {
   MAC_TOKENLESS_NOTICE,
   MAC_UNAVAILABLE,
   buildMacInstallCommand,
+  isVersionAtLeast,
   macReleaseState,
   macReleaseStateFromError,
 } from "../lib/macInstall";
@@ -153,7 +154,7 @@ export function MacInstall({ token, className }: { token?: string; className?: s
           key, where the key comes from, and that this one does start at login. */}
       <div className={styles.consent} aria-label="Before you install">
         <p>{MAC_INSTALL_MEANS} {MAC_TOKENLESS_NOTICE}</p>
-        <p>{MAC_TOKEN_MEANS}</p>
+        <p>{state.kind === "ready" && isVersionAtLeast(state.release.version, "1.1.0") ? "Pairing connects in your browser with one click. No keys to copy." : MAC_TOKEN_MEANS}</p>
         <p>{MAC_AUTOSTART_MEANS}</p>
         <p>{TRACKER_LOCAL_READS}</p>
         <p>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
@@ -223,27 +224,43 @@ export function MacInstall({ token, className }: { token?: string; className?: s
 
       {canInstall && (
         <div className={styles.keyBlock}>
-          <h4 className={styles.keyTitle}>{MAC_KEY_TITLE}</h4>
-          {key ? (
-            <>
-              <p className={styles.sub}>{MAC_KEY_ONCE}</p>
-              <p className={styles.sub}>{MAC_KEY_PRIVATE}</p>
-              <pre className={styles.token} tabIndex={0} aria-label="Device key">{key}</pre>
-              <Button variant="secondary" className={styles.action} onClick={() => void copy("key", key)}>
-                {copied === "key" ? "Key copied" : "Copy device key"}
-              </Button>
-            </>
+          {state.kind === "ready" && isVersionAtLeast(state.release.version, "1.1.0") ? (
+            <div>
+              <p className={styles.lead}>Next steps in VibeHub:</p>
+              <p className={styles.sub}>1. Open VibeHub from Applications</p>
+              <p className={styles.sub}>2. Click <strong>Connect in Browser</strong> to pair with one click</p>
+              <p className={styles.sub}>If macOS blocks first launch: System Settings → Privacy &amp; Security → Open Anyway.</p>
+            </div>
           ) : (
-            <Button
-              variant="secondary"
-              className={styles.action}
-              disabled={issuing}
-              onClick={() => void issueDeviceKey()}
-            >
-              {issuing ? MAC_KEY_PENDING : issueError ? MAC_KEY_RETRY : MAC_KEY_ACTION}
-            </Button>
+            <div>
+              <p className={styles.lead}>Next steps in VibeHub:</p>
+              <p className={styles.sub}>1. Open VibeHub from Applications</p>
+              <p className={styles.sub}>2. Paste the device key below when the app asks, then press Start</p>
+              <p className={styles.sub}>If macOS blocks first launch: System Settings → Privacy &amp; Security → Open Anyway.</p>
+
+              <h4 className={styles.keyTitle}>{MAC_KEY_TITLE}</h4>
+              {key ? (
+                <>
+                  <p className={styles.sub}>{MAC_KEY_ONCE}</p>
+                  <p className={styles.sub}>{MAC_KEY_PRIVATE}</p>
+                  <pre className={styles.token} tabIndex={0} aria-label="Device key">{key}</pre>
+                  <Button variant="secondary" className={styles.action} onClick={() => void copy("key", key)}>
+                    {copied === "key" ? "Key copied" : "Copy device key"}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="secondary"
+                  className={styles.action}
+                  disabled={issuing}
+                  onClick={() => void issueDeviceKey()}
+                >
+                  {issuing ? MAC_KEY_PENDING : issueError ? MAC_KEY_RETRY : MAC_KEY_ACTION}
+                </Button>
+              )}
+              {issueError && <p className={styles.state} role="alert">{issueError}</p>}
+            </div>
           )}
-          {issueError && <p className={styles.state} role="alert">{issueError}</p>}
         </div>
       )}
 

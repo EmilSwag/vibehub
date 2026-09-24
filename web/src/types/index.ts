@@ -460,26 +460,27 @@ export interface Achievement {
   unlockedAt: string | null;
 }
 
-export type FeedEventType = "session" | "achievement" | "project" | "commits" | "friendship";
-export type ReactionKind = "respect" | "flame";
+export type FeedEventType = "post" | "session" | "achievement" | "project" | "commits" | "friendship";
+export type ReactionKind = "like" | "respect" | "flame";
 
 export interface FeedUser {
+  id?: string;
   username: string;
   displayName: string;
   avatarUrl: string | null;
 }
 
 export interface FeedReactions {
+  like: number;
   respect: number;
   flame: number;
   /** The viewer's own toggles — all false when signed out. */
-  mine: { respect: boolean; flame: boolean };
+  mine: { like: boolean; respect: boolean; flame: boolean };
 }
 
 /**
- * One row of `GET /feed` (self + friends) and `GET /users/:username/feed` (one person).
- * Every event is backed by a row; `id` is stable and doubles as the reaction target
- * (`session:<id>`, `achievement:<userId>:<badge>`, `project:<id>:new`, …).
+ * One row of `GET /feed` (self + friends + suggested) and `GET /users/:username/feed` (one person).
+ * Every event is backed by a row; `id` is stable and doubles as the reaction target.
  */
 export interface FeedEvent {
   id: string;
@@ -491,12 +492,15 @@ export interface FeedEvent {
   user: FeedUser;
   /** The other party — friendship events only. */
   other?: FeedUser;
-  /** "Coded 1h 24m in atlas" | "Coding in atlas" | "Unlocked Deep Flow" | "New project: x" | "Updated x" | "Pushed 9 commits" | "became friends" */
   title: string;
+  content?: string;
   /** session: "Claude Code · Claude Opus 5"; project: its description; otherwise null. */
   description: string | null;
   badgeId?: AchievementId;
   projectId?: string;
+  suggested?: boolean;
+  views?: number;
+  canDelete?: boolean;
   reactions: FeedReactions;
 }
 

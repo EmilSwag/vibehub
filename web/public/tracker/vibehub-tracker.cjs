@@ -2274,7 +2274,7 @@ var import_index = __toESM(require_commander(), 1), {
 } = import_index.default;
 
 // src/index.ts
-var path6 = __toESM(require("node:path"));
+var os6 = __toESM(require("node:os")), path6 = __toESM(require("node:path"));
 
 // src/autostart.ts
 var import_node_child_process = require("node:child_process"), import_node_crypto = require("node:crypto"), fs = __toESM(require("node:fs")), os = __toESM(require("node:os")), path = __toESM(require("node:path")), LAUNCH_AGENT_LABEL = "com.vibehub.tracker", AUTOSTART_MARK = "vibehub-tracker autostart v1 (managed by VibeHub; safe to delete)", MAX_AUTOSTART_BYTES = 64 * 1024, THROTTLE_INTERVAL_SECONDS = 30, AutostartError = class extends Error {
@@ -4826,6 +4826,53 @@ program2.command("login [deviceToken]").description(`validate the token with the
   writeConfig(config), verified.ok ? console.log(`Logged in as ${verified.detail}. Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`) : (console.log(`Wrote ${CONFIG_PATH_LABEL} (apiUrl: ${config.apiUrl}).`), console.log(`Could not verify with the server right now (${verified.detail}) - saved anyway.`), console.log("Run `vibehub-tracker status` after `start` to confirm it's actually connected."));
   let daemon = daemonStatus();
   daemon.running && (console.log(`Tracker is running (pid ${daemon.pid}): it picks up this token within 30 s.`), console.log("Run `start` anyway - it replaces a tracker started from an older build."));
+});
+program2.command("pair").description("pair this device with your VibeHub account via browser approval (zero typing)").option("--api-url <url>", "VibeHub server URL", DEFAULT_API_URL).option("--no-browser", "do not open the browser automatically").action(async (options) => {
+  let origin = safeApiOrigin(options.apiUrl);
+  origin || (console.error("Pairing failed: invalid API URL."), process.exit(1));
+  let osName = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "windows" : "linux", hostname2 = os6.hostname();
+  console.log("Requesting pairing code from VibeHub...");
+  let reqRes = await fetch(`${origin}/api/v1/tracker/pair/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceName: hostname2, os: osName })
+  });
+  reqRes.ok || (console.error(`Pairing failed: server returned ${reqRes.status}`), process.exit(1));
+  let session = await reqRes.json();
+  if (console.log(`Pairing code: ${session.userCode}`), console.log(`Approve in browser: ${session.verificationUri}`), options.browser) {
+    let openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    import("node:child_process").then(({ exec }) => {
+      exec(`${openCmd} ${JSON.stringify(session.verificationUri)}`);
+    });
+  }
+  console.log("Waiting for approval in browser...");
+  let deadline = Date.now() + session.expiresIn * 1e3;
+  for (; Date.now() < deadline; ) {
+    await new Promise((r) => setTimeout(r, Math.max(1, session.interval) * 1e3));
+    let pollRes = await fetch(`${origin}/api/v1/tracker/pair/poll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceCode: session.deviceCode })
+    });
+    if (pollRes.ok) {
+      let poll = await pollRes.json();
+      if (poll.status === "approved" && poll.token) {
+        let existing = readConfig(), config = {
+          apiUrl: options.apiUrl,
+          deviceToken: poll.token,
+          projectAliases: existing?.projectAliases ?? {},
+          heartbeatIntervalMs: existing?.heartbeatIntervalMs,
+          idleThresholdMs: existing?.idleThresholdMs,
+          toolProcessNames: existing?.toolProcessNames,
+          attestedMetadata: existing?.attestedMetadata,
+          autostart: existing?.autostart
+        };
+        writeConfig(config), console.log(`Logged in as @${poll.username ?? "user"}. Wrote ${CONFIG_PATH_LABEL}.`), console.log("Run `vibehub-tracker start` to start tracking.");
+        return;
+      } else poll.status === "expired" && (console.error("Pairing code expired. Run `vibehub-tracker pair` again to retry."), process.exit(1));
+    }
+  }
+  console.error("Pairing timed out. Run `vibehub-tracker pair` again to retry."), process.exit(1);
 });
 program2.command("set <projectFolder> <alias>").description(`remap a project folder's display alias, or hide it with the literal "${HIDDEN}"`).action((projectFolder, alias) => {
   let config = requireConfig();

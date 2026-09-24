@@ -12,6 +12,9 @@ interface Props {
 /** Text only: safe inside a StatTile button and an aria-hidden tool-detail row. */
 export function TokenCost({ estimate, id }: Props) {
   const text = presentTokenCost(estimate);
+  if (!text.amount || text.amount === "≈ $—") {
+    return null;
+  }
   return (
     <span className={styles.cost} data-token-cost={estimate.status} title={text.description}>
       <span className={styles.amount} aria-hidden="true">{text.amount}</span>

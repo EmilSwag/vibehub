@@ -26,6 +26,20 @@ enum APIError: LocalizedError, Equatable {
     }
 }
 
+struct PairRequestResponse: Decodable {
+    let deviceCode: String
+    let userCode: String
+    let verificationUri: String
+    let expiresIn: Int
+    let interval: Int
+}
+
+struct PairPollResponse: Decodable {
+    let status: String
+    let token: String?
+    let username: String?
+}
+
 /// One endpoint, no dependencies.
 struct APIClient {
     var baseURL: URL
@@ -72,6 +86,40 @@ struct APIClient {
             } catch {
                 return .failure(.decoding(String(describing: error)))
             }
+        } catch {
+            return .failure(.transport(error.localizedDescription))
+        }
+    }
+
+    func pairRequest(deviceName: String, os: String = "mac") async -> Result<PairRequestResponse, APIError> {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/tracker/pair/request"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 15
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["deviceName": deviceName, "os": os])
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .failure(.transport("No HTTP response")) }
+            guard (200..<300).contains(http.statusCode) else { return .failure(.server(http.statusCode)) }
+            return .success(try JSONDecoder().decode(PairRequestResponse.self, from: data))
+        } catch {
+            return .failure(.transport(error.localizedDescription))
+        }
+    }
+
+    func pairPoll(deviceCode: String) async -> Result<PairPollResponse, APIError> {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/tracker/pair/poll"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["deviceCode": deviceCode])
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .failure(.transport("No HTTP response")) }
+            guard (200..<300).contains(http.statusCode) else { return .failure(.server(http.statusCode)) }
+            return .success(try JSONDecoder().decode(PairPollResponse.self, from: data))
         } catch {
             return .failure(.transport(error.localizedDescription))
         }

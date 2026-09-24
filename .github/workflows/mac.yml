@@ -206,5 +206,5 @@ jobs:
           VibeHub launches on its own once install finishes.
 
           **Manual:** unzip VibeHub-macOS.zip, drag VibeHub.app to /Applications, then
-          right-click -> Open the first time if this build isn't notarised (Gatekeeper
-          otherwise refuses a plain double-click on an unnotarised app)."
+          open it. If macOS blocks first launch: System Settings -> Privacy & Security ->
+          scroll down and click "Open Anyway" (or right-click -> Open on macOS 14 and earlier)."
