@@ -106,10 +106,10 @@ struct OnboardingView: View {
     private func startBrowserPairing() {
         isPairing = true
         errorMessage = nil
-        let client = APIClient(baseURL: settings.apiUrl)
+        let client = APIClient(baseURL: settings.baseURL)
         let deviceName = Host.current().localizedName ?? "Mac"
 
-        pollTask = Task {
+        pollTask = Task { @MainActor in
             let requestResult = await client.pairRequest(deviceName: deviceName, os: "mac")
             guard !Task.isCancelled else { return }
 
