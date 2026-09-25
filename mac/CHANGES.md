@@ -505,3 +505,83 @@ tabs in `mac.yml`; `make-pkg.sh`'s Distribution edit simulated with both artwork
 elements and the result parsed as XML; read-only grep of `tracker/src` for
 `token-stdin` — absent. **Not** performed: any compile, `swift build`, pkg build,
 YAML schema validation (no parser on this box), or run of anything.
+
+## Polish round — first real-Mac pass (2026-09-25)
+
+MacBook Air M2 (Mac14,2), macOS 26, Swift 6.3.3 Command Line Tools, no Xcode. Nothing
+committed, installed or started; the installed 1.1.0's LaunchAgent plist was checked
+byte-identical (md5) before and after, and `com.vibehub.menubar` defaults unchanged.
+
+**Build.** `swift build` cannot run here: the CLT's `swift-package` (6.3) and its
+`usr/lib/swift/pm/*.framework` (a later release) disagree, so SwiftPM dies in dyld
+before reading the package. Fixing that needs a CLT reinstall (sudo), out of lane.
+The sources compile with **zero errors and zero warnings** via `swiftc`, once pointed at
+an SDK its compiler can read (`xcrun` picks a 27.0 beta SDK built by Swift 6.4). New
+`scripts/swiftc-build.sh` + `scripts/select-sdk.sh`; `bundle.sh` falls back to them only
+when `swift build --version` fails, and calls its helpers through `bash` (they are
+committed 644; CI chmods them). `bundle.sh` → universal app, Node pin verified, signature
+valid; `make-pkg.sh` → `dist/VibeHub.pkg` 1.1.0 + `.sha256`.
+
+**QA harness (DEBUG only).** `AppEntry` (new `@main`) hands `--snapshot <dir>` and
+`--qa-island <state> [--expanded|--qa-cycle]` to `QAHarness` before `VibeHubApp` exists.
+Fixture hooks, all `#if DEBUG`: `Keychain.fixtureToken`, `StatusStore(fixture:now:)`,
+`TrackerManager(fixtureRunning:…)` (every mutating call refuses), `AppSettings(defaults:)`
+(the one non-DEBUG change: injectable, `.standard` by default). Release binary checked
+free of harness strings. Shots: `.temp/qa/mac/{before,after}` (35 each), live
+`screencapture -x` in `.temp/qa/mac/live`.
+
+**Island — bugs found in the before shots, fixed.**
+- Collapsed pill was only as tall as its text: a 13pt black band floating mid menu bar.
+- Loading/needsToken/failed glyph was centred — i.e. under the camera, invisible.
+- Every poll re-published `phase`, `showPanel()` reset `isExpanded`: an open island
+  collapsed itself every 15s.
+- A click inside the open island toggled it shut under its own buttons.
+- 92% black let the hardware notch show through; the expanded header sat under the
+  notch; the 260pt card clipped its footer.
+
+**Island — new.** `IslandMetrics` (measured notch: 179×32 here) shared by window and
+view; `IslandShape` with 6pt concave shoulders, 10pt lower corners matching the notch,
+easing to 24 as it opens; pure black. Content only in two 90pt wings; the band stays put
+and swaps to name/presence when open, the body is uncovered beneath it. The **window
+frame** is driven by `FrameSpring` (response/damping like SwiftUI's spring) at 120Hz:
+measured live, open 32→287pt (7pt overshoot of 280) settling in ~0.5s, close in ~0.3s
+with none. Reduced motion: frame jumps, content crossfades.
+
+**Popover / Settings / onboarding / pkg — copy cut.** Popover: no tracker row or
+"Start tracking" before sign-in; FC2's caveat is a tooltip, not a paragraph. Settings:
+Account / General / This Mac, switches right-aligned, `defaults write` hints moved to the
+README. Onboarding: one centred layout per step, one title + one line; the token step
+lost its triple heading; progress ticks appear only once running. `OnboardingView` is
+controls only (hosts title it). pkg welcome/conclusion rewritten to the pairing flow
+(the conclusion still said "mint a token and paste it"), transparent + Dark Mode.
+
+**Could not verify.** Hover and click on the real panel (synthetic mouse events are
+blocked without Accessibility permission — verified via `--qa-cycle` instead); the
+popover and Settings live (the final build is parked on a Keychain prompt: ad-hoc
+signatures differ per build, and the synchronous launch-time token read blocks the UI
+until it is answered); notchless and multi-display placement; the pkg install itself.
+
+**Follow-up (same day).** Popover actions cut to three — Open VibeHub, Settings, Quit.
+"Go online" opened the web connect sheet, which on a Mac whose app *is* the connector
+read like a presence switch (Start already lives in the tracker row); the island had
+already swapped it for Settings. "Copy tracker token" moved to Settings → Account, next
+to Sign Out. Popover labels now match the island: "≈ spend", "N friends online".
+Rebuilt with `bundle.sh` + `make-pkg.sh`; release binary checked for the new strings and
+free of harness paths.
+
+**Installer (found while installing this build).** `make-pkg.sh` marks the app bundle
+non-relocatable: Installer could otherwise "upgrade" any other copy with this bundle id (a
+dev build, an unzipped zip) and leave `/Applications` alone. `pkg/Distribution.xml` declares
+`hostArchitectures="arm64,x86_64"`, so the postinstall runs natively, not under Rosetta (a
+Mac without Rosetta was asked to install it first). The postinstall's `vibehub-tracker` shim
+was never written: the user side sat in root's 0700 TMPDIR (`Permission denied`) and trusted
+`$HOME` under `sudo -u`. It now gets the script as an argument, the shim on stdin and the
+dscl home as `$1`. The pkg's summary page shows the PATH line for zsh and bash again.
+
+**Tracker: the app's LaunchAgent is no longer "an older install".** `vibehub-tracker autostart
+status`, run through the app's shim, byte-compared the app's plist (written by
+PropertyListSerialization: sorted keys, tabs, no marker) with the CLI's template, called it
+"an older install", and suggested `autostart enable`. `start` and `autostart enable` would
+then rewrite it and bounce the job. Now the app's plist that names this install counts as
+current, the status line says the app manages it, `start` leaves it alone, and
+`autostart enable` no longer rewrites it. A stale plist the CLI wrote itself is still refreshed.

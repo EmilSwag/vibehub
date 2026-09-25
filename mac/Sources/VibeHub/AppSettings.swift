@@ -52,20 +52,20 @@ final class AppSettings: ObservableObject {
     static let defaultWebURL = URL(string: "https://web-production-da778.up.railway.app")!
 
     @Published var showTimeInBar: Bool {
-        didSet { UserDefaults.standard.set(showTimeInBar, forKey: Key.showTimeInBar) }
+        didSet { defaults.set(showTimeInBar, forKey: Key.showTimeInBar) }
     }
 
     @Published private(set) var launchAtLogin: Bool
 
     @Published var islandMode: IslandMode {
-        didSet { UserDefaults.standard.set(islandMode.rawValue, forKey: Key.islandMode) }
+        didSet { defaults.set(islandMode.rawValue, forKey: Key.islandMode) }
     }
 
     /// Gates the first-run wizard (`OnboardingWizard`). Set once, on Finish or a final
     /// Skip — never reset by clearing the token, so a returning user who signs out only
     /// sees the plain token field again, not the whole tour.
     @Published var hasCompletedOnboarding: Bool {
-        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: Key.hasCompletedOnboarding) }
+        didSet { defaults.set(hasCompletedOnboarding, forKey: Key.hasCompletedOnboarding) }
     }
 
     /// FC5 "Pause is Off": the single persisted record that the *user* stopped tracking.
@@ -80,7 +80,7 @@ final class AppSettings: ObservableObject {
     /// they never started it at all (this flag false). Only the first must survive an
     /// upgrade that would otherwise helpfully "restore" tracking.
     @Published var userDisabledTracking: Bool {
-        didSet { UserDefaults.standard.set(userDisabledTracking, forKey: Key.userDisabledTracking) }
+        didSet { defaults.set(userDisabledTracking, forKey: Key.userDisabledTracking) }
     }
 
     /// FC5 "Upgrade": `CFBundleShortVersionString` as of the last launch. A pkg upgrade
@@ -90,7 +90,7 @@ final class AppSettings: ObservableObject {
     /// job. Comparing this against the running bundle on launch is how that is detected
     /// without asking launchd anything.
     @Published private(set) var lastRunBundleVersion: String? {
-        didSet { UserDefaults.standard.set(lastRunBundleVersion, forKey: Key.lastRunBundleVersion) }
+        didSet { defaults.set(lastRunBundleVersion, forKey: Key.lastRunBundleVersion) }
     }
 
     /// The version this build actually is. `nil` only in a hand-assembled dev bundle
@@ -103,16 +103,20 @@ final class AppSettings: ObservableObject {
     /// The API server. Mutable (not `let`): a handoff's `apiUrl` persists here — see
     /// the type doc above — not just as a one-call override to the login command.
     @Published private(set) var baseURL: URL {
-        didSet { UserDefaults.standard.set(baseURL.absoluteString, forKey: Key.baseURL) }
+        didSet { defaults.set(baseURL.absoluteString, forKey: Key.baseURL) }
     }
 
     /// The web site. Same persistence shape as `baseURL`, kept separate on purpose.
     @Published private(set) var webUrl: URL {
-        didSet { UserDefaults.standard.set(webUrl.absoluteString, forKey: Key.webURL) }
+        didSet { defaults.set(webUrl.absoluteString, forKey: Key.webURL) }
     }
 
-    init() {
-        let defaults = UserDefaults.standard
+    /// `.standard` in the app; the DEBUG QA harness passes a throwaway suite so a
+    /// fixture run can never rewrite the real `com.vibehub.menubar` preferences.
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         // `object(forKey:)` first: `bool(forKey:)` can't tell "false" from "never set",
         // and the bar text should be on out of the box.
         showTimeInBar = defaults.object(forKey: Key.showTimeInBar) as? Bool ?? true

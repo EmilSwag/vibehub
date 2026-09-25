@@ -141,14 +141,35 @@ struct PrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-            .padding(.horizontal, 16)
-            .frame(minHeight: 30)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 32)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.85 : 1))
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .opacity(isEnabled ? 1 : 0.45)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .animation(reduceMotion ? nil : Animation.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// The quiet partner to `PrimaryButtonStyle`: same size and press, a soft plate
+/// instead of ink — for the second choice on a screen that has one.
+struct SecondaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.14 : 0.08))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .animation(reduceMotion ? nil : Animation.easeOut(duration: 0.12), value: configuration.isPressed)
     }

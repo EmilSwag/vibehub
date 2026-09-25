@@ -59,6 +59,19 @@ final class StatusStore: ObservableObject {
 
     var token: String? { Keychain.readToken() }
 
+    #if DEBUG
+    /// QA harness only: a store frozen on one phase — no poll loop, no network, no
+    /// Keychain. `now` is pinned too, so snapshot timers render the same every run.
+    private(set) var isFixture = false
+
+    convenience init(settings: AppSettings, fixture phase: Phase, now: Date) {
+        self.init(settings: settings)
+        isFixture = true
+        self.phase = phase
+        self.now = now
+    }
+    #endif
+
     var snapshot: TrackerMe? {
         if case .loaded(let me) = phase { return me }
         return nil
@@ -77,6 +90,9 @@ final class StatusStore: ObservableObject {
     }
 
     func start() {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         guard pollTask == nil else { return }
         // Both loops inherit this class's @MainActor isolation, so `self` is touched on
         // the main actor throughout and no extra hops are needed.
@@ -106,6 +122,9 @@ final class StatusStore: ObservableObject {
     /// Re-read the token, drop any back-off, and poll immediately — used when the
     /// popover opens, after the token is saved, and by the error state's Retry.
     func wake() {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         consecutiveFailures = 0
         Task { await refresh() }
     }

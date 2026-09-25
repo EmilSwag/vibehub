@@ -1,12 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// First run — connects the Mac to VibeHub via browser pairing (zero typing),
-/// with manual token entry available as a fallback.
+/// Connecting this Mac: browser pairing first (one click, no typing), a pasted token as
+/// the fallback. Controls only — no heading — so each host (the first-run wizard, the
+/// popover for a signed-out returning user) says it once, in its own voice.
 struct OnboardingView: View {
     @ObservedObject var store: StatusStore
     @ObservedObject var settings: AppSettings
     @ObservedObject var tracker: TrackerManager
+    /// `.center` in the wizard, `.leading` in the popover.
+    var alignment: HorizontalAlignment = .leading
     var onSaved: ((_ viaKeyboard: Bool) -> Void)? = nil
 
     @State private var token = ""
@@ -18,50 +21,12 @@ struct OnboardingView: View {
     @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                BrandMark(size: 15)
-                Text("VibeHub").font(.system(size: 14, weight: .semibold))
-            }
-
-            Text("Connect your Mac to see your AI coding activity.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Primary flow: One-click browser pairing
-            if !isPairing {
-                Button("Connect in Browser") {
-                    startBrowserPairing()
-                }
-                .buttonStyle(PrimaryButtonStyle())
+        VStack(alignment: alignment, spacing: 10) {
+            if isPairing {
+                pairingStatus
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Waiting for approval in browser\u{2026}")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-
-                    if let pairingCode {
-                        HStack(spacing: 6) {
-                            Text("Pairing code:")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            Text(pairingCode)
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        }
-                    }
-
-                    Button("Cancel") {
-                        cancelPairing()
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 11))
-                }
-                .padding(10)
-                .background(Color.primary.opacity(0.04))
-                .cornerRadius(6)
+                Button("Connect in Browser", action: startBrowserPairing)
+                    .buttonStyle(PrimaryButtonStyle())
             }
 
             if let username = tracker.connectedUsername {
@@ -69,30 +34,17 @@ struct OnboardingView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             } else if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                Label(errorMessage, systemImage: "exclamationmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Divider().padding(.vertical, 2)
-
-            // Secondary manual path
-            DisclosureGroup(isExpanded: $showManual) {
-                VStack(alignment: .leading, spacing: 8) {
-                    SecureField("Paste device token", text: $token)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11, design: .monospaced))
-                        .onSubmit { verify(viaKeyboard: true) }
-
-                    Button(isVerifying ? "Verifying\u{2026}" : "Verify token") {
-                        verify(viaKeyboard: false)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding(.top, 4)
-            } label: {
-                Text("Or enter token manually")
+            if showManual {
+                manualEntry
+            } else {
+                Button("Use a token instead") { showManual = true }
+                    .buttonStyle(.link)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -101,6 +53,41 @@ struct OnboardingView: View {
             pollTask?.cancel()
             pollTask = nil
         }
+    }
+
+    private var pairingStatus: some View {
+        VStack(alignment: alignment, spacing: 6) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Waiting for your browser\u{2026}")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            if let pairingCode {
+                // The code to match against the browser page — the one detail worth
+                // reading, so it gets the weight.
+                Text(pairingCode)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .tracking(1.5)
+                    .textSelection(.enabled)
+            }
+            Button("Cancel", action: cancelPairing)
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var manualEntry: some View {
+        HStack(spacing: 6) {
+            SecureField("Paste your device token", text: $token)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
+                .onSubmit { verify(viaKeyboard: true) }
+            Button(isVerifying ? "Checking\u{2026}" : "Connect") { verify(viaKeyboard: false) }
+                .buttonStyle(.bordered)
+                .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .frame(maxWidth: 300)
     }
 
     private func startBrowserPairing() {
@@ -124,7 +111,7 @@ struct OnboardingView: View {
                     NSWorkspace.shared.open(url)
                 }
 
-                // Poll every 2 seconds until approved or cancelled
+                // Poll every `interval` seconds until approved, expired or cancelled.
                 let deadline = Date().addingTimeInterval(Double(pair.expiresIn))
                 while !Task.isCancelled && Date() < deadline {
                     try? await Task.sleep(nanoseconds: UInt64(max(1, pair.interval)) * 1_000_000_000)
@@ -148,7 +135,7 @@ struct OnboardingView: View {
                             }
                         } else if poll.status == "expired" {
                             isPairing = false
-                            errorMessage = "Pairing expired. Try again."
+                            errorMessage = "That request expired. Try again."
                             return
                         }
                     }
@@ -156,7 +143,7 @@ struct OnboardingView: View {
 
                 if !Task.isCancelled {
                     isPairing = false
-                    errorMessage = "Pairing timed out."
+                    errorMessage = "No answer from the browser. Try again."
                 }
             }
         }

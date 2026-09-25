@@ -175,6 +175,21 @@ final class TrackerManager: ObservableObject {
         isTrackAtLoginEnabled = launchAgent.isInstalled
     }
 
+    #if DEBUG
+    /// QA harness only. A fixture tracker never reads `~/.vibehub`, never runs the
+    /// embedded CLI and never touches launchd or `SMAppService` — every mutating entry
+    /// point below refuses while this is set, so a click in a live QA window is inert.
+    private(set) var isFixture = false
+
+    convenience init(settings: AppSettings, fixtureRunning: Bool, trackAtLogin: Bool, status: LocalTrackerStatus?) {
+        self.init(settings: settings)
+        isFixture = true
+        isRunning = fixtureRunning
+        isTrackAtLoginEnabled = trackAtLogin
+        localStatus = status
+    }
+    #endif
+
     var embeddedNodeURL: URL? {
         Bundle.main.resourceURL?.appendingPathComponent("tracker/node/bin/node")
     }
@@ -201,6 +216,9 @@ final class TrackerManager: ObservableObject {
     /// server to call.
     @discardableResult
     func connect(token: String, apiUrl: URL? = nil, webUrl: URL? = nil) async -> Result<String, TrackerManagerError> {
+        #if DEBUG
+        if isFixture { return .failure(.processFailed("QA fixture: disabled.")) }
+        #endif
         settings.adopt(baseURL: apiUrl, webUrl: webUrl)
 
         // FC5, "clear the old account before restarting". If a *different* credential is
@@ -274,6 +292,9 @@ final class TrackerManager: ObservableObject {
     /// tear the supervisor down *before* dropping credentials, or launchd relaunches a
     /// daemon into a half-cleared state between the two steps.
     func signOut() async {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         isBusy = true
         defer { isBusy = false }
         let agent = launchAgent
@@ -319,6 +340,9 @@ final class TrackerManager: ObservableObject {
     /// visible symptom until the popover's own status row happens to be checked.
     @discardableResult
     func login(token: String, apiUrl: URL? = nil) async -> Result<String, TrackerManagerError> {
+        #if DEBUG
+        if isFixture { return .failure(.processFailed("QA fixture: disabled.")) }
+        #endif
         guard let node = embeddedNodeURL, let cjs = embeddedCjsURL else {
             lastActionError = TrackerManagerError.bundleMissing.errorDescription
             return .failure(.bundleMissing)
@@ -383,6 +407,9 @@ final class TrackerManager: ObservableObject {
     /// a healthy daemon is already running, so launchd's restart cycle is a cheap
     /// no-op rather than a fight over `tracker.pid`.
     func enableTrackAtLogin() async -> Result<Void, TrackerManagerError> {
+        #if DEBUG
+        if isFixture { return .failure(.processFailed("QA fixture: disabled.")) }
+        #endif
         guard let token = Keychain.readToken() else {
             lastActionError = TrackerManagerError.noToken.errorDescription
             startProgress = .failed(TrackerManagerError.noToken.errorDescription ?? "")
@@ -447,6 +474,9 @@ final class TrackerManager: ObservableObject {
     /// doesn't fail this call: the LaunchAgent is already gone either way, which is the
     /// primary thing "disable" means.
     func disableTrackAtLogin() async -> Result<Void, TrackerManagerError> {
+        #if DEBUG
+        if isFixture { return .failure(.processFailed("QA fixture: disabled.")) }
+        #endif
         isBusy = true
         defer { isBusy = false }
         let agent = launchAgent
@@ -488,6 +518,9 @@ final class TrackerManager: ObservableObject {
     /// repair (no embedded tracker in a dev build) retries next time instead of
     /// recording success it did not achieve.
     func reconcileOnLaunch() async {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         defer { settings.recordCurrentBundleVersion() }
 
         if settings.userDisabledTracking {
@@ -529,6 +562,9 @@ final class TrackerManager: ObservableObject {
     /// after any action above and on popover `onAppear`, so the UI never waits a full
     /// interval to reflect something the user just did.
     func startPolling() {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         guard pollTask == nil else { return }
         refreshLocalStatus()
         pollTask = Task { [weak self] in
@@ -546,6 +582,9 @@ final class TrackerManager: ObservableObject {
     }
 
     func refreshLocalStatus() {
+        #if DEBUG
+        if isFixture { return }
+        #endif
         isTrackAtLoginEnabled = launchAgent.isInstalled
         localStatus = Self.readStatus()
         isRunning = Self.readRunningPid().map(Self.isProcessAlive) ?? false

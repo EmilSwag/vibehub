@@ -21,7 +21,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // @MainActor on the struct, not just on `body`: `init()` constructs several @MainActor
 // observable objects and `barText` reads @MainActor state, both of which are diagnosed
 // in a nonisolated context.
-@main
 @MainActor
 struct VibeHubApp: App {
     // The `(AppDelegate.self)` argument IS the default for this property — unlike

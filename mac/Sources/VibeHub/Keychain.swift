@@ -16,7 +16,17 @@ enum Keychain {
         ]
     }
 
+    #if DEBUG
+    /// QA harness only (`QAHarness`): when set, `readToken()` answers from here and never
+    /// touches the Keychain — a differently-signed debug build reading the real item
+    /// would raise an access prompt, and fixtures must never see a real credential.
+    static var fixtureToken: String??
+    #endif
+
     static func readToken() -> String? {
+        #if DEBUG
+        if let fixtureToken { return fixtureToken }
+        #endif
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne

@@ -29,13 +29,13 @@ struct OnboardingWizard: View {
     @State private var animateChrome = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(store: StatusStore, settings: AppSettings, tracker: TrackerManager, onFinished: @escaping () -> Void) {
+    init(store: StatusStore, settings: AppSettings, tracker: TrackerManager, initialStep: OnboardingStep? = nil, onFinished: @escaping () -> Void) {
         self.store = store
         self.settings = settings
         self.tracker = tracker
         self.onFinished = onFinished
         // A handoff/deep link may already have landed before this view was ever built.
-        _step = State(initialValue: store.token == nil ? .welcome : .startTracking)
+        _step = State(initialValue: initialStep ?? (store.token == nil ? .welcome : .startTracking))
     }
 
     var body: some View {
@@ -62,105 +62,155 @@ struct OnboardingWizard: View {
         }
     }
 
-    private var welcomeStep: some View {
-        VStack(spacing: 14) {
+    /// Every step has the same skeleton — a visual, a title, one line, one primary
+    /// action at the foot — so the eye learns where to look on step one and never has
+    /// to look again.
+    private func stepLayout<Visual: View, Extra: View, Actions: View>(
+        title: String,
+        line: String,
+        @ViewBuilder visual: () -> Visual,
+        @ViewBuilder extra: () -> Extra,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        VStack(spacing: 0) {
             Spacer(minLength: 0)
-            // The real mark (Lumi, first-start review) — the same figure as the app
-            // icon and the menu bar, not an SF Symbol standing in for it.
-            BrandMark(size: 44)
-            Text("VibeHub").font(.system(size: 22, weight: .semibold))
-            Text("Your AI-coding presence, in the menu bar and the notch.")
+            visual().frame(height: 64)
+            Text(title)
+                .font(.system(size: 22, weight: .semibold))
+                .padding(.top, 20)
+            Text(line)
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+            extra().padding(.top, 22)
             Spacer(minLength: 0)
-            primaryButton("Continue") { advance(to: .token) }
+            actions()
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var welcomeStep: some View {
+        // The real mark (Lumi, first-start review) — the same figure as the app icon
+        // and the menu bar, not an SF Symbol standing in for it.
+        stepLayout(
+            title: "VibeHub",
+            line: "Your coding presence, right beside the notch.",
+            visual: { BrandMark(size: 52) },
+            extra: { EmptyView() },
+            actions: { primaryButton("Get Started") { advance(to: .token) } }
+        )
     }
 
     private var tokenStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Connect your account").font(.system(size: 16, weight: .semibold))
-            OnboardingView(store: store, settings: settings, tracker: tracker, onSaved: { viaKeyboard in
-                // Return in the token field advances without motion (N6).
-                advance(to: .startTracking, animated: !viaKeyboard)
-            })
-            Spacer(minLength: 0)
-        }
+        stepLayout(
+            title: "Connect this Mac",
+            line: "Approve it in your browser. No typing.",
+            visual: { stepSymbol("link") },
+            extra: {
+                OnboardingView(store: store, settings: settings, tracker: tracker, alignment: .center, onSaved: { viaKeyboard in
+                    // Return in the token field advances without motion (N6).
+                    advance(to: .startTracking, animated: !viaKeyboard)
+                })
+            },
+            actions: { EmptyView() }
+        )
     }
 
     private var startTrackingStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Start tracking").font(.system(size: 16, weight: .semibold))
-            Text("Runs quietly in the background and restarts itself after a reboot.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        // No login-item toggle here, and no `.onAppear` side effect: nothing installs
+        // itself until the button is pressed. `TrackerManager.enableTrackAtLogin` owns
+        // both halves (N7), so consent and effect happen in one place (FC5).
+        stepLayout(
+            title: "Start tracking",
+            line: "Runs quietly in the background, even after a restart.",
+            visual: { stepSymbol("waveform.path.ecg") },
+            extra: {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("Show the island").font(.system(size: 13))
+                        Spacer()
+                        Toggle("Show the island", isOn: Binding(
+                            get: { settings.islandMode != .off },
+                            set: { enabled in settings.islandMode = enabled ? .auto : .off }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(width: 280, height: 40)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05)))
 
-            // No "Background at login" toggle here any more. It registered the app as a
-            // login item the moment this step appeared — before the user had agreed to
-            // anything — and duplicated a decision "Start tracking" already makes.
-            // `TrackerManager.enableTrackAtLogin` now owns both halves (N7), so consent
-            // and effect happen in the same place, on the same button.
-            Toggle("Show the island", isOn: Binding(
-                get: { settings.islandMode != .off },
-                set: { enabled in settings.islandMode = enabled ? .auto : .off }
-            ))
+                    // Progress appears only once there is progress — two grey ticks
+                    // before anything has happened read as disabled options.
+                    if tracker.startProgress != .idle {
+                        VStack(alignment: .leading, spacing: 6) {
+                            progressTick("Signing in", state: signInTickState)
+                            progressTick("Starting the tracker", state: trackerTickState)
+                        }
+                    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                progressTick("Sign in", state: signInTickState)
-                progressTick("Start the tracker", state: trackerTickState)
-            }
-            .padding(.top, 4)
-
-            if case .failed(let message) = tracker.startProgress {
-                HStack(spacing: 8) {
-                    Text(message).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
-                    Button("Retry") { Task { await startTracking() } }.buttonStyle(.borderless)
+                    if case .failed(let message) = tracker.startProgress {
+                        Label(message, systemImage: "exclamationmark.circle")
+                            .font(.system(size: 11, weight: .medium))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 320)
+                    }
                 }
-            }
-
-            Spacer(minLength: 0)
-            HStack(spacing: 10) {
+            },
+            actions: {
                 primaryButton(primaryLabel) { Task { await startTracking() } }
                     .disabled(tracker.isBusy)
-                // Lumi: the button changed its label but nothing else moved, so the
-                // seconds spent in `launchctl bootstrap` looked like a dead click.
-                if tracker.isBusy {
-                    ProgressView().controlSize(.small)
-                }
             }
-        }
-        // Deliberately no `.onAppear` side effect. The previous version called
-        // `setLaunchAtLogin(true)` here, which registered a login item merely because
-        // the user reached this step — and would silently re-register it for someone who
-        // had turned tracking off and come back (FC5, retained Off). Nothing installs
-        // itself until the button below is pressed.
+        )
     }
 
     private var doneStep: some View {
-        VStack(spacing: 16) {
-            Spacer(minLength: 0)
-            Text("You're live.").font(.system(size: 20, weight: .semibold))
-            IslandPreview(store: store)
-            Spacer(minLength: 0)
-            HStack(spacing: 12) {
-                Button("Close", action: onFinished)
-                    .buttonStyle(.bordered)
-                primaryButton("Open VibeHub") {
-                    NSWorkspace.shared.open(settings.webUrl)
-                    onFinished()
+        stepLayout(
+            title: "You\u{2019}re live",
+            line: "Hover the notch any time for the details.",
+            visual: {
+                // Hung from a strip of menu bar, so the preview reads as "at the top of
+                // the screen" rather than a black lozenge floating in a window.
+                IslandPreview(store: store)
+                    .frame(width: 360, height: 60, alignment: .top)
+                    .background(alignment: .top) {
+                        Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 32)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            },
+            extra: { EmptyView() },
+            actions: {
+                HStack(spacing: 10) {
+                    Button("Done", action: onFinished)
+                        .buttonStyle(SecondaryButtonStyle())
+                    primaryButton("Open VibeHub") {
+                        NSWorkspace.shared.open(settings.webUrl)
+                        onFinished()
+                    }
                 }
             }
-        }
+        )
+    }
+
+    /// A symbol on a soft disc — the visual slot for steps that have no picture.
+    private func stepSymbol(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 24, weight: .medium))
+            .foregroundStyle(.primary)
+            .frame(width: 60, height: 60)
+            .background(Circle().fill(Color.primary.opacity(0.06)))
     }
 
     // MARK: - Start tracking progress
 
     private var primaryLabel: String {
         switch tracker.startProgress {
-        case .idle, .failed: return "Start tracking"
+        case .idle: return "Start Tracking"
+        case .failed: return "Try Again"
         case .signingIn: return "Signing in\u{2026}"
         case .startingTracker: return "Starting tracker\u{2026}"
         case .done: return "Started"

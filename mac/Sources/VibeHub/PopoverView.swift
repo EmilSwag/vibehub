@@ -16,8 +16,12 @@ struct PopoverView: View {
                 SettingsView(store: store, settings: settings, tracker: tracker, onClose: { showingSettings = false })
             } else {
                 content
-                trackerRow
-                Divider().padding(.vertical, 6)
+                // Before sign-in there is no tracker to describe or start: the row
+                // said "Tracker stopped · Start tracking" to someone with no account.
+                if store.phase != .needsToken {
+                    trackerRow
+                }
+                Divider().padding(.vertical, 8)
                 actions
             }
         }
@@ -40,7 +44,13 @@ struct PopoverView: View {
     private var content: some View {
         switch store.phase {
         case .needsToken:
-            OnboardingView(store: store, settings: settings, tracker: tracker)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    BrandMark(size: 16)
+                    Text("Connect this Mac").font(.system(size: 14, weight: .semibold))
+                }
+                OnboardingView(store: store, settings: settings, tracker: tracker)
+            }
         case .loading:
             loadingSkeleton
         case .failed(let error):
@@ -54,6 +64,7 @@ struct PopoverView: View {
     /// server's last accepted heartbeat, not about a process running on this machine).
     private var trackerRow: some View {
         VStack(alignment: .leading, spacing: 3) {
+            Divider().padding(.bottom, 8)
             HStack(spacing: 6) {
                 // Lumi: presence is the only thing in this UI allowed to be green. A
                 // green dot here made "a process is running on this Mac" look like "you
@@ -62,23 +73,28 @@ struct PopoverView: View {
                 Image(systemName: trackerSymbol)
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
-                Text(trackerStatusLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(trackerStatusLabel)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    // FC2's caveat lives here as a tooltip: always one hover away,
+                    // no longer a permanent paragraph under a status line.
+                    .help(trackerStatusNote ?? "")
                 Spacer(minLength: 0)
                 if !tracker.isTrackAtLoginEnabled {
-                    Button(tracker.isBusy ? "Starting\u{2026}" : "Start tracking") { Task { await startTrackingFromRow() } }
+                    Button(tracker.isBusy ? "Starting\u{2026}" : "Start") { Task { await startTrackingFromRow() } }
                         .buttonStyle(.borderless)
                         .font(.system(size: 11))
                         .disabled(tracker.isBusy)
                 }
             }
-            if let note = trackerStatusNote {
+            if tracker.connectionState == .authRejected, let note = trackerStatusNote {
                 Text(note)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.top, 8)
+        .padding(.top, 12)
     }
 
     private var trackerSymbol: String {
@@ -103,19 +119,19 @@ struct PopoverView: View {
         case .connected:
             return "Tracker connected \u{00B7} \(lastUpdatedSuffix)"
         case .disconnected:
-            return "Tracker running, not reaching VibeHub"
+            return "Tracker can\u{2019}t reach VibeHub"
         case .unknown:
-            return tracker.isRunning ? "Tracker running \u{00B7} status stale" : "Tracker stopped"
+            return tracker.isRunning ? "Tracker running \u{00B7} no recent status" : "Tracker off"
         }
     }
 
     private var trackerStatusNote: String? {
         switch tracker.connectionState {
         case .authRejected:
-            return "The saved token was rejected. Reconnect this Mac to start tracking again."
+            return "Token rejected. Reconnect this Mac in Settings."
         case .connected:
             // The one sentence that stops a transport tick reading as AI usage.
-            return "Connected means VibeHub heard from this Mac \u{2014} not that an AI tool is in use."
+            return "VibeHub heard from this Mac recently. It doesn\u{2019}t mean an AI tool is in use."
         case .disconnected, .unknown:
             return nil
         }
@@ -124,7 +140,8 @@ struct PopoverView: View {
     private var lastUpdatedSuffix: String {
         guard let updatedAt = tracker.localStatus?.lastConnectionSeenAt ?? tracker.localStatus?.updatedAt,
               let date = Format.parseISO8601(updatedAt) else { return "just now" }
-        return Format.elapsedShort(since: date, now: store.now)
+        let elapsed = Format.elapsedShort(since: date, now: store.now)
+        return date.timeIntervalSince(store.now) > -60 ? elapsed : "\(elapsed) ago"
     }
 
     /// `enableTrackAtLogin` owns both halves of Start now — the tracker's LaunchAgent and
@@ -178,8 +195,8 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             } else {
-                // Empty state: one sentence, and the action that resolves it is already
-                // in the list below — no second button here.
+                // Empty state: one sentence. The action that resolves it (Start) is
+                // already in the tracker row below — no second button here.
                 Text(me.tracker.connected ? "Nothing open right now." : "Tracker offline.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
@@ -204,7 +221,7 @@ struct PopoverView: View {
                 // price for today's models" and renders as an em-dash, never as $0.00
                 // and never by swapping in a different statistic, which made the row
                 // silently mean two different things on different days.
-                stat(Format.optionalUsd(me.today.estimatedUsd), "\u{2248}$")
+                stat(Format.optionalUsd(me.today.estimatedUsd), "\u{2248} spend")
             }
         }
     }
@@ -223,7 +240,7 @@ struct PopoverView: View {
 
     private func friendsBlock(_ me: TrackerMe) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionLabel(text: "Friends online: \(me.friendsOnline.count)")
+            SectionLabel(text: me.friendsOnline.count == 1 ? "1 friend online" : "\(me.friendsOnline.count) friends online")
             if me.friendsOnline.sample.isEmpty {
                 Text("Nobody's coding right now.")
                     .font(.system(size: 12))
@@ -307,18 +324,11 @@ struct PopoverView: View {
 
     private var actions: some View {
         VStack(spacing: 1) {
+            // Three rows. "Go online" opened the web connect sheet — on a Mac whose app
+            // *is* the connector it read like a presence switch; Start lives in the
+            // tracker row. Copy Token moved to Settings → Account.
             ActionRow(title: "Open VibeHub", symbol: "arrow.up.forward.app") {
                 open(settings.webUrl)
-            }
-            ActionRow(title: "Go online", symbol: "bolt") {
-                open(settings.webUrl.appending(queryItem: URLQueryItem(name: "connect", value: "1")))
-            }
-            if store.token != nil {
-                ActionRow(title: "Copy tracker token", symbol: "doc.on.doc") {
-                    guard let token = store.token else { return }
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(token, forType: .string)
-                }
             }
             ActionRow(title: "Settings", symbol: "gearshape") { showingSettings = true }
             ActionRow(title: "Quit VibeHub", symbol: "power") { NSApplication.shared.terminate(nil) }

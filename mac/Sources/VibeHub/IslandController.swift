@@ -25,6 +25,9 @@ import SwiftUI
 @MainActor
 final class IslandController: NSObject, ObservableObject {
     @Published fileprivate(set) var isExpanded = false
+    /// The target screen's notch geometry — shared with `IslandView` so the content's
+    /// wings and the window's frame are cut from the same numbers.
+    @Published private(set) var metrics = IslandMetrics.notchless
 
     private let settings: AppSettings
     private let store: StatusStore
@@ -49,25 +52,21 @@ final class IslandController: NSObject, ObservableObject {
         override var canBecomeMain: Bool { false }
     }
 
-    private static let expandedSize = CGSize(width: 420, height: 260)
-    /// Contract: 60ms before expanding on hover, 250ms before collapsing on hover-out —
-    /// asymmetric on purpose (emil design-eng: slow where the user is deciding, fast/
-    /// here inverted-fast-to-commit, slow-to-release so a flick across the menu bar
-    /// doesn't pop it open, but briefly leaving the card while reading it doesn't snap
-    /// it shut either).
-    private static let hoverEnterDelay: TimeInterval = 0.06
-    private static let hoverExitDelay: TimeInterval = 0.25
+    /// Asymmetric on purpose: quick to commit once the pointer settles on the island
+    /// (but not on a flick across the menu bar), slow to let go, so briefly drifting off
+    /// the card while reading it does not snap it shut.
+    private static let hoverEnterDelay: TimeInterval = 0.08
+    private static let hoverExitDelay: TimeInterval = 0.3
     /// Escape key code (`kVK_Escape`); AppKit has no named constant for it.
     private static let escapeKeyCode: UInt16 = 53
-    /// Asymmetric on purpose: opening is the moment the user is waiting on, so it gets
-    /// the full settle; closing is the system getting out of the way and should be
-    /// quicker than the thing it reverses. Sharing one duration made dismissal feel
-    /// like the panel was reluctant to leave.
-    private static let expandDuration: TimeInterval = 0.35
-    private static let collapseDuration: TimeInterval = 0.2
-    /// Reduced motion keeps a short crossfade rather than snapping — "reduce" means
-    /// gentler and fewer, not none; an instant size jump is more jarring than a fade.
-    private static let reducedMotionDuration: TimeInterval = 0.12
+    /// The window frame is driven by a real spring (`FrameSpring`), not an
+    /// `NSAnimationContext` bezier. Opening gets a lively settle with a hint of
+    /// overshoot — the moment the user is waiting on; closing is near-critically damped
+    /// and quicker, the island getting out of the way.
+    private static let expandSpring = FrameSpring.Parameters(response: 0.42, dampingFraction: 0.74)
+    private static let collapseSpring = FrameSpring.Parameters(response: 0.3, dampingFraction: 0.92)
+    private let spring = FrameSpring()
+    private var springTimer: Timer?
 
     init(settings: AppSettings, store: StatusStore) {
         self.settings = settings
@@ -100,6 +99,13 @@ final class IslandController: NSObject, ObservableObject {
     }
 
     private func showPanel() {
+        // Called on every published phase — i.e. every poll. Once the panel exists, only
+        // follow the target size (a loaded card and a message card differ in height);
+        // resetting `isExpanded` here collapsed an open island every 15 seconds.
+        if panel != nil, panel?.isVisible == true {
+            applyFrame(animated: true)
+            return
+        }
         let panel = self.panel ?? makePanel()
         self.panel = panel
         isExpanded = false
@@ -112,6 +118,7 @@ final class IslandController: NSObject, ObservableObject {
     }
 
     private func hidePanel() {
+        stopSpring()
         resignKeyIfNeeded()
         panel?.orderOut(nil)
         removeMonitors()
@@ -125,7 +132,7 @@ final class IslandController: NSObject, ObservableObject {
         // with the *key window*, which for an LSUIElement app with no key window is
         // whatever AppKit last decided, not reliably the menu-bar display (N4).
         let panel = IslandPanel(
-            contentRect: NSRect(origin: .zero, size: collapsedSize(on: targetScreen())),
+            contentRect: NSRect(origin: .zero, size: metrics(for: targetScreen()).collapsedSize),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
@@ -148,22 +155,36 @@ final class IslandController: NSObject, ObservableObject {
         return panel
     }
 
-    // MARK: - Sizing & placement
-
-    /// `notchWidth + 168`: wide enough to give the left (presence/time) and right
-    /// (tokens/≈$) clusters room on either side of the actual hardware notch, which
-    /// this panel deliberately spans rather than avoids. `0` notch width (no-notch
-    /// Mac) collapses this to a plain 168pt pill.
-    private func collapsedSize(on screen: NSScreen?) -> CGSize {
-        guard let screen else { return CGSize(width: 168, height: 32) }
-        let width = notchWidth(on: screen) + 168
-        let height = screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top : 32
-        return CGSize(width: width, height: height)
+    #if DEBUG
+    /// QA harness: the island exactly as it would be framed on the target screen, for
+    /// offscreen rendering. No panel, no monitors, no window.
+    func debugSnapshot(expanded: Bool) -> (view: AnyView, size: CGSize, screen: NSScreen?) {
+        isExpanded = expanded
+        let screen = targetScreen()
+        metrics = metrics(for: screen)
+        return (AnyView(IslandView(store: store, settings: settings, controller: self)), targetSize, screen)
     }
 
-    private func notchWidth(on screen: NSScreen) -> CGFloat {
-        guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return 0 }
-        return max(0, right.minX - left.maxX)
+    /// QA harness, live mode: open or close the real panel without a hover.
+    func debugSetExpanded(_ expanded: Bool) {
+        expanded ? expand() : collapse()
+    }
+    #endif
+
+    // MARK: - Sizing & placement
+
+    /// Measured, not assumed: the notch is the gap between the two auxiliary top areas
+    /// macOS reports, and its height is the top safe-area inset (the menu bar band).
+    private func metrics(for screen: NSScreen?) -> IslandMetrics {
+        guard let screen,
+              let left = screen.auxiliaryTopLeftArea,
+              let right = screen.auxiliaryTopRightArea,
+              screen.safeAreaInsets.top > 0 else { return .notchless }
+        return IslandMetrics(notchWidth: max(0, right.minX - left.maxX), bandHeight: screen.safeAreaInsets.top)
+    }
+
+    private var targetSize: CGSize {
+        isExpanded ? metrics.expandedSize(loaded: store.snapshot != nil) : metrics.collapsedSize
     }
 
     /// One resolver, used by both `makePanel` and `applyFrame` (N4 — they disagreed
@@ -220,35 +241,66 @@ final class IslandController: NSObject, ObservableObject {
         // call sites) covers every path into `applyFrame` — hover, click, and the
         // screen-parameter notification that fires when a Space goes full screen.
         guard !isLikelyFullScreen(screen) else {
+            stopSpring()
             panel.orderOut(nil)
             return
         }
+        let measured = metrics(for: screen)
+        if measured != metrics { metrics = measured }
         if !panel.isVisible { panel.orderFrontRegardless() }
 
-        let size = isExpanded ? Self.expandedSize : collapsedSize(on: screen)
-        let frame = NSRect(origin: origin(for: size, on: screen), size: size)
-        guard animated else {
-            panel.setFrame(frame, display: true)
+        // Reduced motion: the frame jumps and only the content crossfades (0.12s in
+        // `IslandView`) — no growth, no overshoot.
+        guard animated, !reduceMotion else {
+            stopSpring()
+            spring.reset(to: isExpanded ? 1 : 0)
+            panel.setFrame(frame(progress: spring.value, on: screen), display: true)
             return
         }
-        NSAnimationContext.runAnimationGroup { context in
-            // `spring(response: 0.35, dampingFraction: 0.8)` drives the SwiftUI content
-            // (`IslandView`'s `.animation`) directly; `NSAnimationContext` has no spring
-            // API of its own (only duration + `CAMediaTimingFunction`, a bezier curve),
-            // so the window frame's own motion approximates the same settle time and
-            // near-critical damping with a strong ease-out curve instead.
-            //
-            // Reduced motion still animates, just briefly and linearly: the size change
-            // is the information, and removing it entirely turns a settle into a jump.
-            if reduceMotion {
-                context.duration = Self.reducedMotionDuration
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            } else {
-                context.duration = isExpanded ? Self.expandDuration : Self.collapseDuration
-                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+        spring.parameters = isExpanded ? Self.expandSpring : Self.collapseSpring
+        spring.target = isExpanded ? 1 : 0
+        startSpring()
+    }
+
+    /// Size interpolated between the collapsed and expanded frames by the spring's
+    /// progress — which may overshoot 1 for a moment; the top edge and the horizontal
+    /// centre never move, so the island grows straight down out of the notch.
+    private func frame(progress: CGFloat, on screen: NSScreen) -> NSRect {
+        let from = metrics.collapsedSize
+        let to = metrics.expandedSize(loaded: store.snapshot != nil)
+        let size = CGSize(
+            width: (from.width + (to.width - from.width) * progress).rounded(),
+            height: max(from.height, (from.height + (to.height - from.height) * progress).rounded())
+        )
+        return NSRect(origin: origin(for: size, on: screen), size: size)
+    }
+
+    private func startSpring() {
+        guard springTimer == nil else { return }
+        var last = CACurrentMediaTime()
+        // 120Hz ticks: on a 60Hz panel every frame still gets a fresh value; on
+        // ProMotion none are skipped. Common mode so a tracking menu doesn't stall it.
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+            // Scheduled on the main run loop, so this is already the main thread; a
+            // `Task` hop would cost a frame of latency on every tick.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let now = CACurrentMediaTime()
+                let settled = self.spring.step(dt: now - last)
+                last = now
+                if let panel = self.panel, let screen = self.targetScreen() {
+                    panel.setFrame(self.frame(progress: self.spring.value, on: screen), display: true)
+                }
+                if settled { self.stopSpring() }
             }
-            panel.animator().setFrame(frame, display: true)
         }
+        RunLoop.main.add(timer, forMode: .common)
+        springTimer = timer
+    }
+
+    private func stopSpring() {
+        springTimer?.invalidate()
+        springTimer = nil
     }
 
     private func origin(for size: CGSize, on screen: NSScreen) -> NSPoint {
@@ -323,10 +375,15 @@ final class IslandController: NSObject, ObservableObject {
             guard let panel else { return }
             if panel.frame.contains(NSEvent.mouseLocation) {
                 // Take key focus on the explicit click, so Escape has somewhere to be
-                // delivered. `orderFrontRegardless` keeps the panel from activating the
-                // app as a whole; the user stays in whatever they were doing.
+                // delivered. A `.nonactivatingPanel` becoming key does not activate the
+                // app; the user stays in whatever they were doing.
                 panel.makeKeyAndOrderFront(nil)
-                toggleExpanded()
+                // A click opens a closed island; a click *inside* an open one belongs to
+                // its buttons and must not also close it underneath them.
+                if !isExpanded {
+                    hoverWorkItem?.cancel()
+                    expand()
+                }
             } else if isExpanded {
                 // N5: click-outside-to-collapse — the permission-free counterpart to
                 // Escape, and the gesture people actually reach for first.
@@ -364,11 +421,6 @@ final class IslandController: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    private func toggleExpanded() {
-        hoverWorkItem?.cancel()
-        if isExpanded { collapse() } else { expand() }
-    }
-
     private func expand() {
         guard !isExpanded else { return }
         isExpanded = true
@@ -384,5 +436,50 @@ final class IslandController: NSObject, ObservableObject {
         isExpanded = false
         resignKeyIfNeeded()
         applyFrame(animated: true)
+    }
+}
+
+/// A damped harmonic oscillator for one scalar (the island's open progress, 0…1),
+/// parameterised the way SwiftUI's `spring(response:dampingFraction:)` is so the
+/// numbers mean the same thing here as in a view animation. `NSWindow` has no spring
+/// API of its own, and the window *is* the island's silhouette, so the frame is stepped
+/// by hand. Semi-implicit Euler in fixed 1ms substeps: stable at any tick rate.
+@MainActor
+final class FrameSpring {
+    struct Parameters {
+        var response: Double
+        var dampingFraction: Double
+    }
+
+    var parameters = Parameters(response: 0.4, dampingFraction: 0.8)
+    var target: Double = 0
+    private(set) var value: Double = 0
+    private var velocity: Double = 0
+
+    func reset(to value: Double) {
+        self.value = value
+        target = value
+        velocity = 0
+    }
+
+    /// Advances by `dt` seconds; returns true once at rest on the target (and snaps).
+    func step(dt: Double) -> Bool {
+        let stiffness = pow(2 * .pi / parameters.response, 2)
+        let damping = 4 * .pi * parameters.dampingFraction / parameters.response
+        var remaining = min(dt, 1.0 / 20.0) // a stalled main thread must not fling it
+        let h = 0.001
+        while remaining > 0 {
+            let step = min(h, remaining)
+            let acceleration = -stiffness * (value - target) - damping * velocity
+            velocity += acceleration * step
+            value += velocity * step
+            remaining -= step
+        }
+        if abs(value - target) < 0.0005, abs(velocity) < 0.005 {
+            value = target
+            velocity = 0
+            return true
+        }
+        return false
     }
 }

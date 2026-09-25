@@ -1,63 +1,94 @@
 import SwiftUI
 
-/// Bottom-only rounded corners via a hand-built `Shape`, not `UnevenRoundedRectangle`
-/// (SwiftUI only gained per-corner radii in macOS 14/iOS 17 — this app's minimum is
-/// macOS 13). A quadratic Bézier from each straight edge into the corner, with the
-/// control point placed exactly at the sharp corner it's replacing, reads as a normal
-/// rounded corner at these radii without needing arc-angle/winding-direction math.
-/// `AnyTransition.modifier` needs a concrete `ViewModifier`; `.blur` alone isn't one.
-/// Separate type rather than a closure so the transition can be built in both the
-/// active and identity directions from the same shape.
-struct BlurModifier: ViewModifier {
-    let radius: CGFloat
+/// Everything the island's shape and layout are measured from, derived once per screen
+/// by `IslandController` and shared by the panel frame and the SwiftUI content so the
+/// two can never disagree.
+///
+/// Anatomy, collapsed, on a notched display:
+///
+///     ╮┌──────── wing ───────┬──── notch ────┬─────── wing ────────┐╭
+///      │ ● 2h 14m            │  (camera)     │          1.3M $3.20 │
+///      ╰─────────────────────┴───────────────┴─────────────────────╯
+///
+/// The body is exactly as tall as the hardware notch and straddles it, so the camera
+/// housing disappears into it; the concave *shoulders* flare the top corners out into
+/// the menu bar edge the way the notch itself meets the bezel; content lives only in
+/// the wings. On a display without a notch `notchWidth` is 0 and the same shape hangs
+/// from the bottom of the menu bar.
+struct IslandMetrics: Equatable {
+    var notchWidth: CGFloat
+    var bandHeight: CGFloat
 
-    func body(content: Content) -> some View {
-        content.blur(radius: radius)
+    /// Content room either side of the camera housing.
+    static let wing: CGFloat = 90
+    /// Concave top-corner flare. Kept constant through the animation so the content
+    /// inset never shifts while the window springs.
+    static let shoulder: CGFloat = 6
+    /// Matches the hardware notch's own lower corners, so the pill reads as the notch
+    /// grown sideways rather than a second object stuck to it.
+    static let collapsedBottomRadius: CGFloat = 10
+    static let expandedBottomRadius: CGFloat = 24
+    static let expandedWidth: CGFloat = 404
+    static let bodyHeightLoaded: CGFloat = 248
+    static let bodyHeightMessage: CGFloat = 92
+
+    /// No notch: a plain menu-bar-height tab, same proportions.
+    static let notchless = IslandMetrics(notchWidth: 0, bandHeight: 28)
+
+    var collapsedSize: CGSize {
+        CGSize(width: notchWidth + 2 * Self.wing + 2 * Self.shoulder, height: bandHeight)
+    }
+
+    func expandedSize(loaded: Bool) -> CGSize {
+        CGSize(
+            width: max(Self.expandedWidth, collapsedSize.width),
+            height: bandHeight + (loaded ? Self.bodyHeightLoaded : Self.bodyHeightMessage)
+        )
     }
 }
 
-struct BottomRoundedRectangle: Shape {
-    var radius: CGFloat
+/// Notch silhouette: concave shoulders at the top, rounded lower corners. Quadratic
+/// Béziers whose control points sit on the sharp corners they replace — at these radii
+/// that is visually a circular arc, with no winding-direction bookkeeping.
+struct IslandShape: Shape {
+    var shoulder: CGFloat
+    var bottomRadius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(shoulder, bottomRadius) }
+        set { shoulder = newValue.first; bottomRadius = newValue.second }
+    }
 
     func path(in rect: CGRect) -> Path {
-        let r = min(radius, min(rect.width, rect.height) / 2)
+        let s = min(shoulder, rect.width / 4)
+        let r = max(0, min(bottomRadius, (rect.width - 2 * s) / 2, rect.height - s))
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - r, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY - r),
-            control: CGPoint(x: rect.minX, y: rect.maxY)
-        )
+        path.addQuadCurve(to: CGPoint(x: rect.minX + s, y: rect.minY + s), control: CGPoint(x: rect.minX + s, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX + s, y: rect.maxY - r))
+        path.addQuadCurve(to: CGPoint(x: rect.minX + s + r, y: rect.maxY), control: CGPoint(x: rect.minX + s, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - s - r, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX - s, y: rect.maxY - r), control: CGPoint(x: rect.maxX - s, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - s, y: rect.minY + s))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control: CGPoint(x: rect.maxX - s, y: rect.minY))
         path.closeSubpath()
         return path
     }
 }
 
-/// Content for the floating panel, in both states, plus the onboarding "Done" step's
-/// static preview (`IslandPreview` below) — same shapes and the same shared components
-/// as `PopoverView` (`Avatar`, `PresenceDot`, `SectionLabel`, `Format`), because this is
-/// a second window onto the same data, not a second design. The four data sections
-/// (header/Now/Today/friends) and the shared components are reused as-is; the
-/// *container* views are Island's own, not literally `PopoverView`'s private view
-/// builders, because Island is always dark regardless of system appearance while the
-/// popover follows it — sharing those methods directly would need a colour-scheme
-/// parameter threaded through `PopoverView` itself, which is out of scope here.
+/// The panel's content. The panel *window* is what springs (`IslandController`); this
+/// view just fills whatever frame it is given:
 ///
-/// Always dark, regardless of the system appearance: like the hardware notch it hugs,
-/// the island reads as a fixed black plate in both light and dark mode — `PresenceDot`/
-/// `SectionLabel`'s `.secondary`/`.tertiary` foreground styles need `.preferredColorScheme
-/// (.dark)` here so they resolve to their dark-appropriate (light-on-dark) values even
-/// when the rest of the system is in Light mode.
+/// - the shape fills the window, its lower radius eased from notch-sized to card-sized
+///   by how far the window has grown, so the silhouette morphs rather than swaps;
+/// - the band (the collapsed content) never moves or fades — it stays pinned beside the
+///   notch while the body is revealed beneath it, the way a Dynamic Island keeps its
+///   live activity in place as it opens;
+/// - the body is laid out at full expanded size from the start and simply uncovered by
+///   the growing window, then faded in, so nothing reflows mid-spring.
 ///
-/// Bottom corners only: the panel is flush against the screen's top edge in both
-/// states (`IslandController` anchors it there), so rounding the top corners would look
-/// like the shape floating above its own cut line instead of growing out of it.
+/// Pure black, not 92%: anything lighter than the camera housing shows the hardware
+/// notch as a darker rectangle inside the island. Always dark, like the notch itself.
 struct IslandView: View {
     @ObservedObject var store: StatusStore
     @ObservedObject var settings: AppSettings
@@ -65,206 +96,246 @@ struct IslandView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            if controller.isExpanded {
-                expanded.transition(contentTransition)
-            } else {
-                IslandPill(store: store).transition(contentTransition)
+        let metrics = controller.metrics
+        GeometryReader { proxy in
+            let collapsed = metrics.collapsedSize
+            let target = metrics.expandedSize(loaded: store.snapshot != nil)
+            let span = max(1, target.height - collapsed.height)
+            let t = min(1, max(0, (proxy.size.height - collapsed.height) / span))
+            let shape = IslandShape(
+                shoulder: IslandMetrics.shoulder,
+                bottomRadius: IslandMetrics.collapsedBottomRadius
+                    + (IslandMetrics.expandedBottomRadius - IslandMetrics.collapsedBottomRadius) * t
+            )
+            ZStack(alignment: .top) {
+                shape.fill(Color.black)
+                VStack(spacing: 0) {
+                    IslandBand(store: store, metrics: metrics, expanded: controller.isExpanded)
+                    IslandBody(store: store, settings: settings)
+                        .frame(width: target.width - 2 * IslandMetrics.shoulder, height: target.height - metrics.bandHeight, alignment: .top)
+                        .opacity(controller.isExpanded ? 1 : 0)
+                        .scaleEffect(controller.isExpanded || reduceMotion ? 1 : 0.97, anchor: .top)
+                        .animation(bodyAnimation, value: controller.isExpanded)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
+            .clipShape(shape)
         }
-        .background(shape.fill(Color.black.opacity(0.92)))
-        .clipShape(shape)
-        .preferredColorScheme(.dark)
-        .animation(contentAnimation, value: controller.isExpanded)
+        .environment(\.colorScheme, .dark)
     }
 
-    /// Never from `scale(0)`: nothing in the physical world appears out of nothing, and
-    /// a card unfolding from a zero-size point reads as a glitch rather than a growth.
-    /// 0.95 is enough to imply the motion and small enough not to look like a bounce.
-    ///
-    /// The blur is doing real work, not decoration. Without it a crossfade shows two
-    /// legible-but-different layouts overlapping — the pill's two clusters and the card's
-    /// header — and the eye resolves that as two objects swapping. 2pt is enough to stop
-    /// either being readable mid-transition, so the pair reads as one shape changing.
-    /// Kept at 2pt because blur is expensive and this runs over whatever is underneath.
-    private var contentTransition: AnyTransition {
-        if reduceMotion {
-            // Reduced motion: opacity only. The size change is still visible (the window
-            // frame animates, briefly, in IslandController) but nothing scales or blurs.
-            return .opacity
-        }
-        return .opacity.combined(with: .scale(scale: 0.95)).combined(with: .modifier(
-            active: BlurModifier(radius: 2),
-            identity: BlurModifier(radius: 0)
-        ))
-    }
-
-    /// Contract: `spring(response: 0.35, dampingFraction: 0.8)` for the content swap;
-    /// `NSAnimationContext` (`IslandController.applyFrame`) drives the window frame
-    /// itself, since `NSWindow` has no spring API of its own — see the comment there.
-    ///
-    /// Collapse is quicker than expand, matching the window-frame durations on the
-    /// controller side: opening is what the user is waiting for, closing is the panel
-    /// getting out of the way and should not be savoured.
-    private var contentAnimation: Animation {
+    /// In: a beat after the window starts to grow, so the text arrives into space that
+    /// already exists. Out: immediately and quicker, so it is gone before the edges pass it.
+    private var bodyAnimation: Animation {
         if reduceMotion { return .easeOut(duration: 0.12) }
-        return controller.isExpanded
-            ? .spring(response: 0.35, dampingFraction: 0.8)
-            : .spring(response: 0.2, dampingFraction: 0.9)
+        return controller.isExpanded ? .easeOut(duration: 0.22).delay(0.07) : .easeIn(duration: 0.1)
+    }
+}
+
+/// The collapsed content: two wings, one either side of the camera housing, and a
+/// fixed gap exactly the notch's width between them — nothing is ever drawn under it.
+///
+/// Open, the card below already prints today's numbers with labels, so the wings swap
+/// to who and how — avatar and name, presence in words — instead of repeating them.
+struct IslandBand: View {
+    @ObservedObject var store: StatusStore
+    let metrics: IslandMetrics
+    var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
+                leading.opacity(showIdentity ? 0 : 1)
+                if let me = store.snapshot {
+                    identity(me).opacity(showIdentity ? 1 : 0)
+                }
+            }
+            .padding(.leading, 12)
+            .frame(width: IslandMetrics.wing, alignment: .leading)
+            Color.clear.frame(width: metrics.notchWidth)
+            ZStack(alignment: .trailing) {
+                trailing.opacity(showIdentity ? 0 : 1)
+                if let me = store.snapshot {
+                    Text(Format.statusLabel(me.presence.status))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .fixedSize()
+                        .opacity(showIdentity ? 1 : 0)
+                }
+            }
+            .padding(.trailing, 12)
+            .frame(width: IslandMetrics.wing, alignment: .trailing)
+        }
+        .frame(height: metrics.bandHeight)
+        .foregroundStyle(.white)
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : .easeInOut(duration: 0.2), value: showIdentity)
     }
 
-    private var shape: BottomRoundedRectangle {
-        BottomRoundedRectangle(radius: 16)
+    private var showIdentity: Bool { expanded && store.snapshot != nil }
+
+    private func identity(_ me: TrackerMe) -> some View {
+        let name = me.user.displayName ?? me.user.username
+        return HStack(spacing: 6) {
+            Avatar(url: me.user.avatarUrl, name: name, size: 18)
+            Text(name.split(separator: " ").first.map(String.init) ?? name)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
     }
 
-    private var expanded: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    @ViewBuilder
+    private var leading: some View {
+        if let me = store.snapshot {
+            // Live: the same `liveActiveSeconds` tick the popover and menu bar use.
+            HStack(spacing: 6) {
+                PresenceDot(status: me.presence.status, size: 7)
+                Text(Format.compactDuration(seconds: store.liveActiveSeconds ?? me.today.activeSeconds))
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        } else {
+            // The app's own mark stands in for presence until there is one; dimmed
+            // when the problem is the connection, not the account.
+            BrandMark(size: 14, style: AnyShapeStyle(Color.white.opacity(store.phase == .loading || store.phase == .needsToken ? 0.9 : 0.45)))
+        }
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        switch store.phase {
+        case .loaded(let me):
+            HStack(spacing: 6) {
+                // Nullable (checkpoint §M.1): an em-dash, never 0; the accessibility
+                // label carries B7's words, which the pill has no room to print.
+                Text(Format.optionalCount(me.today.tokens))
+                    .accessibilityLabel(me.today.tokens.map { "\(Format.compactCount($0)) tokens" } ?? Format.tokensLabel(nil))
+                // An em-dash when today's models have no verified price, never $0.00.
+                Text(Format.optionalUsd(me.today.estimatedUsd))
+                    .foregroundStyle(Color.white.opacity(0.55))
+            }
+            .font(.system(size: 12, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(Color.white.opacity(0.85))
+            .lineLimit(1)
+            .fixedSize()
+        case .loading:
+            Capsule().fill(Color.white.opacity(0.18)).frame(width: 30, height: 6)
+        case .needsToken:
+            Text("Sign in")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.6))
+                .fixedSize()
+        case .failed:
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.55))
+                .accessibilityLabel("Offline")
+        }
+    }
+}
+
+/// What the island shows once open. Your own name is not here — it is your Mac — so the
+/// card spends its room on now, today and friends.
+struct IslandBody: View {
+    @ObservedObject var store: StatusStore
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        Group {
             switch store.phase {
             case .loaded(let me):
-                header(me)
-                Divider().overlay(Color.white.opacity(0.15))
-                nowRow(me)
-                todayRow(me)
-                friendsRow(me)
-                Spacer(minLength: 0)
-                Divider().overlay(Color.white.opacity(0.15))
-                footer
+                loaded(me)
             case .loading:
-                // Shape-matched to the loaded state: an avatar-sized circle and two
-                // bars where the name and the Now line will land, so nothing jumps
-                // sideways when real data replaces it.
-                loadingSkeleton
-            case .needsToken:
-                // Previously shared the `.loading` branch, which left a signed-out user
-                // watching a skeleton that could never resolve. This is a terminal
-                // state with an action, not a wait.
-                statusMessage(
-                    symbol: "person.crop.circle.badge.plus",
-                    title: "Not connected",
-                    detail: "Open VibeHub from the menu bar to add your token."
-                )
-            case .failed:
-                statusMessage(
-                    symbol: "antenna.radiowaves.left.and.right.slash",
-                    title: "Can't reach VibeHub",
-                    detail: "Retrying on its own."
-                )
-            }
-        }
-        .padding(14)
-        .frame(width: 420, height: 260, alignment: .topLeading)
-    }
-
-    /// Same geometry as `header` + `nowRow`, so the transition from skeleton to content
-    /// is a fill, not a relayout.
-    private var loadingSkeleton: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Circle().fill(Color.white.opacity(0.12)).frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: 4) {
-                    SkeletonBar(width: 120, height: 11)
-                    SkeletonBar(width: 64, height: 9)
+                VStack(alignment: .leading, spacing: 8) {
+                    SkeletonBar(width: 220, height: 11)
+                    SkeletonBar(width: 120, height: 9)
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            case .needsToken:
+                message(symbol: "person.crop.circle.badge.plus", title: "Not signed in", detail: "Open VibeHub from the menu bar to connect this Mac.")
+            case .failed:
+                message(symbol: "wifi.slash", title: "Can\u{2019}t reach VibeHub", detail: "Retrying on its own.")
             }
-            SectionLabel(text: "Now")
-            SkeletonBar(width: 220, height: 11)
-            SkeletonBar(width: 70, height: 9)
         }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 14)
     }
 
-    /// One shape for every terminal non-loaded state, each with its own symbol and its
-    /// own sentence — `needsToken` and `failed` are different problems and must not look
-    /// like the same one (or like loading).
-    private func statusMessage(symbol: String, title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 7) {
-                Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(.secondary)
-                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-            }
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func header(_ me: TrackerMe) -> some View {
-        HStack(spacing: 8) {
-            Avatar(url: me.user.avatarUrl, name: me.user.displayName ?? me.user.username, size: 28)
-            Text(me.user.displayName ?? me.user.username)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            PresenceDot(status: me.presence.status)
+    private func loaded(_ me: TrackerMe) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            now(me)
+            today(me)
+            friends(me)
             Spacer(minLength: 0)
+            footer
         }
     }
 
-    /// Live: the elapsed-since-activity-started line ticks off `store.now` exactly
-    /// like `PopoverView.nowBlock` — this is one of the "live timers" the panel needs,
-    /// alongside `todayRow`'s ticking "active" stat and the collapsed pill's own time.
-    private func nowRow(_ me: TrackerMe) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func now(_ me: TrackerMe) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             SectionLabel(text: "Now")
             if let activity = me.presence.activity {
-                Text(Format.activityLine(activity)).font(.system(size: 12)).foregroundStyle(.white).lineLimit(1)
-                Text(Format.elapsedShort(since: activity.since, now: store.now))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(Format.activityLine(activity))
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Text(Format.elapsedShort(since: activity.since, now: store.now))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
             } else {
                 Text(me.tracker.connected ? "Nothing open right now." : "Tracker offline.")
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    /// The ≈$ slot is always present. A null `estimatedUsd` means "today's models have
-    /// no verified price", which renders as an em-dash — not as `$0.00` (a false claim
-    /// that the work was free) and not by dropping the column (which would make the row
-    /// change shape depending on which models someone used).
-    private func todayRow(_ me: TrackerMe) -> some View {
-        HStack(spacing: 16) {
-            stat(Format.compactDuration(seconds: store.liveActiveSeconds ?? me.today.activeSeconds), "active")
-            // Nullable on the wire (checkpoint §M.1); B7 wording when null — "tokens not
-            // reported", never 0, never an estimate.
+    /// The ≈$ slot is always present — an em-dash when there is no verified price,
+    /// never $0.00 and never a missing column that changes the row's shape.
+    private func today(_ me: TrackerMe) -> some View {
+        HStack(spacing: 0) {
+            stat(Format.compactDuration(seconds: store.liveActiveSeconds ?? me.today.activeSeconds), "active today")
             stat(Format.optionalCount(me.today.tokens), Format.tokensLabel(me.today.tokens))
-            stat(Format.optionalUsd(me.today.estimatedUsd), "\u{2248}$")
+            stat(Format.optionalUsd(me.today.estimatedUsd), "\u{2248} spend")
         }
     }
 
     private func stat(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(value).font(.system(size: 13, weight: .medium)).foregroundStyle(.white).monospacedDigit()
-            Text(label).font(.system(size: 9)).foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Names and tools, not just avatars — mirrors `PopoverView.friendsBlock`.
-    /// `.prefix(3)`, tighter than the popover's uncapped list: this card's total
-    /// height is fixed at 260, and each named row costs more vertical space than the
-    /// small overlapping-avatar strip this replaced.
-    private func friendsRow(_ me: TrackerMe) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            SectionLabel(text: "Friends online: \(me.friendsOnline.count)")
+    /// Three at most: the card's height is fixed so the window has a spring target.
+    private func friends(_ me: TrackerMe) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            SectionLabel(text: me.friendsOnline.count == 1 ? "1 friend online" : "\(me.friendsOnline.count) friends online")
             if me.friendsOnline.sample.isEmpty {
-                Text("Nobody's coding right now.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Nobody\u{2019}s coding right now.").font(.system(size: 12)).foregroundStyle(.secondary)
             } else {
                 ForEach(me.friendsOnline.sample.prefix(3)) { friend in
-                    HStack(spacing: 6) {
+                    HStack(spacing: 7) {
                         Avatar(url: friend.avatarUrl, name: friend.displayName ?? friend.username, size: 18)
                         Text(friend.displayName ?? friend.username)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 12))
                             .lineLimit(1)
                         PresenceDot(status: friend.status, size: 6)
-                        Spacer(minLength: 0)
+                        Spacer(minLength: 8)
                         if let activity = friend.activity {
                             Text(Format.toolLabel(activity.tool))
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
@@ -273,125 +344,76 @@ struct IslandView: View {
         }
     }
 
-    /// Deliberately not `PopoverView`'s full action list: "Copy tracker token" and
-    /// "Quit" stay popover-only — a decorative always-on-top panel is the wrong place
-    /// to expose sign-out/quit.
+    /// Popover-only: token, sign-out and Quit — an always-on-top panel is the wrong
+    /// place for account management.
     private var footer: some View {
-        HStack(spacing: 16) {
-            footerButton("Open VibeHub", symbol: "arrow.up.forward.app") {
+        HStack(spacing: 6) {
+            IslandButton(title: "Open VibeHub", symbol: "arrow.up.right") {
                 NSWorkspace.shared.open(settings.webUrl)
             }
-            footerButton("Settings", symbol: "gearshape") {
+            IslandButton(title: "Settings", symbol: "gearshape") {
                 NSWorkspace.shared.open(settings.webUrl.appendingPathComponent("settings"))
             }
             Spacer(minLength: 0)
         }
     }
 
-    private func footerButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 11))
-                Text(title).font(.system(size: 11))
+    private func message(symbol: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.85))
+        .frame(maxHeight: .infinity, alignment: .center)
     }
 }
 
-/// The collapsed, notch-hugging pill: left cluster is presence + today's time, right
-/// cluster is tokens (plus ≈$ once the server sends it) — flanking the actual hardware
-/// notch, which sits in the flexible gap between them. The panel's own width is exactly
-/// `notch width + 168` (`IslandController.collapsedSize`), so filling it edge-to-edge
-/// here (rather than sizing to fit) is what keeps the two clusters correctly straddling
-/// the notch instead of drifting to one side.
-struct IslandPill: View {
-    @ObservedObject var store: StatusStore
+/// A quiet capsule button for the dark card: hover is a lightness step, never a hue.
+private struct IslandButton: View {
+    let title: String
+    let symbol: String
+    let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            switch store.phase {
-            case .loaded(let me):
-                leftCluster(me)
-                Spacer(minLength: 0)
-                rightCluster(me)
-            case .loading, .needsToken, .failed:
-                // One glyph for all three read as "something is wrong, or maybe not" —
-                // at pill size the symbol is the entire message, so each state gets its
-                // own. Dimmed for the two that need the user, full strength while
-                // loading, since only one of them is a problem.
-                Spacer(minLength: 0)
-                if store.phase == .loading {
-                    // The app's own mark (Lumi: the real mark, not a system chevron),
-                    // full strength — loading is not a problem state.
-                    BrandMark(size: 12, style: AnyShapeStyle(.white))
-                } else {
-                    Image(systemName: placeholderSymbol)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
+                Text(title).font(.system(size: 12, weight: .medium))
             }
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(Capsule().fill(Color.white.opacity(hovering ? 0.16 : 0.09)))
+            .contentShape(Capsule())
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity)
-    }
-
-    /// Distinct per state (Lumi): the app mark while loading (drawn by `BrandMark`, not
-    /// listed here), a "add your account" badge when there is no token, a struck-through
-    /// antenna when the server is unreachable — matching the symbols the expanded card
-    /// uses for the same states, so hovering explains the pill rather than introducing a
-    /// new vocabulary.
-    private var placeholderSymbol: String {
-        switch store.phase {
-        case .needsToken: return "person.crop.circle.badge.plus"
-        case .failed: return "antenna.radiowaves.left.and.right.slash"
-        case .loading, .loaded: return "circle.dotted"
-        }
-    }
-
-    /// Live: same `store.liveActiveSeconds` tick the popover's Today stat uses.
-    private func leftCluster(_ me: TrackerMe) -> some View {
-        HStack(spacing: 5) {
-            PresenceDot(status: me.presence.status, size: 6)
-            Text(Format.compactDuration(seconds: store.liveActiveSeconds ?? me.today.activeSeconds))
-                .font(.system(size: 11, weight: .medium))
-                .monospacedDigit()
-        }
-    }
-
-    private func rightCluster(_ me: TrackerMe) -> some View {
-        HStack(spacing: 5) {
-            // Nullable (checkpoint §M.1): the pill has no room for B7's words, so the
-            // slot shows the same em-dash the ≈$ slot uses and the accessibility label
-            // carries "tokens not reported"; the expanded card and the popover spell it out.
-            Text(Format.optionalCount(me.today.tokens))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .accessibilityLabel(me.today.tokens.map { "\(Format.compactCount($0)) tokens" } ?? Format.tokensLabel(nil))
-            // Same rule as the expanded card: an em-dash when today's models have no
-            // verified price, never a fabricated $0.00.
-            Text(Format.optionalUsd(me.today.estimatedUsd))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.white.opacity(0.9))
+        .onHover { hovering = $0 }
     }
 }
 
-/// Non-interactive taste of the collapsed pill, for the onboarding "Done" step. Fixed
-/// 168pt width there (no real screen/notch to measure against in that context).
+/// A still of the collapsed island around a drawn notch, for onboarding's last step.
+/// The notch is narrower than a real one so the preview fits the window's measure.
 struct IslandPreview: View {
     @ObservedObject var store: StatusStore
 
+    private let metrics = IslandMetrics(notchWidth: 96, bandHeight: 32)
+
     var body: some View {
-        IslandPill(store: store)
-            .frame(width: 168, height: 32)
-            .background(BottomRoundedRectangle(radius: 16).fill(Color.black.opacity(0.92)))
-            .clipShape(BottomRoundedRectangle(radius: 16))
-            .preferredColorScheme(.dark)
+        IslandBand(store: store, metrics: metrics)
+            .padding(.horizontal, IslandMetrics.shoulder)
+            .frame(width: metrics.collapsedSize.width, height: metrics.bandHeight)
+            .background(IslandShape(shoulder: IslandMetrics.shoulder, bottomRadius: IslandMetrics.collapsedBottomRadius).fill(Color.black))
+            .environment(\.colorScheme, .dark)
+            .accessibilityElement(children: .combine)
     }
 }

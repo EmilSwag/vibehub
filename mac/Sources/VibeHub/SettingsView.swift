@@ -16,35 +16,49 @@ struct SettingsView: View {
     @State private var launchError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("Settings").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button(action: onClose) {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.primary.opacity(0.07)))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .help("Back")
             }
 
-            VStack(alignment: .leading, spacing: 5) {
-                SectionLabel(text: "Tracker token")
-                SecureField(store.token == nil ? "Not set" : "Replace token", text: $token)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
-                    .onSubmit(saveToken)
-                HStack(spacing: 8) {
-                    Button(isVerifying ? "Verifying\u{2026}" : "Save", action: saveToken)
+            section("Account") {
+                HStack(spacing: 6) {
+                    SecureField(store.token == nil ? "Paste your device token" : "Paste a new token", text: $token)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .onSubmit(saveToken)
+                    Button(isVerifying ? "Checking\u{2026}" : "Save", action: saveToken)
                         .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if store.token != nil {
-                        // N1(b): "Clear" used to delete the Keychain entry and nothing
-                        // else, leaving a credentialed daemon running under a supervisor
-                        // that would restart it at every login — the app forgot the
-                        // account, the machine did not. Sign out is the whole operation:
-                        // stop the daemon, release this device's connection receipt, drop
-                        // the tracker's own config, remove the LaunchAgent and the login
-                        // item, then clear the Keychain.
-                        Button(tracker.isBusy ? "Signing out\u{2026}" : "Sign out") {
+                }
+                if let savedNote {
+                    Text(savedNote).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                if store.token != nil {
+                    // N1(b): Sign out is the whole operation — stop the daemon, release
+                    // this device's connection receipt, drop the tracker's own config,
+                    // remove the LaunchAgent and the login item, then clear the Keychain.
+                    // The machine forgets the account, not just the app.
+                    HStack(spacing: 14) {
+                        // Moved here from the popover's main list: a power-user action
+                        // does not need a permanent row in the everyday menu.
+                        Button("Copy Token") {
+                            guard let current = store.token else { return }
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(current, forType: .string)
+                            savedNote = "Token copied."
+                        }
+                        .help("Copies this Mac\u{2019}s device token.")
+                        Button(tracker.isBusy ? "Signing out\u{2026}" : "Sign Out of This Mac") {
                             Task {
                                 await tracker.signOut()
                                 token = ""
@@ -54,124 +68,110 @@ struct SettingsView: View {
                         }
                         .disabled(tracker.isBusy)
                     }
-                }
-                .buttonStyle(.bordered)
-                .font(.system(size: 12))
-                if let savedNote {
-                    Text(savedNote).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                 }
             }
 
             Divider()
 
-            Toggle("Show today's time in the menu bar", isOn: $settings.showTimeInBar)
-                .font(.system(size: 12))
-                .toggleStyle(.switch)
-                .controlSize(.small)
+            section("General") {
+                switchRow("Time in the menu bar", isOn: $settings.showTimeInBar)
 
-            // Lumi: "Track at login" silently also flipped "Launch at login", so turning
-            // one on moved a switch the user never touched and the pair could disagree.
-            // They are one decision — "start with my Mac" — and are now one switch that
-            // says what it does. `TrackerManager.enableTrackAtLogin`/`disable…` own both
-            // halves (the tracker's LaunchAgent and the app's login registration), which
-            // is also what makes Off durable (FC5).
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Toggle("Start with my Mac", isOn: Binding(
+                // One switch, because it is one decision: the tracker's LaunchAgent
+                // and the app's login item together (Lumi; N7). The enable/disable
+                // calls own both halves, which is also what makes Off durable (FC5).
+                switchRow(
+                    "Start with my Mac",
+                    isOn: Binding(
                         get: { tracker.isTrackAtLoginEnabled },
                         set: { enabled in Task { await setTrackAtLogin(enabled) } }
-                    ))
-                    .font(.system(size: 12))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(tracker.isBusy || store.token == nil)
-
-                    // Lumi: there was no in-flight state at all — `launchctl bootstrap`
-                    // plus a `login` round trip is seconds of nothing happening.
-                    if tracker.isBusy {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-
-                Text("Runs the tracker and reopens VibeHub after a reboot, even while the app is closed. Turning this off keeps it off \u{2014} including across updates.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    ),
+                    busy: tracker.isBusy,
+                    disabled: tracker.isBusy || store.token == nil
+                )
+                Text(store.token == nil
+                     ? "Connect an account first."
+                     : "Keeps tracking after a restart. Off stays off, even after updates.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if store.token == nil {
-                    Text("Add a token above first.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-
-                // Lumi: errors were styled as ordinary body text and read as description.
-                // A failure gets a symbol and full-strength weight so it is distinguishable
-                // from the tertiary explanatory line directly above it — no hue, because
-                // presence is the only colour this product uses (emil design-eng, strict
-                // monochrome; the same reason the done-tick in onboarding is not green).
+                // A failure gets a symbol and full weight so it can't pass for the
+                // caption above it — no hue: presence is the product's only colour.
                 if let message = tracker.lastActionError ?? tracker.launchAtLoginError ?? launchError {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                HStack {
+                    Text("Island").font(.system(size: 12))
+                    Spacer()
+                    Picker("Island", selection: $settings.islandMode) {
+                        ForEach(IslandMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                }
             }
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 5) {
-                SectionLabel(text: "Island")
-                Picker("", selection: $settings.islandMode) {
-                    ForEach(IslandMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
+            // Read-only facts. How to override the servers is documented in the README,
+            // not printed at everyone who opens Settings.
+            section("This Mac") {
+                infoRow("Server", settings.baseURL.host ?? settings.baseURL.absoluteString)
+                    .help(settings.baseURL.absoluteString)
+                infoRow("Web", settings.webUrl.host ?? settings.webUrl.absoluteString)
+                    .help(settings.webUrl.absoluteString)
+                if let devices = store.snapshot?.tracker.devices, !devices.isEmpty {
+                    infoRow(devices.count == 1 ? "Device" : "Devices", devices.map(\.name).joined(separator: ", "))
                 }
-                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(text: title)
+            content()
+        }
+    }
+
+    /// Label left, switch right — the macOS Settings arrangement — so a row of
+    /// switches lines up down one edge instead of trailing each label.
+    private func switchRow(_ title: String, isOn: Binding<Bool>, busy: Bool = false, disabled: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            Text(title).font(.system(size: 12))
+            Spacer(minLength: 8)
+            // `launchctl bootstrap` plus a `login` round trip is seconds of nothing
+            // happening; say so beside the switch (Lumi).
+            if busy { ProgressView().controlSize(.small) }
+            Toggle(title, isOn: isOn)
                 .labelsHidden()
-                Text("The floating panel beside the notch.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(disabled)
+        }
+    }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 2) {
-                SectionLabel(text: "Server")
-                Text(settings.baseURL.absoluteString)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("Override: defaults write com.vibehub.menubar BaseURL \"…\"")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                SectionLabel(text: "Web")
-                Text(settings.webUrl.absoluteString)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("Override: defaults write com.vibehub.menubar WebURL \"…\"")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-            }
-
-            if let devices = store.snapshot?.tracker.devices, !devices.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    SectionLabel(text: "Devices")
-                    ForEach(devices, id: \.name) { device in
-                        Text(device.name)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
         }
     }
 

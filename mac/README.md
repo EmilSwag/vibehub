@@ -9,10 +9,13 @@ install. macOS 13+, no Swift package dependencies (URLSession + Codable only).
 - **Menu bar item** — the VibeHub mark as a template glyph, plus today's active time if
   you leave that toggle on. Click it for the popover: header, Now, Today (time, tokens,
   ≈$), Friends online, and actions.
-- **Island** — a small panel that hugs the notch (below the menu bar, top-centre, on a
-  Mac without one). Collapsed: presence dot · today's time · tokens/≈$. Hover to
-  spring-expand into a card with the same data as the popover; it auto-collapses on
-  mouse-out, on a click outside, or on Escape after you have clicked it. Setting:
+- **Island** — a black panel shaped like the notch and exactly as tall as it, straddling
+  it so the camera housing disappears inside (below the menu bar, top-centre, on a Mac
+  without one). Collapsed, content sits only in the two wings beside the notch: presence
+  dot + today's time on the left, tokens + ≈$ on the right. Hover (or click) and the
+  window itself springs open into a card — Now, Today, friends, Open/Settings — while
+  the band swaps to your name and presence; it closes on mouse-out, a click outside, or
+  Escape after you have clicked it. A click inside an open island never closes it. Setting:
   **Auto** (shows once there's something to show) / **Always** / **Off**. It hides on a
   display that is running a full-screen app.
 - **The tracker** — `vibehub-tracker.cjs` and a private Node runtime ship inside
@@ -53,8 +56,9 @@ register a login item for an app running from `~/Downloads`, a disk image or `.b
 
 ## First run
 
-Welcome → click "Connect in Browser" to pair with one click → Start tracking → Done.
-(Manual device key entry from Settings → Tracker is also supported if needed).
+Welcome → Connect this Mac ("Connect in Browser", or "Use a token instead") → Start
+Tracking → Done. A returning, signed-out user gets the same connect controls in the
+popover; a replacement token can also be pasted in Settings → Account.
 The app verifies the token against the server before saving it anywhere; then it goes
 into the login Keychain (this device only, never synced) and, via the embedded CLI's
 `login --token-stdin`, into the tracker's own `~/.vibehub/config.json`. It is never placed
@@ -87,6 +91,22 @@ defaults write com.vibehub.menubar WebURL "http://localhost:3000"
 
 Restart the app afterwards; it reads these once at launch.
 
+## Visual QA (DEBUG builds only)
+
+```bash
+bash scripts/swiftc-build.sh arm64 debug .build/swiftc/arm64-debug   # or: swift build
+.build/swiftc/arm64-debug/VibeHub --snapshot ../.temp/qa/mac/after  # 35 @2x PNGs
+.build/swiftc/arm64-debug/VibeHub --qa-island loaded [--expanded | --qa-cycle]
+```
+
+`--snapshot` renders the island (collapsed + expanded, alone and over a drawn notch at
+this screen's real geometry) for loaded/loading/needsToken/failed, the popover in every
+state light + dark, Settings, and every onboarding step. `--qa-island` puts the real
+panel on the real screen; `--qa-cycle` opens/closes it every 3s and logs the window's
+frame per tick to stderr. Both run on fixtures: no Keychain, no network, a throwaway
+`com.vibehub.qa` defaults suite, a tracker that refuses every mutating call — nothing
+can touch the real install. None of it is compiled into release builds.
+
 ## Upgrades
 
 A pkg upgrade replaces the embedded Node runtime and tracker bundle underneath a
@@ -97,13 +117,19 @@ the job. If tracking was turned off, an upgrade leaves it off.
 ## Build from source
 
 Requires the Xcode toolchain (`swift`, `iconutil`, `codesign`, `pkgbuild`,
-`productbuild`, `lipo`). No Python.
+`productbuild`, `lipo`). No Python. Command Line Tools alone are enough.
+
+If `swift build` itself dies in dyld (seen 2026-09-25 on a CLT whose `swift-package`
+and `usr/lib/swift/pm/*.framework` came from different releases), `bundle.sh` falls
+back to `scripts/swiftc-build.sh` — a direct `swiftc` build of the one target — and
+`scripts/select-sdk.sh` picks an SDK whose Swift interfaces match the compiler (a CLT
+can carry a newer beta SDK than its `swiftc` can read). CI never takes that path.
 
 ```bash
 swift run                          # iterate locally — UI only, no embedded tracker
 swift build -c release             # binary only
-./scripts/bundle.sh                # universal .app + zip in dist/, tracker embedded
-./scripts/make-pkg.sh              # dist/VibeHub.pkg + .sha256 (needs bundle.sh first)
+bash scripts/bundle.sh             # universal .app + zip in dist/, tracker embedded
+bash scripts/make-pkg.sh           # dist/VibeHub.pkg + .sha256 (needs bundle.sh first)
 ```
 
 `bundle.sh` builds both architectures (`swift build --arch arm64` / `--arch x86_64`),
@@ -187,8 +213,14 @@ daemon reached the server — never that an AI tool is in use.
 
 ## What only a real Mac can verify
 
-Nothing in this directory has been compiled or run where it was written; CI on
-`macos-14` is the first compiler it meets. Beyond a green build: pkg install → token
+Verified on a real MacBook Air (M2, notch 179×32pt, 2026-09-25): the sources compile
+clean; `bundle.sh` → universal app, embedded Node verified and lipo'd, signature valid;
+`make-pkg.sh` → `VibeHub.pkg` (not installed); the island sits flush on the notch at
+the right frame and its window springs open/closed. Known: an ad-hoc build that differs
+from the one that saved the token raises a Keychain prompt on first launch, and the app
+shows nothing until it is answered (the token read is synchronous at launch).
+
+Still open: pkg install → token
 prompt → Start → tracker survives reboot → Island shows data; Island placement on
 notched, notchless and multi-display setups; hover/click delivery to a
 `.nonactivatingPanel`; Escape after a click; the upgrade repair; and signing/notarisation
