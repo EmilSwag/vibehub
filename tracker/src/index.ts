@@ -425,6 +425,8 @@ autostart
     } else if (state.owner === "other-install") {
       console.log("Note:      it belongs to another VibeHub install (the Mac app, or a tracker elsewhere).");
       console.log("           Manage autostart from that install; this one will not overwrite it.");
+    } else if (state.managedByApp) {
+      console.log("Note:      the VibeHub app manages it. Turn \"Track at login\" on or off there.");
     } else if (state.exists && !state.current) {
       console.log("Note:      it points at an older install. Run `vibehub-tracker autostart enable` to refresh it.");
     }

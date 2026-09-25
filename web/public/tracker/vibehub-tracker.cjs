@@ -2448,6 +2448,9 @@ function namesThisInstall(body, env) {
 function classifyOwner(body, env) {
   return namesThisInstall(body, env) ? "ours" : env.platform === "darwin" ? /vibehub/i.test(body) ? "other-install" : "foreign" : body.includes(AUTOSTART_MARK) ? "other-install" : "foreign";
 }
+function writtenByMacApp(body, env) {
+  return env.platform === "darwin" && !body.includes(AUTOSTART_MARK) && /\.app[\\/]Contents[\\/]/i.test(body);
+}
 function describeInstall(body) {
   let line = body.split(/\r?\n/).find((entry) => /vibehub-tracker\.cjs|index\.js/.test(entry));
   return line === void 0 ? "path unknown" : line.replace(/<\/?string>/g, "").replace(/^\s*Exec=/, "").trim().slice(0, 160);
@@ -2479,7 +2482,10 @@ function planFor(mode, env) {
     if (mode === "disable")
       return refuse(`${rendered.file} points at a VibeHub tracker installed elsewhere (${describeInstall(body)}). Leaving it alone; disable it from that install.`);
   }
-  return mode === "disable" ? { ...base, supported: !0, file: rendered.file, existed, owner, changed: existed, blocked: null } : {
+  if (mode === "disable")
+    return { ...base, supported: !0, file: rendered.file, existed, owner, changed: existed, blocked: null };
+  let appManaged = owner === "ours" && current !== null && writtenByMacApp(current, env);
+  return {
     ...base,
     supported: !0,
     file: rendered.file,
@@ -2487,7 +2493,7 @@ function planFor(mode, env) {
     encoding: rendered.encoding,
     existed,
     owner,
-    changed: current !== rendered.text,
+    changed: !appManaged && current !== rendered.text,
     blocked: null
   };
 }
@@ -2554,6 +2560,7 @@ function autostartStatus(env, optedOut) {
     exists: !1,
     owner: "none",
     current: !1,
+    managedByApp: !1,
     optedOut,
     command: autostartCommand(env),
     problem: null
@@ -2567,7 +2574,9 @@ function autostartStatus(env, optedOut) {
   if (rendered === null) return base;
   try {
     let body = readArtifact(rendered.file);
-    return body === null ? base : { ...base, exists: !0, owner: classifyOwner(body, env), current: body === rendered.text };
+    if (body === null) return base;
+    let owner = classifyOwner(body, env), managedByApp = writtenByMacApp(body, env), current = owner === "ours" && managedByApp ? !0 : body === rendered.text;
+    return { ...base, exists: !0, owner, managedByApp, current };
   } catch (error) {
     return { ...base, exists: !0, problem: error instanceof Error ? error.message : "unreadable" };
   }
@@ -4926,7 +4935,7 @@ autostart.command("status").description("show whether the tracker starts at logi
     console.log(`Note:      that file could not be read - ${state.problem}`);
     return;
   }
-  state.owner === "foreign" ? console.log("Note:      that file was not written by VibeHub, so it is left alone.") : state.owner === "other-install" ? (console.log("Note:      it belongs to another VibeHub install (the Mac app, or a tracker elsewhere)."), console.log("           Manage autostart from that install; this one will not overwrite it.")) : state.exists && !state.current && console.log("Note:      it points at an older install. Run `vibehub-tracker autostart enable` to refresh it."), state.optedOut ? console.log("Note:      you disabled autostart, so `start` will not register it.") : state.exists || console.log("Note:      `vibehub-tracker start` registers it, or run `autostart enable` on its own.");
+  state.owner === "foreign" ? console.log("Note:      that file was not written by VibeHub, so it is left alone.") : state.owner === "other-install" ? (console.log("Note:      it belongs to another VibeHub install (the Mac app, or a tracker elsewhere)."), console.log("           Manage autostart from that install; this one will not overwrite it.")) : state.managedByApp ? console.log('Note:      the VibeHub app manages it. Turn "Track at login" on or off there.') : state.exists && !state.current && console.log("Note:      it points at an older install. Run `vibehub-tracker autostart enable` to refresh it."), state.optedOut ? console.log("Note:      you disabled autostart, so `start` will not register it.") : state.exists || console.log("Note:      `vibehub-tracker start` registers it, or run `autostart enable` on its own.");
 });
 program2.command("status").description(`pretty-print the current ${STATUS_PATH_LABEL}`).action(() => {
   let config = readConfig();

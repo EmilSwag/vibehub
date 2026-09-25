@@ -382,6 +382,79 @@ describe("somebody else's file is never overwritten", () => {
     assert.equal(autostart.autostartStatus(env, false).owner, "other-install");
   });
 
+  // Byte for byte what `LaunchAgent.swift` writes through PropertyListSerialization: our keys,
+  // sorted and tab-indented, and no marker - a serializer cannot write comments.
+  const macAppPlist = (env: AutostartEnv): string => {
+    const log = join(env.home, ".vibehub", "launchd.log");
+    return [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+      '<plist version="1.0">',
+      "<dict>",
+      "\t<key>EnvironmentVariables</key>", "\t<dict>", "\t\t<key>HOME</key>", `\t\t<string>${env.home}</string>`, "\t</dict>",
+      "\t<key>KeepAlive</key>", "\t<dict>", "\t\t<key>SuccessfulExit</key>", "\t\t<false/>", "\t</dict>",
+      "\t<key>Label</key>", "\t<string>com.vibehub.tracker</string>",
+      "\t<key>ProcessType</key>", "\t<string>Background</string>",
+      "\t<key>ProgramArguments</key>", "\t<array>",
+      `\t\t<string>${env.execPath}</string>`, `\t\t<string>${env.scriptPath}</string>`, "\t\t<string>serve</string>",
+      "\t</array>",
+      "\t<key>RunAtLoad</key>", "\t<true/>",
+      "\t<key>StandardErrorPath</key>", `\t<string>${log}</string>`,
+      "\t<key>StandardOutPath</key>", `\t<string>${log}</string>`,
+      "\t<key>ThrottleInterval</key>", "\t<integer>30</integer>",
+      "</dict>",
+      "</plist>",
+      "",
+    ].join("\n");
+  };
+  // The CLI inside the app bundle - what the app's `vibehub-tracker` shim runs.
+  const insideApp = (): AutostartEnv => envFor("darwin", {
+    execPath: "/Applications/VibeHub.app/Contents/Resources/tracker/node/bin/node",
+    scriptPath: "/Applications/VibeHub.app/Contents/Resources/tracker/vibehub-tracker.cjs",
+  });
+
+  it("run through the app's shim, the app's own plist is current - not \"an older install\"", () => {
+    const env = insideApp();
+    const theirs = macAppPlist(env);
+    const file = seed(env, theirs);
+
+    const state = autostart.autostartStatus(env, false);
+    assert.equal(state.owner, "ours");
+    assert.equal(state.managedByApp, true);
+    assert.equal(state.current, true, "it runs this very entry point; there is nothing to refresh");
+
+    // ...and `start` / `autostart enable` must not rewrite it into our template, nor bounce it.
+    const plan = autostart.planAutostartEnable(env);
+    assert.equal(plan.blocked, null);
+    assert.equal(plan.changed, false);
+    const runner = recorder();
+    assert.equal(autostart.ensureAutostart(env, false, { runner: runner.run }).outcome, "already");
+    assert.deepEqual(runner.calls, [], "`start` must not restart the app's job");
+    assert.equal(readFileSync(file, "utf8"), theirs);
+  });
+
+  it("a stale plist that WE wrote for the app's tracker is still refreshed", () => {
+    const env = insideApp();
+    const stale = (autostart.renderAutostart(env)?.text ?? "").replace("<integer>30</integer>", "<integer>10</integer>");
+    assert.ok(stale.includes("<integer>10</integer>"), "the fixture must actually differ from the template");
+    seed(env, stale);
+
+    const state = autostart.autostartStatus(env, false);
+    assert.equal(state.managedByApp, false, "our marker means we wrote it");
+    assert.equal(state.current, false);
+    assert.equal(autostart.planAutostartEnable(env).changed, true);
+  });
+
+  it("a marker-less plist outside an app bundle is an older registration, not the app's", () => {
+    const env = envFor("darwin");
+    seed(env, macAppPlist(env));
+
+    const state = autostart.autostartStatus(env, false);
+    assert.equal(state.owner, "ours");
+    assert.equal(state.managedByApp, false);
+    assert.equal(state.current, false, "this one really is out of date");
+  });
+
   it("refuses a symlinked registration instead of writing through it", (t) => {
     const env = envFor("linux");
     const file = autostart.autostartFile(env) as string;

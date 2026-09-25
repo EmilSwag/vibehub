@@ -351,6 +351,17 @@ export function classifyOwner(body: string, env: AutostartEnv): AutostartOwner {
   return body.includes(AUTOSTART_MARK) ? "other-install" : "foreign";
 }
 
+/**
+ * The Mac app's own plist: `LaunchAgent.swift` writes our keys through PropertyListSerialization
+ * - sorted, tab-indented, and without our marker, since a serializer cannot write comments -
+ * pointing at the tracker inside its bundle. Never byte-equal to our template, so it must never
+ * be judged by a byte compare. A marker-less plist outside an app bundle is not the app's: that
+ * is a registration from an older installer, and "older install" is the right thing to call it.
+ */
+function writtenByMacApp(body: string, env: AutostartEnv): boolean {
+  return env.platform === "darwin" && !body.includes(AUTOSTART_MARK) && /\.app[\\/]Contents[\\/]/i.test(body);
+}
+
 // ---------------------------------------------------------------------------
 // Plan / apply, so `--dry-run` shows the exact bytes and writes nothing.
 // ---------------------------------------------------------------------------
@@ -422,8 +433,12 @@ function planFor(mode: "enable" | "disable", env: AutostartEnv): AutostartPlan {
   if (mode === "disable") {
     return { ...base, supported: true, file: rendered.file, existed, owner, changed: existed, blocked: null };
   }
+  // The app's plist naming this very install - the CLI running from inside the app bundle,
+  // through its `vibehub-tracker` shim. Same job, serialized by Swift: rewriting it would buy
+  // nothing, bounce the running tracker, and take the job away from "Track at login".
+  const appManaged = owner === "ours" && current !== null && writtenByMacApp(current, env);
   return { ...base, supported: true, file: rendered.file, content: rendered.text, encoding: rendered.encoding,
-    existed, owner, changed: current !== rendered.text, blocked: null };
+    existed, owner, changed: !appManaged && current !== rendered.text, blocked: null };
 }
 
 export function planAutostartEnable(env: AutostartEnv): AutostartPlan { return planFor("enable", env); }
@@ -540,8 +555,13 @@ export interface AutostartState {
   file: string | null;
   exists: boolean;
   owner: AutostartOwner;
-  /** The artifact on disk is exactly what this install would write right now. */
+  /**
+   * Nothing to refresh: the artifact is exactly what this install would write right now, or
+   * it is the Mac app's own plist running this install's entry point (`managedByApp`).
+   */
   current: boolean;
+  /** Written by the Mac app (LaunchAgent.swift), which keeps it up to date itself. */
+  managedByApp: boolean;
   /** The user ran `autostart disable`: `start` must not put it back. */
   optedOut: boolean;
   command: string;
@@ -551,14 +571,19 @@ export interface AutostartState {
 
 export function autostartStatus(env: AutostartEnv, optedOut: boolean): AutostartState {
   const base = { supported: autostartSupported(env), platform: env.platform, file: autostartFile(env),
-    exists: false, owner: "none" as AutostartOwner, current: false, optedOut,
+    exists: false, owner: "none" as AutostartOwner, current: false, managedByApp: false, optedOut,
     command: autostartCommand(env), problem: null };
   const rendered = (() => { try { return renderAutostart(env); } catch { return null; } })();
   if (rendered === null) return base;
   try {
     const body = readArtifact(rendered.file);
     if (body === null) return base;
-    return { ...base, exists: true, owner: classifyOwner(body, env), current: body === rendered.text };
+    const owner = classifyOwner(body, env);
+    const managedByApp = writtenByMacApp(body, env);
+    // A byte compare called the app's plist "an older install" and sent the user to
+    // `autostart enable`, which then rewrote it. The app refreshes its plist on upgrade.
+    const current = owner === "ours" && managedByApp ? true : body === rendered.text;
+    return { ...base, exists: true, owner, managedByApp, current };
   } catch (error) {
     return { ...base, exists: true, problem: error instanceof Error ? error.message : "unreadable" };
   }
