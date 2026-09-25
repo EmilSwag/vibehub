@@ -39,8 +39,21 @@ chmod +x "$ROOT/pkg/scripts/postinstall"
 COMPONENT_ROOT="$(mktemp -d)/root"
 mkdir -p "$COMPONENT_ROOT/Applications"
 ditto "$APP" "$COMPONENT_ROOT/Applications/VibeHub.app"
+# Install to /Applications, always. pkgbuild marks bundles relocatable by default, and
+# Installer then "upgrades" whatever copy with this bundle id it finds first — a dev
+# build, an unzipped VibeHub.app in Downloads — and leaves /Applications untouched
+# (mac.sh then fails with "/Applications/VibeHub.app is missing").
+COMPONENT_PLIST="$(dirname "$COMPONENT_ROOT")/component.plist"
+pkgbuild --analyze --root "$COMPONENT_ROOT" "$COMPONENT_PLIST" >/dev/null
+bundle_index=0
+while plutil -extract "$bundle_index" xml1 -o /dev/null "$COMPONENT_PLIST" >/dev/null 2>&1; do
+  plutil -replace "$bundle_index.BundleIsRelocatable" -bool NO "$COMPONENT_PLIST"
+  bundle_index=$((bundle_index + 1))
+done
+[ "$bundle_index" -gt 0 ] || { echo "error: pkgbuild --analyze found no bundle in $COMPONENT_ROOT" >&2; exit 1; }
 pkgbuild \
   --root "$COMPONENT_ROOT" \
+  --component-plist "$COMPONENT_PLIST" \
   --identifier "$IDENTIFIER" \
   --version "$VERSION" \
   --scripts "$ROOT/pkg/scripts" \

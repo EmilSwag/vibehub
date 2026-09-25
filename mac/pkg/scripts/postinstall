@@ -122,10 +122,11 @@ vibehub_user_home() {
   printf '%s' "$vibehub_home"
 }
 vibehub_install_user_shim() {
-  vibehub_user="$1"; vibehub_app="$2"
+  vibehub_user="$1"; vibehub_app="$2"; vibehub_home="$3"
   vibehub_staged="$(mktemp -d 2>/dev/null)" || return 2
-  chmod 755 "$vibehub_staged" 2>/dev/null || true
-  # Root's own directory: the shim text is built here, where the user cannot interfere.
+  # Root's own directory: the shim text is built here, where the user cannot interfere -
+  # or even look: root's TMPDIR (/var/folders/zz/.../T) is 0700. So the user never opens
+  # anything in it; the shim reaches their shell on stdin and the script as an argument.
   if ! vibehub_write_shim "$vibehub_staged/shim" "$vibehub_app" \
     "$vibehub_app/Contents/Resources/tracker/node/bin/node" \
     "$vibehub_app/Contents/Resources/tracker/vibehub-tracker.cjs"; then
@@ -137,9 +138,12 @@ vibehub_install_user_shim() {
   cat > "$vibehub_staged/install.sh" <<'VIBEHUB_USER_SIDE'
 #!/bin/sh
 mark='# vibehub-tracker shim v1 (managed by VibeHub; safe to delete)'
-dir="$HOME/.local/bin"
+# The home comes from dscl, as $1: under `sudo -u` from root, $HOME may still be root's.
+home="$1"
+case "$home" in /*) ;; *) exit 1 ;; esac
+dir="$home/.local/bin"
 dest="$dir/vibehub-tracker"
-[ ! -L "$HOME/.local" ] || exit 1
+[ ! -L "$home/.local" ] || exit 1
 [ ! -L "$dir" ] || exit 1
 if [ -e "$dest" ]; then
   [ -f "$dest" ] && [ ! -L "$dest" ] || exit 1
@@ -152,8 +156,9 @@ chmod 755 "$tmp" 2>/dev/null || true
 mv -f "$tmp" "$dest" || { rm -f "$tmp"; exit 2; }
 exit 0
 VIBEHUB_USER_SIDE
-  chmod 755 "$vibehub_staged/install.sh" 2>/dev/null || true
-  sudo -u "$vibehub_user" /bin/sh "$vibehub_staged/install.sh" <"$vibehub_staged/shim"
+  # Root reads both files; the user's shell gets the script as argv and the shim on stdin.
+  sudo -u "$vibehub_user" /bin/sh -c "$(cat "$vibehub_staged/install.sh")" vibehub-user-shim \
+    "$vibehub_home" <"$vibehub_staged/shim"
   vibehub_rc=$?
   rm -rf "$vibehub_staged" 2>/dev/null
   return $vibehub_rc
@@ -174,7 +179,7 @@ fi
 # above already exited, so nothing is ever written into root's home or a stranger's.
 VIBEHUB_APP="/Applications/VibeHub.app"
 if VIBEHUB_HOME="$(vibehub_user_home "$CONSOLE_USER")"   && [ -x "$VIBEHUB_APP/Contents/Resources/tracker/node/bin/node" ]; then
-  vibehub_install_user_shim "$CONSOLE_USER" "$VIBEHUB_APP" || true
+  vibehub_install_user_shim "$CONSOLE_USER" "$VIBEHUB_APP" "$VIBEHUB_HOME" || true
 fi
 
 launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" open -a "/Applications/VibeHub.app" >/dev/null 2>&1 || true

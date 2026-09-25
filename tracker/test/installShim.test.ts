@@ -159,21 +159,24 @@ describe("install shim: the pkg installs it per user, never as root", () => {
   it("writes into the console user's own ~/.local/bin, not /usr/local/bin", () => {
     assert.equal(/vibehub_write_shim "\/usr\/local\/bin/.test(post()), false,
       "the pkg still installs a root-owned launcher");
-    assert.match(post(), /dir="\$HOME\/\.local\/bin"/);
+    assert.match(post(), /dir="\$home\/\.local\/bin"/);
     assert.match(post(), /vibehub_install_user_shim "\$CONSOLE_USER" "\$VIBEHUB_APP"/);
   });
 
   it("does the home writes AS the user, so there is no chown and no race to win", () => {
     // Checking harder cannot fix a TOCTOU on a directory the user controls. Root builds
-    // the text in its own temp dir; the user's shell performs every write under $HOME.
-    assert.match(post(), /sudo -u "\$vibehub_user" \/bin\/sh "\$vibehub_staged\/install\.sh"/);
+    // the text in its own temp dir (0700, so the user could not even open a file in it);
+    // the user's shell gets the script as an argument, the shim on stdin, and performs
+    // every write under the home that dscl resolved - never a $HOME inherited from root.
+    assert.match(post(), /sudo -u "\$vibehub_user" \/bin\/sh -c "\$\(cat "\$vibehub_staged\/install\.sh"\)"/);
+    assert.match(post(), /"\$vibehub_home" <"\$vibehub_staged\/shim"/);
     assert.match(post(), /mktemp -d/);
     assert.equal(/chown/.test(post().replace(/^#.*$/gm, "")), false,
       "root still changes ownership somewhere");
     // The user side re-checks the rules itself, because it is the half with the user's
     // privileges - symlinked .local, symlinked bin, and a foreign file.
     const userSide = post().slice(post().indexOf("VIBEHUB_USER_SIDE"));
-    for (const rule of ['[ ! -L "$HOME/.local" ] || exit 1', '[ ! -L "$dir" ] || exit 1',
+    for (const rule of ['case "$home" in /*) ;; *) exit 1 ;; esac', '[ ! -L "$home/.local" ] || exit 1', '[ ! -L "$dir" ] || exit 1',
       'grep -qF "$mark" "$dest" 2>/dev/null || exit 1']) {
       assert.ok(userSide.includes(rule), `the user-side installer lost: ${rule}`);
     }
@@ -229,6 +232,8 @@ describe("install shim: the pkg installs it per user, never as root", () => {
       'WORK="$(mktemp -d)"',
       'APP="$WORK/Applications/VibeHub.app"',
       'export HOME="$WORK/Users/casey"',
+      // What dscl resolved; the pkg passes it explicitly instead of trusting $HOME.
+      'USER_HOME="$HOME"',
       'mkdir -p "$APP/Contents/Resources/tracker/node/bin" "$HOME" "$WORK/stubs"',
       'printf "#!/bin/sh\\n" > "$APP/Contents/Resources/tracker/node/bin/node"',
       'chmod 755 "$APP/Contents/Resources/tracker/node/bin/node"',
@@ -249,8 +254,9 @@ describe("install shim: the pkg installs it per user, never as root", () => {
       'chmod 755 "$WORK/stubs/sudo" "$WORK/stubs/chown"',
       'PATH="$WORK/stubs:$PATH"',
       ...prepare,
-      'vibehub_install_user_shim casey "$APP"; echo "rc=$?"',
-      'SHIM="$HOME/.local/bin/vibehub-tracker"',
+      'vibehub_install_user_shim casey "$APP" "$USER_HOME"; echo "rc=$?"',
+      'SHIM="$USER_HOME/.local/bin/vibehub-tracker"',
+      'echo "stray=$([ "$HOME" != "$USER_HOME" ] && [ -e "$HOME/.local" ] && echo yes || echo no)"',
       'echo "written=$([ -f "$SHIM" ] && echo yes || echo no)"',
       'echo "app-rooted=$(grep -qF "$APP" "$SHIM" 2>/dev/null && echo yes || echo no)"',
       'echo "chowned=$([ -e "$WORK/chown.log" ] && echo yes || echo no)"',
@@ -271,6 +277,15 @@ describe("install shim: the pkg installs it per user, never as root", () => {
     assert.match(out, /app-rooted=yes/);
     // The point of the redesign: root never owns the result, so nothing needs handing over.
     assert.match(out, /chowned=no/);
+  });
+
+  it("writes into the resolved home even while $HOME is still root's", (t) => {
+    if (!bash) return t.skip("bash is unavailable");
+    // `sudo -u` from root can keep root's HOME. Trusting it put the shim nowhere useful.
+    const out = runPkgInstall("pkg-root-home", ['export HOME="$WORK/var/root"', 'mkdir -p "$HOME"']);
+    assert.match(out, /rc=0/);
+    assert.match(out, /written=yes/);
+    assert.match(out, /stray=no/);
   });
 
   it("leaves a foreign command in the user's bin untouched", (t) => {
