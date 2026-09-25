@@ -17,6 +17,14 @@
   align-items: flex-start;
   gap: 16px;
 }
+/* The action keeps one line; the title block gives way first on a phone. */
+.header > :first-child {
+  min-width: 0;
+}
+.header > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .lead {
   margin: 4px 0 0;
   font-size: 14px;

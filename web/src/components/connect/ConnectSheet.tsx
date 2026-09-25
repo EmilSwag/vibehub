@@ -315,12 +315,8 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const copyError = (what: Copied) =>
     error?.what === what ? <p className={styles.error} role="alert">{error.message}</p> : null;
 
-  const honestLine =
-    choice === "mac-app"
-      ? "Carries the tracker. No terminal setup."
-      : choice === "windows"
-        ? "Installs VibeHub and connects via browser approval. No tokens needed."
-        : "Installs VibeHub and connects via browser approval. No tokens needed.";
+  // The Mac panel opens with its own one-liner, so the sheet stays quiet on that tab.
+  const honestLine = choice === "mac-app" ? null : "One command. Approve in your browser, no tokens.";
 
   return createPortal(
     <>
@@ -342,7 +338,7 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
             </button>
           </header>
           <div className={styles.body}>
-            <p className={styles.scope}>{honestLine}</p>
+            {honestLine && <p className={styles.scope}>{honestLine}</p>}
 
             {installed && (
               <div className={styles.installed}>
@@ -389,8 +385,9 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
               )}
             </div>
 
-            {/* Accessible Details disclosure */}
-            <div className={styles.help}>
+            {/* Accessible Details disclosure. The Mac tab carries its own ("What it reads
+                and sends"), so the sheet's would be a second toggle for the same facts. */}
+            {choice !== "mac-app" && <div className={styles.help}>
               <button
                 type="button"
                 className={styles.helpToggle}
@@ -412,7 +409,7 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
                   <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
                 </div>
               )}
-            </div>
+            </div>}
 
             {showProgress && (
               <Progress

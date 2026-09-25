@@ -32,9 +32,14 @@ export function StepConnect({ onBack, onNext, onConnected }: Props) {
   return (
     <div className={styles.step}>
       <h1 className={styles.title}>Connect VibeHub once</h1>
-      <p className={styles.lead}>{DEVICE_CONNECT_SCOPE} {TRACKER_SUPPORT_NOTICE}</p>
+      <p className={styles.lead}>One setup per device. Friends see when you're coding.</p>
 
       <ConnectTools onConnected={markConnected} onCelebrated={advance} />
+
+      <details className={styles.support}>
+        <summary>What's supported</summary>
+        <p>{DEVICE_CONNECT_SCOPE} {TRACKER_SUPPORT_NOTICE}</p>
+      </details>
 
       <div className={styles.actions}>
         <button type="button" className={styles.linkButton} onClick={onBack}>

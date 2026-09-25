@@ -6,7 +6,7 @@ import { usersApi } from "../lib/api";
 import { useTheme } from "../lib/theme";
 import type { ThemePreference } from "../lib/theme";
 import type { ChangeEvent } from "react";
-import type { ExternalLink, UserRole } from "../types";
+import type { UserRole } from "../types";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Avatar } from "../components/ui/Avatar";
@@ -99,7 +99,8 @@ function ProfileSection() {
 function LinksSection() {
   const { user } = useAuth();
   const [links, setLinks] = useState<{ url: string; label: string }[]>([]);
-  const [saved, setSaved] = useState<ExternalLink[]>([]);
+  // Count from the last explicit save; null until one happens (loading is not saving).
+  const [saved, setSaved] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -108,21 +109,23 @@ function LinksSection() {
     usersApi
       .get(user.username)
       .then(({ links }) => {
-        setSaved(links);
         setLinks(links.map((l) => ({ url: l.url, label: l.label ?? "" })));
       })
       .finally(() => setLoading(false));
   }, [user]);
 
   function addRow() {
+    setSaved(null);
     setLinks((prev) => [...prev, { url: "", label: "" }]);
   }
 
   function updateRow(index: number, field: "url" | "label", value: string) {
+    setSaved(null);
     setLinks((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   }
 
   function removeRow(index: number) {
+    setSaved(null);
     setLinks((prev) => prev.filter((_, i) => i !== index));
   }
 
@@ -133,7 +136,7 @@ function LinksSection() {
         .filter((l) => l.url.trim())
         .map((l) => ({ url: l.url.trim(), label: l.label.trim() || undefined }));
       const { links: result } = await usersApi.putLinks(payload);
-      setSaved(result);
+      setSaved(result.length);
     } finally {
       setSaving(false);
     }
@@ -189,7 +192,11 @@ function LinksSection() {
           Save links
         </Button>
       </div>
-      {saved.length > 0 && <p className={styles.savedNote}>Saved {saved.length} link(s).</p>}
+      {saved !== null && (
+        <p className={styles.savedNote} role="status">
+          {saved === 0 ? "Links cleared." : `Saved ${saved} ${saved === 1 ? "link" : "links"}.`}
+        </p>
+      )}
     </Card>
   );
 }

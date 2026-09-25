@@ -117,12 +117,19 @@ export function LoginPage() {
             {showGithub && <div className={styles.divider}>{usernameLabel}</div>}
             <form className={styles.devForm} onSubmit={handleDevLogin}>
               <FieldLabel htmlFor="dev-username">
-                {showGithub ? "Dev login username" : "Pick a username (letters, digits, - or _)"}
+                {showGithub ? "Dev login username" : "Pick a username (a–z, 0–9 or -)"}
               </FieldLabel>
+              {/* Mirrors the server rule (^[a-z0-9-]{3,24}$): the old hint promised "_",
+                  which the server rejects, and uppercase failed silently. */}
               <Input
                 id="dev-username"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                pattern="[a-z0-9\-]{3,24}"
+                title="3–24 characters: a–z, 0–9 or -"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="ada"
                 autoFocus={!showGithub}
                 required

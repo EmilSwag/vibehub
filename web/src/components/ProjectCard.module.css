@@ -160,6 +160,11 @@
 }
 .media > a {
   display: block;
+  background: var(--vh-surface-2);
+}
+/* A social cover still loading (or retrying): keep its 16/9 box, hide the pixels. */
+.media .coverPending {
+  visibility: hidden;
 }
 .owner + .media {
   margin-top: 10px;

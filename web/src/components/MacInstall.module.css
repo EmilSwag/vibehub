@@ -34,7 +34,6 @@
   color: var(--vh-text-dim);
 }
 
-.consent,
 .details,
 .release {
   display: flex;
@@ -47,10 +46,38 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--vh-text-dim);
+  margin: 0;
 }
 
-.consent p {
+/* "Then" — what happens inside the app once installed. A real list, not numbered
+ * paragraphs, so the two steps read as steps. */
+.next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.steps {
   margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vh-text-dim);
+}
+
+.steps strong {
+  font-weight: 500;
+  color: var(--vh-text);
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--vh-text-faint);
 }
 
 /* ---- the one primary action ---- */

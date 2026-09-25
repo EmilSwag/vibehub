@@ -25,6 +25,7 @@ import {
   MAC_NOT_RELEASED,
   MAC_NOT_RELEASED_FIX,
   MAC_REQUIREMENTS,
+  MAC_PAIRING_MEANS,
   MAC_TOKEN_MEANS,
   MAC_TOKENLESS_NOTICE,
   MAC_UNAVAILABLE,
@@ -164,7 +165,7 @@ eq("a non-Windows device never lands on the Windows tab", detectInstallChoice("m
  */
 
 const MAC_COPY = [MAC_APP_SCOPE, MAC_INSTALL_MEANS, MAC_TOKENLESS_NOTICE, MAC_TOKEN_MEANS,
-  MAC_AUTOSTART_MEANS, MAC_COMMAND_MEANS, MAC_CHECKSUM_MISSING, MAC_NOT_RELEASED,
+  MAC_PAIRING_MEANS, MAC_AUTOSTART_MEANS, MAC_COMMAND_MEANS, MAC_CHECKSUM_MISSING, MAC_NOT_RELEASED,
   MAC_NOT_RELEASED_FIX, MAC_UNAVAILABLE, MAC_REQUIREMENTS, MAC_KEY_TITLE, MAC_KEY_ACTION,
   MAC_KEY_RETRY, MAC_KEY_PENDING, MAC_KEY_ONCE, MAC_KEY_PRIVATE, MAC_KEY_ERROR];
 const MAC_TEXT = MAC_COPY.join(" ");
@@ -181,6 +182,8 @@ eq("the key is asked for in the app, not the browser", /asks for a device key on
 // Settings → Tracker is the circular instruction this replaced.
 eq("the guidance resolves here instead of pointing back at this page",
   /Create one below and paste it into the app\./.test(MAC_TOKEN_MEANS) && !/Settings . Tracker/.test(MAC_TOKEN_MEANS), true);
+eq("1.1.0+ pairing copy sends the user to the browser, never to a pasted key",
+  /through your browser/.test(MAC_PAIRING_MEANS) && !/paste|below|device key/i.test(MAC_PAIRING_MEANS), true);
 eq("issuing a key is offered as an explicit action", MAC_KEY_ACTION, "Create a device key");
 eq("an issued key is stated to be unsaved and one-shot",
   /Shown once/.test(MAC_KEY_ONCE) && /not saved in this browser/.test(MAC_KEY_ONCE), true);

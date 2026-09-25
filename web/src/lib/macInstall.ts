@@ -182,9 +182,12 @@ export function buildMacInstallCommand(apiUrl: string, webUrl: string): string {
  */
 
 export const MAC_APP_SCOPE = "VibeHub for Mac carries the tracker. No Terminal setup.";
-export const MAC_INSTALL_MEANS = "Installing puts VibeHub in Applications and opens it. Nothing is tracked yet.";
+export const MAC_INSTALL_MEANS = "Installs to Applications and opens. Nothing is tracked yet.";
 export const MAC_TOKENLESS_NOTICE = "The download and the command carry no device key.";
+/** Releases before 1.1.0 have no browser pairing: the app asks for a pasted key. */
 export const MAC_TOKEN_MEANS = "VibeHub asks for a device key on first launch. Create one below and paste it into the app.";
+/** 1.1.0+: the app pairs through the browser, so there is nothing to create or paste here. */
+export const MAC_PAIRING_MEANS = "On first launch VibeHub connects through your browser — you approve it there.";
 
 /* Manual key issuance, explicitly authorised for this panel. It is a button, never a
  * side effect of choosing the macOS tab, and the key it returns is held in component
@@ -197,8 +200,8 @@ export const MAC_KEY_PENDING = "Creating…";
 export const MAC_KEY_ONCE = "Shown once, here. It is not saved in this browser — create another if you lose it.";
 export const MAC_KEY_PRIVATE = "Private: it reports as you. Paste it into VibeHub, not into a terminal or a chat.";
 export const MAC_KEY_ERROR = "Could not create a device key. Try again.";
-export const MAC_AUTOSTART_MEANS = "Tracking starts only when you start it in the app. After that it resumes at login until you turn it off, and off stays off.";
-export const MAC_COMMAND_MEANS = "The same installer as the button. Paste in Terminal.";
+export const MAC_AUTOSTART_MEANS = "Once you start tracking in the app, it resumes at login. Off stays off.";
+export const MAC_COMMAND_MEANS = "Or paste this in Terminal — same installer.";
 export const MAC_CHECKSUM_MISSING = "This release publishes no checksum. The command verifies one and stops without it — use the download.";
 export const MAC_NOT_RELEASED = "VibeHub for Mac is not released yet.";
 export const MAC_NOT_RELEASED_FIX = "Connect this Mac with the Terminal setup instead.";

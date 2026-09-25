@@ -49,6 +49,9 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
   // is busy, so one error is not a verdict: remount the <img> a couple of times with a
   // pause before giving up. `attempt` in the key forces the refetch; -1 means "gave up".
   const [socialAttempt, setSocialAttempt] = useState(0);
+  // Until GitHub's card actually arrives, the <img> stays invisible over the grey box:
+  // a failed attempt would otherwise paint the browser's broken-image glyph.
+  const [socialLoaded, setSocialLoaded] = useState(false);
   const activeIndex = Math.min(active, Math.max(0, images.length - 1));
   const imageCover = images[activeIndex] ?? null;
   const repo = githubRepoOf(project.repoUrl);
@@ -98,12 +101,15 @@ export function ProjectCard({ project, owner, liked, onToggleLike, actions, styl
           >
             <img
               key={imageCover ? cover : `${cover}#${socialAttempt}`}
-              className={[styles.cover, !imageCover && styles.socialCover].filter(Boolean).join(" ")}
+              className={[styles.cover, !imageCover && styles.socialCover, !imageCover && !socialLoaded && styles.coverPending]
+                .filter(Boolean)
+                .join(" ")}
               src={cover}
               alt=""
               loading={previewMode ? "eager" : "lazy"}
               referrerPolicy="no-referrer"
               onError={!imageCover ? onSocialCoverError : undefined}
+              onLoad={!imageCover ? () => setSocialLoaded(true) : undefined}
             />
           </Link>
           {images.length > 1 && (

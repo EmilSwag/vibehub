@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { API_BASE, macApi, usersApi } from "../lib/api";
 import {
-  COPY_ONLY_NOTICE,
   TRACKER_CONTROL_NOTICE,
   TRACKER_HISTORY_NOTICE,
   TRACKER_LOCAL_READS,
@@ -26,6 +25,7 @@ import {
   MAC_KEY_TITLE,
   MAC_NOT_RELEASED,
   MAC_NOT_RELEASED_FIX,
+  MAC_PAIRING_MEANS,
   MAC_REQUIREMENTS,
   MAC_TOKEN_MEANS,
   MAC_TOKENLESS_NOTICE,
@@ -145,20 +145,20 @@ export function MacInstall({ token, className }: { token?: string; className?: s
   // one answer that makes the whole block pointless; "could not check" is not.
   const key = token ?? issued;
   const canInstall = state.kind === "ready" || state.kind === "unavailable";
+  // 1.1.0+ pairs through the browser; anything older (or unknown) needs a pasted key.
+  const pairs = state.kind === "ready" && isVersionAtLeast(state.release.version, "1.1.0");
+  const showsKey = canInstall && !pairs;
 
   return (
     <div className={cx(styles.mac, className, "fade-in")}>
       <p className={styles.lead}>{MAC_APP_SCOPE}</p>
 
-      {/* Load-bearing before either entrance: what installing does, that it carries no
-          key, where the key comes from, and that this one does start at login. */}
-      <div className={styles.consent} aria-label="Before you install">
-        <p>{MAC_INSTALL_MEANS} {MAC_TOKENLESS_NOTICE}</p>
-        <p>{state.kind === "ready" && isVersionAtLeast(state.release.version, "1.1.0") ? "Pairing connects in your browser with one click. No keys to copy." : MAC_TOKEN_MEANS}</p>
-        <p>{MAC_AUTOSTART_MEANS}</p>
-        <p>{TRACKER_LOCAL_READS}</p>
-        <p>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
-      </div>
+      {/* Load-bearing before either entrance: what installing does, and that tracking
+          resumes at login once started. The rest of the data story sits one click away
+          in the disclosure at the bottom, so the download reads in a glance. */}
+      <p className={styles.consent} aria-label="Before you install">
+        {MAC_INSTALL_MEANS} {MAC_AUTOSTART_MEANS}
+      </p>
 
       {state.kind === "loading" && (
         // Same silhouette as the ready state: download button, meta line, command, copy.
@@ -207,7 +207,7 @@ export function MacInstall({ token, className }: { token?: string; className?: s
           {state.commandUsable ? (
             command.text ? (
               <>
-                <p className={styles.sub}>{MAC_COMMAND_MEANS} {COPY_ONLY_NOTICE}</p>
+                <p className={styles.sub}>{MAC_COMMAND_MEANS}</p>
                 <pre className={styles.cmd} tabIndex={0} aria-label="Mac install command">{command.text}</pre>
                 <Button variant="secondary" className={styles.action} onClick={() => void copy("command", command.text!)}>
                   {copied === "command" ? "Command copied" : "Copy install command"}
@@ -224,19 +224,23 @@ export function MacInstall({ token, className }: { token?: string; className?: s
 
       {canInstall && (
         <div className={styles.keyBlock}>
-          {state.kind === "ready" && isVersionAtLeast(state.release.version, "1.1.0") ? (
-            <div>
-              <p className={styles.lead}>Next steps in VibeHub:</p>
-              <p className={styles.sub}>1. Open VibeHub from Applications</p>
-              <p className={styles.sub}>2. Click <strong>Connect in Browser</strong> to pair with one click</p>
-              <p className={styles.sub}>If macOS blocks first launch: System Settings → Privacy &amp; Security → Open Anyway.</p>
+          {pairs ? (
+            <div className={styles.next}>
+              <p className={styles.lead}>Then</p>
+              <ol className={styles.steps}>
+                <li>Open VibeHub from Applications.</li>
+                <li>Click <strong>Connect in Browser</strong>. No keys to copy.</li>
+              </ol>
+              <p className={styles.hint}>Blocked on first launch? System Settings → Privacy &amp; Security → Open Anyway.</p>
             </div>
           ) : (
-            <div>
-              <p className={styles.lead}>Next steps in VibeHub:</p>
-              <p className={styles.sub}>1. Open VibeHub from Applications</p>
-              <p className={styles.sub}>2. Paste the device key below when the app asks, then press Start</p>
-              <p className={styles.sub}>If macOS blocks first launch: System Settings → Privacy &amp; Security → Open Anyway.</p>
+            <div className={styles.next}>
+              <p className={styles.lead}>Then</p>
+              <ol className={styles.steps}>
+                <li>Open VibeHub from Applications.</li>
+                <li>Paste the device key below, then press Start.</li>
+              </ol>
+              <p className={styles.hint}>Blocked on first launch? System Settings → Privacy &amp; Security → Open Anyway.</p>
 
               <h4 className={styles.keyTitle}>{MAC_KEY_TITLE}</h4>
               {key ? (
@@ -273,10 +277,17 @@ export function MacInstall({ token, className }: { token?: string; className?: s
         aria-controls={`${id}-mac-data`}
         onClick={() => setDetailsOpen((value) => !value)}
       >
-        Data access and supported sources
+        What it reads and sends
       </button>
       {detailsOpen && (
         <div id={`${id}-mac-data`} className={cx(styles.details, "fade-in")}>
+          <p className={styles.sub}>
+            {MAC_TOKENLESS_NOTICE}{" "}
+            {/* Mirrors the steps: only point at "below" when the key block is really there. */}
+            {showsKey ? MAC_TOKEN_MEANS : MAC_PAIRING_MEANS}
+          </p>
+          <p className={styles.sub}>{TRACKER_LOCAL_READS}</p>
+          <p className={styles.sub}>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
           <p className={styles.sub}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
           <p className={styles.sub}>{TRACKER_STATE_NOTICE}</p>
           <p className={styles.sub}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>

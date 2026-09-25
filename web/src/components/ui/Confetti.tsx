@@ -21,7 +21,7 @@ interface Burst {
 /**
  * Neat, quiet fireworks — strictly monochrome (skills/emil_design_eng §3/§6).
  * A few bursts of white/gray sparks with gravity and fade; stops itself after
- * `durationMs`, and renders a single static frame under prefers-reduced-motion.
+ * `durationMs`, and draws nothing under prefers-reduced-motion.
  */
 export function Confetti({ durationMs = 5200, bursts = 6 }: { durationMs?: number; bursts?: number }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -133,20 +133,8 @@ export function Confetti({ durationMs = 5200, bursts = 6 }: { durationMs?: numbe
     };
 
     if (reduced) {
-      // One static, faint frame — celebration without motion.
-      plan.forEach(explode);
-      for (const p of particles) {
-        p.x += p.vx * 18;
-        p.y += p.vy * 18;
-      }
-      const dark = isDark();
-      for (const p of particles) {
-        const l = dark ? 200 : 90;
-        ctx.fillStyle = `rgba(${l}, ${l}, ${l}, 0.35)`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // Nothing. A frozen frame of sparks lands on the headline and reads as noise,
+      // not celebration; the words and the avatar carry the moment on their own.
     } else {
       raf = requestAnimationFrame(frame);
     }

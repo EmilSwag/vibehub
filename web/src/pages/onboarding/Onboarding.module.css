@@ -409,6 +409,39 @@
   color: var(--vh-text-faint);
 }
 
+/* ---- Connect: supported-tools disclosure ----
+ * The full support notice is a paragraph; the step reads in a glance only if it sits
+ * one click away, under the action rather than above it. */
+
+.support {
+  width: 100%;
+  margin-top: 16px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--vh-text-dim);
+}
+
+.support summary {
+  width: max-content;
+  margin: 0 auto;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--vh-text-faint);
+  transition: color var(--dur-press) var(--ease-out);
+}
+
+.support summary:hover {
+  color: var(--vh-text-dim);
+}
+
+.support p {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  line-height: 1.5;
+  background: var(--vh-surface-2);
+  border-radius: var(--vh-radius-sm);
+}
+
 /* ---- Step 4: welcome ---- */
 
 .welcome {

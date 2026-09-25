@@ -16,7 +16,7 @@ interface Props {
   onEnter: () => void;
 }
 
-const WORDS = ["Welcome,", "bro."];
+const WORDS = ["You're", "in."];
 
 export function StepWelcome({ user, invited, busy, tracking, onEnter }: Props) {
   const chips = [
@@ -42,8 +42,8 @@ export function StepWelcome({ user, invited, busy, tracking, onEnter }: Props) {
       </h1>
       <p className={[styles.lead, "reveal"].join(" ")} style={{ animationDelay: "420ms" }}>
         {tracking
-          ? "You're in. Your friends can see what you're building."
-          : "You're in. Start the tracker and your friends will see what you're building."}
+          ? "Your friends can see what you're building."
+          : "Go online and friends will see what you're building."}
       </p>
 
       <ul className={[styles.chips, "stagger"].join(" ")} style={{ "--stagger": "70ms" } as CSSProperties}>

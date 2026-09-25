@@ -5,6 +5,7 @@ import { pairingApi } from "../lib/api";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Spinner } from "../components/ui/Spinner";
+import { Icon } from "../components/ui/Icon";
 import { TRACKER_FULL_DISCLOSURE } from "../lib/connectPrompt";
 import styles from "./PairPage.module.css";
 
@@ -51,13 +52,13 @@ export function PairPage() {
           if (res.valid) {
             setInfo(res);
           } else {
-            setError("This pairing code has expired or is invalid.");
+            setError("That code expired or doesn't exist.");
           }
         }
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
-          setError(err instanceof Error ? err.message : "Could not look up pairing code.");
+          setError(err instanceof Error ? err.message : "Couldn't look up that code.");
         }
       })
       .finally(() => {
@@ -77,7 +78,7 @@ export function PairPage() {
       await pairingApi.approve(activeCode);
       setApproved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not approve device pairing.");
+      setError(err instanceof Error ? err.message : "Couldn't connect this device. Try again.");
     } finally {
       setApproving(false);
     }
@@ -92,17 +93,16 @@ export function PairPage() {
   };
 
   const osLabel = info?.os === "mac" ? "Mac" : info?.os === "windows" ? "PC" : "device";
-  const osGlyph = info?.os === "mac" ? "" : info?.os === "windows" ? "⊞" : "💻";
 
   return (
     <div className={styles.container}>
       <div className={styles.card}>
         {approved ? (
           <div className={styles.successBox}>
-            <div className={styles.successIcon}>✓</div>
-            <h1 className={styles.successTitle}>Connected</h1>
-            <p className={styles.successSub}>
-              {info?.deviceName || "Your device"} is now connected to @{user?.username}. You can return to VibeHub on your {osLabel}.
+            <div className={styles.successIcon}><Icon name="check" size={24} /></div>
+            <h1 className={styles.title}>Connected</h1>
+            <p className={styles.subtitle}>
+              {info?.deviceName || "Your device"} is on @{user?.username}. Head back to your {osLabel}.
             </p>
             <Button
               className={styles.approveBtn}
@@ -114,16 +114,14 @@ export function PairPage() {
         ) : loading ? (
           <div className={styles.successBox}>
             <Spinner size={24} />
-            <p className={styles.subtitle}>Looking up pairing request…</p>
+            <p className={styles.subtitle}>Looking up code…</p>
           </div>
         ) : !info?.valid ? (
           <div className={styles.header}>
             <h1 className={styles.title}>Pair a device</h1>
-            <p className={styles.subtitle}>
-              Enter the pairing code shown in VibeHub on your Mac or PC.
-            </p>
-            {error && <p className={styles.subtitle} style={{ color: "var(--text-error)" }}>{error}</p>}
-            <form onSubmit={handleManualSubmit} className={styles.inputGroup} style={{ marginTop: "1rem" }}>
+            <p className={styles.subtitle}>Enter the code the VibeHub app shows you.</p>
+            {error && <p className={styles.error} role="alert">{error}</p>}
+            <form onSubmit={handleManualSubmit} className={styles.inputGroup}>
               <Input
                 className={styles.codeInput}
                 placeholder="VIBE-XXXX"
@@ -131,21 +129,21 @@ export function PairPage() {
                 onChange={(e) => setInputCode(e.target.value)}
                 maxLength={16}
                 autoFocus
+                aria-label="Pairing code"
+                autoComplete="off"
+                spellCheck={false}
               />
-              <Button type="submit">Lookup</Button>
+              <Button type="submit" disabled={!inputCode.trim()}>Continue</Button>
             </form>
           </div>
         ) : (
           <>
             <div className={styles.header}>
               <h1 className={styles.title}>Connect this {osLabel}?</h1>
-              <p className={styles.subtitle}>
-                Pairing allows VibeHub to track your AI coding sessions on this device.
-              </p>
+              <p className={styles.subtitle}>It will show your AI coding sessions here.</p>
             </div>
 
             <div className={styles.deviceBox}>
-              <span className={styles.deviceIcon}>{osGlyph}</span>
               <div className={styles.deviceMeta}>
                 <span className={styles.deviceName}>{info.deviceName || "Personal Computer"}</span>
                 <span className={styles.deviceOs}>{info.os || "Desktop"}</span>
@@ -154,13 +152,11 @@ export function PairPage() {
             </div>
 
             <p className={styles.summary}>
-              Reads only supported local AI logs. No prompts, code, files or transcripts ever leave your machine.
+              Reads local AI session logs only. Prompts, code and files never leave the device.
             </p>
 
             {error && (
-              <p className={styles.subtitle} style={{ color: "var(--text-error)" }}>
-                {error}
-              </p>
+              <p className={styles.error} role="alert">{error}</p>
             )}
 
             <div className={styles.actions}>
@@ -188,7 +184,7 @@ export function PairPage() {
                 onClick={() => setDetailsOpen(!detailsOpen)}
                 aria-expanded={detailsOpen}
               >
-                {detailsOpen ? "Hide details ▲" : "View privacy & data details ▼"}
+                What gets sent <Icon name="chevronDown" size={12} />
               </button>
               {detailsOpen && (
                 <div className={styles.detailsBox}>
