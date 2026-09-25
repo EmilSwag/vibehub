@@ -6,44 +6,36 @@ saved device token without touching anything else on your machine.
 ## macOS: VibeHub for Mac
 
 On a Mac, install the app instead of the connector. `VibeHub.app` carries the tracker and
-its private Node runtime, lives in the menu bar, and — once you start tracking inside the
-app — brings the tracker back at every login. Turning it off in the app keeps it off,
-across relaunch, reinstall and upgrade.
+its own Node runtime, and lives in the menu bar (plus an optional notch island).
 
-Two entrances, one package, **neither carrying a device token**:
+```bash
+curl -fsSL https://web-production-da778.up.railway.app/tracker/mac.sh | bash
+```
 
-1. **Download.** VibeHub → **Settings → Tracker → macOS app → Download VibeHub for Mac**.
-2. **One command:**
+Or download it from VibeHub → **Connect VibeHub → macOS app**, or the `.pkg` from
+[Releases](https://github.com/EmilSwag/vibehub/releases/latest). Both install the newest
+`mac-v*` release (`GET /api/v1/mac/latest`); the command checks the published SHA-256
+first and stops if it is missing or wrong.
 
-   ```bash
-   curl -fsSL https://web-production-da778.up.railway.app/tracker/mac.sh | bash
-   ```
-
-Both resolve the newest `mac-v*` release through `GET /api/v1/mac/latest`, install the
-same `VibeHub.pkg` and open the app. The command verifies the release's published SHA-256
-first and stops rather than installing when that checksum is missing or does not match.
-
-The app asks for a device token on first launch. Create one on that same **macOS app**
-tab — *Create a device key* — and paste it into the app. The token is issued only when
-you press that button, is shown once, and is not saved in the browser. It is never in the
-download, in the command, in a URL or in the environment.
+Then open VibeHub → **Connect in Browser** → approve on the page that opens. No token is
+ever in the download, the command or a URL. *Use a token instead* accepts a pasted device key.
 
 | | |
 |---|---|
-| Requirements | macOS 13 or later, Apple Silicon or Intel. |
-| Releases come from | `github.com/EmilSwag/vibehub` — the `mac-v*` tags. Server-side this is `MAC_RELEASE_REPO`. |
-| Installs | `/Applications/VibeHub.app` plus, after you start tracking, `~/Library/LaunchAgents/com.vibehub.tracker.plist`. |
-| Tracking starts | Only when you start it in the app — installing and opening track nothing. |
-| First launch blocked | System Settings → Privacy & Security → scroll to Security → click **Open Anyway** (or right-click → **Open** on older macOS). |
-| Not released yet | Before the first `mac-v*` release the endpoint answers 404 and Settings says *not released yet* instead of offering a dead button. Use the connector below on that Mac meanwhile. |
+| Requirements | macOS 13+, Apple Silicon or Intel. |
+| Tracking starts | Only when you press **Start Tracking** in the app. Then it resumes at login until you switch off **Start with my Mac** — and off stays off across relaunch, reinstall and upgrade. |
+| Installs | `/Applications/VibeHub.app`; after you start tracking, `~/Library/LaunchAgents/com.vibehub.tracker.plist`. |
+| First launch blocked | System Settings → Privacy & Security → **Open Anyway** (older macOS: right-click → **Open**). |
+| Releases | `mac-v*` tags of `github.com/EmilSwag/vibehub` (server env `MAC_RELEASE_REPO`). Before the first one the endpoint answers 404 and the web says *not released yet* — use the connector meanwhile. |
 
-Everything from section 1 onward describes the cross-platform connector
-(`connect.sh` / `connect.ps1`) — the path for Linux and Windows, still available on macOS.
+Everything below is the cross-platform connector (`connect.sh` / `connect.ps1`) — the path
+for Linux and Windows, still available on macOS.
 
 ## 1. Get a device token
 
-VibeHub → **Settings → Tracker → New token**. Treat it like a password: it is the only
-thing that lets a device report as you. Revoke it there if a device is lost.
+Press **Connect VibeHub** in the web app: it creates a token and prints the full command for
+your OS. Treat the token like a password; revoke it in **Settings → Tracker** if a device is
+lost.
 
 ## 2. Run the connector
 
@@ -67,21 +59,15 @@ $env:VIBEHUB_TOKEN='<device token>'; & ([scriptblock]::Create((irm https://web-p
 
 Setup only: drop `-Start`.
 
-> The web app (Home → **Connect**) generates a hardened variant of the same command:
-> `set -o pipefail`, no redirects, pinned `--proto '=https'`, explicit
-> `VIBEHUB_API_URL` / `VIBEHUB_WEB_URL`, and token cleanup in a `finally` block on
-> Windows. Prefer that one when you can copy from the app.
+> The **Connect VibeHub** sheet prints a hardened variant of the same command (`set -o
+> pipefail`, pinned `--proto '=https'`, explicit `VIBEHUB_API_URL` / `VIBEHUB_WEB_URL`,
+> token cleanup on Windows). Prefer copying that one.
 
 ## 3. What happens
 
 ```
 VibeHub
 Connecting this device
-What this does
-  One device installation covers supported tools. It does not install AI apps or connect their accounts.
-  Local reads: Claude Code (~/.claude/projects) and Codex (~/.codex/sessions) session logs (JSONL) only; …
-  Uploads: tool, model, timing, token counts and a bounded project alias only.
-  …
 ✓ [1/5] Node.js ready (v24.21.0, private runtime)
 ✓ [2/5] Tracker downloaded
 ✓ [3/5] Device token verified as @you
@@ -104,11 +90,10 @@ Done in 6s.
 | 3 Token | Calls `GET /api/v1/tracker/verify` with the token in an `Authorization` header (never in a URL). Fails closed on anything but a valid `{ username }`. |
 | 4 Config | `~/.vibehub/config.json`, mode `0600`, directory `0700`. |
 | 5 Start | Only with `--start` / `-Start`. Spawns the background daemon and confirms it with an independent `status` call. No launchd / Task Scheduler / registry entries. |
-| Launcher | A small `vibehub-tracker` command is written so the commands below work by name — `~/.local/bin/vibehub-tracker` on macOS and Linux, `%LOCALAPPDATA%\Programs\VibeHub\vibehub-tracker.cmd` on Windows (per user, so no administrator is needed to install it *or* to remove it). It is ours and rewritten in place on every re-install; a file of that name the installer does not recognise is left untouched. If that directory is not already on your PATH, the installer says so and prints both the line to add and the full-path form to use meanwhile. |
+| Launcher | Writes a per-user `vibehub-tracker` command (`~/.local/bin`, or `%LOCALAPPDATA%\Programs\VibeHub` on Windows) so the commands below work by name. No administrator needed; a foreign file of that name is left untouched. If the folder is not on your PATH, the installer prints the line to add. |
 
-Colours and ✓ glyphs appear only in an interactive UTF-8 terminal; `NO_COLOR=1` or a
-non-TTY gives plain text. Every failure prints one red `✗` line plus a one-line hint and
-exits non-zero. If the failure happens before step 5, the hint reads *Nothing was started*.
+`NO_COLOR=1` or a non-TTY gives plain text. Every failure prints one `✗` line with a hint
+and exits non-zero; before step 5 that hint reads *Nothing was started*.
 
 ## 4. What the tracker reads and sends
 
@@ -155,23 +140,17 @@ exits non-zero. If the failure happens before step 5, the hint reads *Nothing wa
 | Status | `… vibehub-tracker.cjs status` | `… vibehub-tracker.cjs status` |
 | Stop | `… vibehub-tracker.cjs stop` | `… vibehub-tracker.cjs stop` |
 
-With the launcher's directory on your PATH the short form works everywhere:
-`vibehub-tracker start` / `status` / `stop` / `hooks status`. That directory is
-`~/.local/bin` on macOS and Linux and `%LOCALAPPDATA%\Programs\VibeHub` on Windows. If it
-is not on your PATH the connector prints the exact line to add it — an `export PATH=…`
-line for the file your login shell really reads, or on Windows
+With the launcher on your PATH the short form works everywhere:
+`vibehub-tracker start` / `status` / `stop` / `hooks status`. If it is not, the connector
+prints the exact line to add — an `export PATH=…` for your login shell, or on Windows (User
+scope, no administrator; reopen the terminal afterwards):
 
 ```powershell
 [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:LOCALAPPDATA\Programs\VibeHub", 'User')
 ```
 
-which is the User scope, so no administrator is needed; reopen the terminal afterwards.
-(The directory has to go in resolved, as above — a literal `%LOCALAPPDATA%` would be stored
-unexpanded and the entry would never match anything. The connector prints the line with
-your own absolute path already substituted.)
-(`setx` would also work but truncates PATH at 1024 characters, so it is not the advice.)
-If the connector reused your system Node, replace the runtime path with plain `node`. The
-web app's **Connect** sheet prints the exact commands for your device.
+Avoid `setx` — it truncates PATH at 1024 characters. If the connector reused your system
+Node, replace the runtime path with plain `node`.
 
 Rename or hide a project alias: `… vibehub-tracker.cjs set <path> "<alias>"`.
 
@@ -181,20 +160,16 @@ Rename or hide a project alias: `… vibehub-tracker.cjs set <path> "<alias>"`.
 vibehub-tracker uninstall
 ```
 
-That stops the daemon, removes the Cursor/Windsurf hook entries from your own hook files,
-clears the saved config and deletes its launcher. The downloaded tracker, the private Node
-runtime and the metadata inbox stay where they are, and the command prints the one line
-that removes them — deleting a directory on your behalf is not something an uninstaller
-should decide silently.
+Stops the daemon, removes the Cursor/Windsurf hook entries, clears the config and deletes
+the launcher. The tracker files and Node runtime stay in `~/.vibehub`; the command prints
+the one line that removes them.
 
-Manually, if you prefer: `… vibehub-tracker.cjs stop`, then delete `~/.vibehub`
-(Windows: `%USERPROFILE%\.vibehub`) and the launcher —
-`~/.local/bin/vibehub-tracker`, or `%LOCALAPPDATA%\Programs\VibeHub\vibehub-tracker.cmd`
-on Windows. Optionally revoke the token in VibeHub → Settings → Tracker. If you delete
-`~/.vibehub` and forget the launcher, it removes itself the next time it is run rather
-than sitting on your PATH as a broken command.
+Manually: `… vibehub-tracker.cjs stop`, then delete `~/.vibehub` (Windows:
+`%USERPROFILE%\.vibehub`) and the launcher. Optionally revoke the token in Settings →
+Tracker. Nothing else was written outside those paths and your own hook files.
 
-Outside those two paths and your own hook files, nothing was written.
+**Mac app:** VibeHub → Settings → **Sign Out of This Mac** (stops the tracker, removes its
+LaunchAgent and login item), quit, then move `/Applications/VibeHub.app` to the Trash.
 
 ## 7. Troubleshooting
 
