@@ -60,10 +60,16 @@ One screen: **Connect** → approve in the browser → "You're live ✓". Connec
 starts tracking; *Trouble?* takes a pasted device key instead. A returning, signed-out
 user gets the same connect controls in the popover; a replacement token can also be
 pasted in Settings → Account.
-The app verifies the token against the server before saving it anywhere; then it goes
-into the login Keychain (this device only, never synced) and, via the embedded CLI's
-`login --token-stdin`, into the tracker's own `~/.vibehub/config.json`. It is never placed
-in a preferences file, an argument vector, an environment variable, a URL or a log.
+The app verifies the token against the server before saving it anywhere; then the
+embedded CLI's `login --token-stdin` writes it into the tracker's own
+`~/.vibehub/config.json` — since 1.2.2 the token's single source of truth, read once
+off the main thread at launch and held in memory. It is never placed in a preferences
+file, an argument vector, an environment variable, a URL or a log.
+
+Builds up to 1.2.1 also kept a copy in the login Keychain. 1.2.2 never writes or deletes
+that item: it reads it once, only if config.json has no token, without ever showing an
+"allow access" prompt (an item it can't read silently counts as no token → reconnect with
+one click), migrates it into config.json, and never looks at it again.
 
 A `~/.vibehub/handoff.json` written by the one-command installer, or a
 `vibehub://connect?apiUrl=…&webUrl=…` link, can only point the app at a different
@@ -76,8 +82,8 @@ Inside the popover (**Settings**):
 - **Tracker token** — replace it, or **Sign out**. Replacing the token with a different
   account's stops the running tracker, releases this device's connection, clears the
   old account's local state, then signs in and restarts tracking on the new one. Sign
-  out does all of that and removes the LaunchAgent, the login item and the Keychain
-  entry — the machine forgets the account, not just the app.
+  out does all of that and removes the LaunchAgent, the login item and
+  `~/.vibehub/config.json` — the machine forgets the account, not just the app.
 - **Show today's time in the menu bar** — the "2h 14m" beside the glyph.
 - **Start with my Mac** — one switch for the tracker's LaunchAgent *and* the app's login
   item; they are one decision. Turning it off keeps it off across updates.
@@ -104,7 +110,7 @@ bash scripts/swiftc-build.sh arm64 debug .build/swiftc/arm64-debug   # or: swift
 this screen's real geometry) for loaded/loading/needsToken/failed, the popover in every
 state light + dark, Settings, and every onboarding step. `--qa-island` puts the real
 panel on the real screen; `--qa-cycle` opens/closes it every 3s and logs the window's
-frame per tick to stderr. Both run on fixtures: no Keychain, no network, a throwaway
+frame per tick to stderr. Both run on fixtures: no token reads, no network, a throwaway
 `com.vibehub.qa` defaults suite, a tracker that refuses every mutating call — nothing
 can touch the real install. None of it is compiled into release builds.
 
@@ -217,9 +223,10 @@ daemon reached the server — never that an AI tool is in use.
 Verified on a real MacBook Air (M2, notch 179×32pt, 2026-09-25): the sources compile
 clean; `bundle.sh` → universal app, embedded Node verified and lipo'd, signature valid;
 `make-pkg.sh` → `VibeHub.pkg` (not installed); the island sits flush on the notch at
-the right frame and its window springs open/closed. Known: an ad-hoc build that differs
-from the one that saved the token raises a Keychain prompt on first launch, and the app
-shows nothing until it is answered (the token read is synchronous at launch).
+the right frame and its window springs open/closed. Fixed in 1.2.2: an ad-hoc build that
+differed from the one that saved the token raised a Keychain prompt on first launch and
+froze the app until it was answered — the token now comes from config.json, off-main,
+and the legacy Keychain read never prompts (`--qa-keychain`).
 
 Still open: pkg install → token
 prompt → Start → tracker survives reboot → Island shows data; Island placement on

@@ -1,3 +1,23 @@
+# 1.2.5 (build 8) — "Starting…" instead of "Not counting" right after install (2026-09-26)
+
+- A freshly installed Node takes ~20 s to launch (macOS scans the new binary) before the daemon writes its pid file; the popover said "Not counting" for that whole window after every upgrade or connect. For 60 s after the app (re)starts the LaunchAgent job, a missing pid now reads "Starting…".
+
+# 1.2.4 (build 7) — no false "Can't reach VibeHub" on start (2026-09-26)
+
+- Every tracker start writes an offline snapshot before its first connection check; the popover read it as "Can't reach VibeHub" for 20-30 s after each start (right after installing or connecting). "Can't reach" now needs a check that ran and failed (`lastConnectionCheckAt`); before that the row says "Running".
+- Popover: dropped the "This Mac checked in recently…" line under "Counting"; the Now block already says whether an AI tool is in use.
+
+# 1.2.3 (build 6) — tracker rides out VPN blips (2026-09-26)
+
+- Embeds tracker `436be7a7b8f3`: requests that never reached the server (DNS, connect, TLS handshake dropped by a VPN) are retried in-tick (1 s, 3 s) — only those, so nothing is counted twice; one failed tick right after a good one keeps "connected" (60 s grace, never for a revoked token). Live: the grace fired once, status stayed connected.
+
+# 1.2.2 (build 5) — Keychain prompt froze the app on upgrade (2026-09-26)
+
+- The token's single source of truth is now the tracker's `~/.vibehub/config.json` (`TokenStore`), read once off-main at launch and held in memory. `StatusStore.init`, every poll and every `store.token` used to call `SecItemCopyMatching` on the main thread; a differently-signed upgrade got an "allow access" prompt and froze before `reconcileOnLaunch` ran.
+- The Keychain item is legacy, read-only: read once, only if config.json has no token, never prompting (measured: `kSecUseAuthenticationUISkip` alone still blocked; it now also disables file-keychain interaction around the read, resolved at runtime), migrated into config.json via `login`, then retired. Never written or deleted; not-allowed = no token.
+- Launch audit: Handoff file, local status poll (status.json/pid/kill), `SMAppService` status/register/unregister moved off-main.
+- Proof: DEBUG `--qa-keychain <com.vibehub.qa-*> <dir>`; logs in `.temp/qa/mac/keychain/`.
+
 # 1.2.1 (build 4) — LaunchAgent bootout race (2026-09-26)
 
 - `LaunchAgent.install` waited for nothing between `bootout` and `bootstrap`; bootout is async, so a slow-exiting tracker made bootstrap fail (reproduced: `Bootstrap failed: 5`, 7/10) and the catch then deleted the plist. Now it polls `launchctl print` until the job is really gone, retries 5/37 with exponential backoff, and never deletes the plist on failure (only `uninstall` does).

@@ -146,6 +146,15 @@ private struct TrackerProcess {
 @MainActor
 final class TrackerManager: ObservableObject {
     @Published private(set) var isRunning = false
+    /// When this app last (re)started the LaunchAgent job. A freshly installed Node takes
+    /// ~20 s to launch (macOS scans the new binary) before the daemon writes its pid file;
+    /// live QA 2026-09-26 showed "Not counting" for that whole window after every upgrade.
+    @Published private(set) var agentStartedAt: Date?
+    /// The job was just (re)started and its pid isn't up yet: "Starting…", not "Not counting".
+    var isStarting: Bool {
+        guard !isRunning, isTrackAtLoginEnabled, let started = agentStartedAt else { return false }
+        return Date().timeIntervalSince(started) < 60
+    }
     @Published private(set) var isTrackAtLoginEnabled: Bool
     @Published private(set) var localStatus: LocalTrackerStatus?
     @Published private(set) var lastActionError: String?
@@ -164,10 +173,10 @@ final class TrackerManager: ObservableObject {
     private let launchAgent = LaunchAgent()
     private var pollTask: Task<Void, Never>?
 
-    private static let vibehubDirectory = FileManager.default.homeDirectoryForCurrentUser
+    nonisolated private static let vibehubDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".vibehub")
-    private static let statusPath = vibehubDirectory.appendingPathComponent("status.json")
-    private static let pidPath = vibehubDirectory.appendingPathComponent("tracker.pid")
+    nonisolated private static let statusPath = vibehubDirectory.appendingPathComponent("status.json")
+    nonisolated private static let pidPath = vibehubDirectory.appendingPathComponent("tracker.pid")
     private static let statusPollInterval: Duration = .seconds(5)
 
     init(settings: AppSettings) {
@@ -209,9 +218,8 @@ final class TrackerManager: ObservableObject {
     /// `vibehub://connect` (`AppDelegate`), or the installer's `handoff.json`
     /// (`VibeHubApp.init`) — so "verify against the server, then save" happens exactly
     /// once, the same way, no matter which one fired. Verify-first, not save-first:
-    /// the Keychain is only written once `login` has actually confirmed the token, so
-    /// a bad paste or a stale handoff never overwrites a working token with a rejected
-    /// one. A non-default `apiUrl`/`webUrl` persists into `AppSettings` immediately,
+    /// the app only adopts the token (`TokenStore`) once `login` has confirmed it and
+    /// written config.json, so a bad paste never replaces a working token in the UI. A non-default `apiUrl`/`webUrl` persists into `AppSettings` immediately,
     /// before the verification call — `login` itself needs the (possibly just-updated)
     /// server to call.
     @discardableResult
@@ -227,7 +235,7 @@ final class TrackerManager: ObservableObject {
         // local state dropped. Doing this before `login` means the new token is never
         // written on top of a live previous-account daemon, and no restart can reuse the
         // old account's receipt, session or cached status.
-        let replacingExistingToken = Keychain.readToken().map { $0 != token } ?? false
+        let replacingExistingToken = TokenStore.shared.token.map { $0 != token } ?? false
         let agentWasInstalled = launchAgent.isInstalled
         if replacingExistingToken {
             // Supervisor first. With the agent still bootstrapped, the `stop` inside
@@ -252,7 +260,8 @@ final class TrackerManager: ObservableObject {
             // popover's tracker row offers "Start tracking" again once a login works.
             return result
         }
-        Keychain.writeToken(token)
+        // `login` just wrote it into config.json — the one place the token lives.
+        TokenStore.shared.adopt(token)
         connectedUsername = username
 
         // N1(a): a running supervisor was executing against the config that `login`
@@ -299,9 +308,11 @@ final class TrackerManager: ObservableObject {
         defer { isBusy = false }
         let agent = launchAgent
         try? await Task.detached { try agent.uninstall() }.value
-        launchAtLoginError = settings.setLaunchAtLogin(false)
+        launchAtLoginError = await settings.setLaunchAtLogin(false)
         await retireCurrentAccount()
-        Keychain.deleteToken()
+        // `logout` (in retireCurrentAccount) removed config.json. The legacy Keychain
+        // item is never deleted — only retired, so it can't sign this Mac back in.
+        TokenStore.shared.clear()
         settings.userDisabledTracking = true
         isTrackAtLoginEnabled = launchAgent.isInstalled
         startProgress = .idle
@@ -324,10 +335,27 @@ final class TrackerManager: ObservableObject {
             // Off-main: `install` polls launchd and backs off with blocking sleeps.
             _ = try await Task.detached { try agent.install(nodePath: nodePath, cjsPath: cjsPath) }.value
             lastActionError = nil
+            agentStartedAt = Date()
             return true
         } catch {
             lastActionError = error.localizedDescription
             return false
+        }
+    }
+
+    /// ≤1.2.1 → 1.2.2: a token found only in the legacy Keychain item is written into
+    /// config.json through the CLI's verified `login` (off-main process, token on stdin).
+    /// On failure (offline, rejected) the in-memory token still works this launch and the
+    /// migration is tried again next launch; the Keychain item is never touched.
+    func migrateLegacyTokenIfNeeded() async {
+        #if DEBUG
+        if isFixture { return }
+        #endif
+        guard TokenStore.shared.source == .legacyKeychain, let token = TokenStore.shared.token,
+              hasEmbeddedTracker else { return }
+        if case .success = await login(token: token) {
+            TokenStore.shared.adopt(token)
+            refreshLocalStatus()
         }
     }
 
@@ -355,15 +383,15 @@ final class TrackerManager: ObservableObject {
         return .success(())
     }
 
-    /// Writes the tracker's own `~/.vibehub/config.json` — a separate store from the
-    /// Keychain (ARCHITECTURE.md §4.4), and the one the embedded daemon actually reads.
+    /// Writes the tracker's own `~/.vibehub/config.json` — the token's single source of
+    /// truth since 1.2.2 (`TokenStore`), and the file the embedded daemon reads.
     ///
     /// Success is strict on purpose: exit 0 *and* a stdout line starting with
     /// "Logged in as " (`tracker/src/index.ts`'s `verified.ok` branch, whose returned
     /// `@username` this parses out and returns) — not merely exit 0, since the CLI
     /// still exits 0 and prints "Wrote ..." when it saved the config without being
     /// able to verify the token against the server. That unverified-but-saved case
-    /// must not read as success here: `connect` only writes the Keychain on this
+    /// must not read as success here: `connect` only adopts the token on this
     /// result, and "Start tracking" bootstraps a LaunchAgent on the strength of it — a
     /// silently-invalid token would just launchd-loop the daemon forever with no
     /// visible symptom until the popover's own status row happens to be checked.
@@ -423,7 +451,7 @@ final class TrackerManager: ObservableObject {
         output.contains("unknown option '--token-stdin'") || output.contains("missing required argument 'deviceToken'")
     }
 
-    /// The one "Start tracking" action: (re)runs `login` with the Keychain's token so
+    /// The one "Start tracking" action: (re)runs `login` with the current token so
     /// the tracker's own `~/.vibehub/config.json` is current, then writes + bootstraps
     /// the LaunchAgent — which (via `RunAtLoad`) also starts the tracker immediately,
     /// no separate `start` call needed. Skipping the `login` step would let the
@@ -439,7 +467,7 @@ final class TrackerManager: ObservableObject {
         #if DEBUG
         if isFixture { return .failure(.processFailed("QA fixture: disabled.")) }
         #endif
-        guard let token = Keychain.readToken() else {
+        guard let token = TokenStore.shared.token else {
             lastActionError = TrackerManagerError.noToken.errorDescription
             startProgress = .failed(TrackerManagerError.noToken.errorDescription ?? "")
             return .failure(.noToken)
@@ -483,12 +511,13 @@ final class TrackerManager: ObservableObject {
             return .failure(.launchAgentFailed(error.localizedDescription))
         }
         lastActionError = nil
+        agentStartedAt = Date()
         isTrackAtLoginEnabled = launchAgent.isInstalled
         // N7: the daemon comes back at login via `RunAtLoad`; the app has to be asked
         // separately, and the menu bar / Island are the product's only UI — a machine
         // that reboots into a running tracker with no way to see it is not "started".
         // Both halves are installed by this one approved action (FC5, "re-login").
-        launchAtLoginError = settings.setLaunchAtLogin(true)
+        launchAtLoginError = await settings.setLaunchAtLogin(true)
         // FC5, retained Off: an explicit Start is the only thing that clears the opt-out.
         settings.userDisabledTracking = false
         refreshLocalStatus()
@@ -525,7 +554,7 @@ final class TrackerManager: ObservableObject {
         // choice. The app's own login registration goes with it, and the flag is what
         // stops `reconcileOnLaunch` (and any future helpful restore) from undoing this
         // at the next login, upgrade or reinstall.
-        launchAtLoginError = settings.setLaunchAtLogin(false)
+        launchAtLoginError = await settings.setLaunchAtLogin(false)
         settings.userDisabledTracking = true
         startProgress = .idle
         refreshLocalStatus()
@@ -617,14 +646,24 @@ final class TrackerManager: ObservableObject {
         pollTask = nil
     }
 
+    /// Every 5s and after actions. The three file reads + `kill(pid, 0)` run off-main;
+    /// only the assignment hops back.
     func refreshLocalStatus() {
         #if DEBUG
         if isFixture { return }
         #endif
-        isTrackAtLoginEnabled = launchAgent.isInstalled
-        localStatus = Self.readStatus()
-        isRunning = Self.readRunningPid().map(Self.isProcessAlive) ?? false
-        handleAuthRejectionIfNeeded()
+        let agent = launchAgent
+        Task {
+            let snapshot = await Task.detached(priority: .utility) {
+                (installed: agent.isInstalled,
+                 status: Self.readStatus(),
+                 running: Self.readRunningPid().map(Self.isProcessAlive) ?? false)
+            }.value
+            isTrackAtLoginEnabled = snapshot.installed
+            localStatus = snapshot.status
+            isRunning = snapshot.running
+            handleAuthRejectionIfNeeded()
+        }
     }
 
     /// FC2's freshness bound. The collector's transport TTL is 90s for 30s ticks, so a
@@ -647,7 +686,12 @@ final class TrackerManager: ObservableObject {
     var connectionState: TrackerConnectionState {
         if localStatus?.authRejected == true { return .authRejected }
         guard isStatusFresh else { return .unknown }
-        return localStatus?.connected == true ? .connected : .disconnected
+        if localStatus?.connected == true { return .connected }
+        // "Can't reach" needs evidence: a connection check that ran and failed. The snapshot
+        // the daemon writes on start/stop (`writeOfflineStatus`) has no check yet: that is
+        // "starting", not offline. Live QA 2026-09-26: 20-30 s of a false "Can't reach
+        // VibeHub" after every start, i.e. right after installing or connecting.
+        return localStatus?.lastConnectionCheckAt == nil ? .unknown : .disconnected
     }
 
     /// Whether a snapshot belongs to the account currently signed in. A `status.json`
@@ -671,12 +715,12 @@ final class TrackerManager: ObservableObject {
         return path.hasPrefix(userApplications + "/")
     }
 
-    private static func readStatus() -> LocalTrackerStatus? {
+    nonisolated private static func readStatus() -> LocalTrackerStatus? {
         guard let data = try? Data(contentsOf: statusPath) else { return nil }
         return try? JSONDecoder().decode(LocalTrackerStatus.self, from: data)
     }
 
-    private static func readRunningPid() -> pid_t? {
+    nonisolated private static func readRunningPid() -> pid_t? {
         guard let data = try? Data(contentsOf: pidPath),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let pid = object["pid"] as? Int, pid > 0 else { return nil }
@@ -685,7 +729,7 @@ final class TrackerManager: ObservableObject {
 
     /// Signal 0: doesn't deliver anything, only checks the pid exists and we're allowed
     /// to signal it — the same liveness check the tracker CLI itself uses (`daemon.ts`).
-    private static func isProcessAlive(_ pid: pid_t) -> Bool {
+    nonisolated private static func isProcessAlive(_ pid: pid_t) -> Bool {
         kill(pid, 0) == 0
     }
 }

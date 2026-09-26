@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import Security
 import SwiftUI
 
 /// DEBUG-only visual QA. Two modes, both fully sandboxed from the real install:
@@ -13,7 +14,7 @@ import SwiftUI
 /// `<state>` is loaded | loading | needsToken | failed.
 ///
 /// Isolation, which is the point of this file:
-/// - The Keychain is never read (`Keychain.fixtureToken`) — a differently-signed debug
+/// - No token is ever read (`Keychain.fixtureToken` short-circuits `TokenStore`) — a differently-signed debug
 ///   build would raise an access prompt, and fixtures must not see a real token.
 /// - Preferences go to a throwaway `com.vibehub.qa` suite, wiped before and after, never
 ///   the real `com.vibehub.menubar` domain.
@@ -35,6 +36,11 @@ enum QAHarness {
             wipeSuite()
             FileHandle.standardError.write(Data("snapshot: wrote \(written) PNGs to \(dir)\n".utf8))
             return true
+        }
+        if let index = arguments.firstIndex(of: "--qa-keychain") {
+            let service = arguments.indices.contains(index + 1) ? arguments[index + 1] : ""
+            let dir = arguments.indices.contains(index + 2) ? arguments[index + 2] : NSTemporaryDirectory()
+            exit(runKeychainProof(service: service, dir: URL(fileURLWithPath: dir, isDirectory: true)) ? 0 : 1)
         }
         if let index = arguments.firstIndex(of: "--qa-launchagent-race") {
             let dir = arguments.indices.contains(index + 1) ? arguments[index + 1] : NSTemporaryDirectory()
@@ -289,6 +295,79 @@ enum QAHarness {
         window.contentView = nil
         guard let png = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: url)) != nil
+    }
+
+    // MARK: - Keychain no-prompt proof
+
+    /// Expects two items under a throwaway `com.vibehub.qa-*` service, created by the
+    /// caller with the `security` CLI (so this binary is NOT the creator):
+    ///   account `tracker-token` — ACL trusts no app (`-T ""`): reading must not prompt;
+    /// Every read runs off the main thread under a watchdog: a hang means a prompt.
+    private static func runKeychainProof(service: String, dir: URL) -> Bool {
+        guard service.hasPrefix("com.vibehub.qa-") else {
+            raceLog("refusing: service must start with com.vibehub.qa-")
+            return false
+        }
+        var failures = 0
+        func check(_ name: String, timeout: TimeInterval = 8, _ body: @escaping @Sendable () -> (ok: Bool, detail: String)) {
+            let started = Date()
+            var result: (ok: Bool, detail: String)?
+            let done = DispatchSemaphore(value: 0)
+            DispatchQueue.global(qos: .userInitiated).async {
+                result = body()
+                done.signal()
+            }
+            // Main thread stays free (and keeps its run loop turning) the whole time.
+            while done.wait(timeout: .now()) == .timedOut, Date().timeIntervalSince(started) < timeout {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+            let elapsed = Date().timeIntervalSince(started)
+            guard let result else {
+                failures += 1
+                raceLog(String(format: "FAIL %@ — no answer after %.1fs (a prompt is blocking)", name, elapsed))
+                return
+            }
+            if !result.ok { failures += 1 }
+            raceLog(String(format: "%@ %@ — %@ (%.3fs, main thread free)", result.ok ? "OK  " : "FAIL", name, result.detail, elapsed))
+        }
+
+        check("untrusted item, legacy read") {
+            let read = Keychain.readLegacyToken(service: service, account: "tracker-token")
+            return (read.token == nil, "\(read)")
+        }
+        // A `security`-CLI item is partitioned to Apple tools even with `-A`, so another
+        // binary can never read it silently (see the untrusted check). The readable case is
+        // an item this binary creates itself — test-only, throwaway service, removed below.
+        check("own item (readable), legacy read") {
+            let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                       kSecAttrService as String: service, kSecAttrAccount as String: "self"]
+            var add = base
+            add[kSecValueData as String] = Data("vh_qa_self_token".utf8)
+            let added = SecItemAdd(add as CFDictionary, nil)
+            let read = Keychain.readLegacyToken(service: service, account: "self")
+            let removed = SecItemDelete(base as CFDictionary)
+            return (added == errSecSuccess && read.token == "vh_qa_self_token" && removed == errSecSuccess,
+                    "add=\(added) read=\(read.token == nil ? "\(read)" : "token(<matches>)") cleanup=\(removed)")
+        }
+        let configURL = dir.appendingPathComponent("config.json")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? #"{"apiUrl":"https://example.invalid","deviceToken":"vh_qa_config_token","projectAliases":{}}"#
+            .write(to: configURL, atomically: true, encoding: .utf8)
+        check("config.json wins over Keychain") {
+            let r = TokenStore.resolve(configURL: configURL, allowLegacy: true, legacyService: service)
+            return (r.token == "vh_qa_config_token" && r.source == .config, "source=\(r.source)")
+        }
+        try? FileManager.default.removeItem(at: configURL)
+        check("no config, legacy retired → no Keychain read") {
+            let r = TokenStore.resolve(configURL: configURL, allowLegacy: false, legacyService: service)
+            return (r.token == nil && r.source == .none, "source=\(r.source)")
+        }
+        check("no config, legacy allowed, item not readable → no token") {
+            let r = TokenStore.resolve(configURL: configURL, allowLegacy: true, legacyService: service)
+            return (r.token == nil && r.source == .none, "source=\(r.source)")
+        }
+        raceLog("RESULT: \(failures == 0 ? "PASS" : "FAIL") — \(failures) failure(s)")
+        return failures == 0
     }
 
     // MARK: - LaunchAgent race proof

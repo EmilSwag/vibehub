@@ -20,7 +20,8 @@ enum IslandMode: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// User-facing preferences. The token is deliberately NOT here — it lives in `Keychain`.
+/// User-facing preferences. The token is deliberately NOT here — it lives in the tracker's
+/// `~/.vibehub/config.json`, held in memory by `TokenStore`.
 ///
 /// Two distinct server URLs, matching `web/public/tracker/connect.sh`'s own
 /// `WEB_URL`/`API_URL` split (two different Railway deployments, two different
@@ -144,7 +145,9 @@ final class AppSettings: ObservableObject {
         showTimeInBar = defaults.object(forKey: Key.showTimeInBar) as? Bool ?? true
         baseURL = (defaults.string(forKey: Key.baseURL).flatMap(URL.init(string:))) ?? Self.defaultBaseURL
         webUrl = (defaults.string(forKey: Key.webURL).flatMap(URL.init(string:))) ?? Self.defaultWebURL
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        // `SMAppService.status` is an XPC round trip — not on the launch path's main
+        // thread. Starts false and settles a moment later; nothing at launch reads it.
+        launchAtLogin = false
         let storedIsland = defaults.string(forKey: Key.islandMode).flatMap(IslandMode.init(rawValue:))
         let explicit = defaults.bool(forKey: Key.islandModeExplicit)
         islandModeIsExplicit = explicit
@@ -165,6 +168,11 @@ final class AppSettings: ObservableObject {
     /// Any attached display with a camera housing (`auxiliaryTopLeftArea`, macOS 12+).
     static var hasNotchedScreen: Bool {
         NSScreen.screens.contains { $0.auxiliaryTopLeftArea != nil && $0.auxiliaryTopRightArea != nil }
+    }
+
+    /// Off-main refresh of `launchAtLogin` (see init).
+    func refreshLaunchAtLogin() async {
+        launchAtLogin = await Task.detached(priority: .utility) { SMAppService.mainApp.status == .enabled }.value
     }
 
     /// Called once per launch, after `TrackerManager.reconcileOnLaunch` has had the
@@ -189,18 +197,24 @@ final class AppSettings: ObservableObject {
     /// `SMAppService` throws when the app isn't in a location macOS will launch from
     /// (still in ~/Downloads, or run straight from `.build/`). Surface it rather than
     /// silently leaving the toggle in a lying state.
-    func setLaunchAtLogin(_ enabled: Bool) -> String? {
-        do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
+    ///
+    /// `register`/`unregister`/`status` are XPC round trips to the service-management
+    /// daemon — run off-main, result applied here.
+    func setLaunchAtLogin(_ enabled: Bool) async -> String? {
+        let result: (enabled: Bool, failed: Bool) = await Task.detached(priority: .userInitiated) {
+            var failed = false
+            do {
+                if enabled {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                failed = true
             }
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-            return nil
-        } catch {
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-            return "Move VibeHub to /Applications first."
-        }
+            return (SMAppService.mainApp.status == .enabled, failed)
+        }.value
+        launchAtLogin = result.enabled
+        return result.failed ? "Move VibeHub to /Applications first." : nil
     }
 }

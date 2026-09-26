@@ -125,7 +125,8 @@ struct PopoverView: View {
         case .disconnected:
             return "Can\u{2019}t reach VibeHub"
         case .unknown:
-            return tracker.isRunning ? "Running" : "Not counting"
+            if tracker.isRunning { return "Running" }
+            return tracker.isStarting ? "Starting\u{2026}" : "Not counting"
         }
     }
 
@@ -133,10 +134,9 @@ struct PopoverView: View {
         switch tracker.connectionState {
         case .authRejected:
             return "Reconnect this Mac in Settings."
-        case .connected:
-            // The one sentence that stops a transport tick reading as AI usage.
-            return "This Mac checked in recently. Not the same as an AI tool in use."
-        case .disconnected, .unknown:
+        case .connected, .disconnected, .unknown:
+            // No disclaimer under "Counting": the Now block right below already says
+            // whether an AI tool is in use (QA 2026-09-26: cut text).
             return nil
         }
     }

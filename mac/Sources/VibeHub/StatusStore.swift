@@ -37,11 +37,9 @@ final class StatusStore: ObservableObject {
     init(settings: AppSettings) {
         self.settings = settings
         self.client = APIClient(baseURL: settings.baseURL)
-        if Keychain.readToken() == nil {
-            phase = .needsToken
-        } else {
-            phase = .loading
-        }
+        // No token lookup here — this runs on the main thread during app launch, and the
+        // token is resolved off-main by `TokenStore.load()`. Loading until that finishes.
+        phase = TokenStore.shared.isLoaded && TokenStore.shared.token == nil ? .needsToken : .loading
 
         // A handoff/deep-link naming a non-default server (`AppSettings.adopt`) can
         // arrive after this store already exists — rebuild the client so the *next*
@@ -57,11 +55,12 @@ final class StatusStore: ObservableObject {
             .store(in: &cancellables)
     }
 
-    var token: String? { Keychain.readToken() }
+    /// In-memory (`TokenStore`) — safe to read from views on every render.
+    var token: String? { TokenStore.shared.token }
 
     #if DEBUG
     /// QA harness only: a store frozen on one phase — no poll loop, no network, no
-    /// Keychain. `now` is pinned too, so snapshot timers render the same every run.
+    /// token reads. `now` is pinned too, so snapshot timers render the same every run.
     private(set) var isFixture = false
 
     convenience init(settings: AppSettings, fixture phase: Phase, now: Date) {
@@ -140,7 +139,9 @@ final class StatusStore: ObservableObject {
     }
 
     private func refresh() async {
-        guard let token = Keychain.readToken() else {
+        // Before the launch read finishes, "no token" would flash the sign-in state.
+        guard TokenStore.shared.isLoaded else { return }
+        guard let token = TokenStore.shared.token else {
             phase = .needsToken
             consecutiveFailures = 0
             return

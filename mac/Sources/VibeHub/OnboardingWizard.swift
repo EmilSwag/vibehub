@@ -50,7 +50,7 @@ struct OnboardingWizard: View {
                 begin()
             }
             .task {
-                // A token already in the Keychain (returning user) skips straight on.
+                // A token already in config.json (returning user) skips straight on.
                 guard autoStart, step == .starting else { return }
                 await startTracking()
             }

@@ -60,27 +60,36 @@ struct VibeHubApp: App {
             }
         })
 
-        // Menu-bar apps have no other launch hook: `MenuBarExtra`'s `.window` style
-        // only builds its content view (and fires `.onAppear`) once the user first
-        // clicks the item, but the Island and the menu-bar text both need live data
-        // before that ever happens.
-        store.start()
+        // Launch does no blocking IO on the main thread (1.2.1 freeze: a Keychain prompt
+        // inside `StatusStore.init` hung the app before `reconcileOnLaunch` ever ran).
+        // Everything below is either in-memory or hops off-main itself.
         tracker.startPolling()
-        onboardingWindow.showIfNeeded()
 
-        // FC5: reconcile the LaunchAgent against this launch before anything else can
-        // act on it — tear it down if the user had turned tracking off (an upgrade must
-        // not resurrect it), or rewrite and restart it if the bundle version changed and
-        // the running job is executing replaced binaries.
+        // FC5: reconcile the LaunchAgent first and independently of the token — tear it
+        // down if the user turned tracking off (an upgrade must not resurrect it), or
+        // restart it if the bundle version changed under a running job.
         Task { await tracker.reconcileOnLaunch() }
 
+        // The token (config.json, legacy Keychain fallback) is resolved off-main. Only
+        // then: start polling the server (menu-bar text and Island need live data before
+        // the popover is ever opened), decide whether first run is needed, and migrate a
+        // legacy-only token into config.json.
+        Task { await settings.refreshLaunchAtLogin() }
+        let onboarding = onboardingWindow // a struct's init can't capture `self` in a Task
+        Task {
+            await TokenStore.shared.load()
+            store.start()
+            onboarding.showIfNeeded()
+            await tracker.migrateLegacyTokenIfNeeded()
+        }
+
         // FC4: a handoff carries **server selection only** — `apiUrl`/`webUrl` — never a
-        // credential. Both install entrances are tokenless; the token is typed once, by
-        // hand, in onboarding. So this adopts servers and nothing else, and there is no
-        // `connect` to fire here at all.
-        if let servers = Handoff.consumeInstallerFile() {
-            settings.adopt(baseURL: servers.apiUrl, webUrl: servers.webUrl)
-            store.wake()
+        // credential. The file read + delete happen off-main; adopting hops back.
+        Task {
+            if let servers = await Task.detached(priority: .utility, operation: { Handoff.consumeInstallerFile() }).value {
+                settings.adopt(baseURL: servers.apiUrl, webUrl: servers.webUrl)
+                store.wake()
+            }
         }
 
         // `appDelegate` already exists (see its declaration above) — configure it now

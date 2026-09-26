@@ -41,7 +41,7 @@ struct SettingsView: View {
                         Text("Connected as @\(me.user.username)").font(.system(size: 12))
                     }
                     // N1(b): Sign out is the whole operation — stop the tracker, release
-                    // this device's connection, remove the login item, clear the Keychain.
+                    // this device's connection, remove the login item, forget the token.
                     Button(tracker.isBusy ? "Signing out\u{2026}" : "Sign Out of This Mac") {
                         Task {
                             await tracker.signOut()
