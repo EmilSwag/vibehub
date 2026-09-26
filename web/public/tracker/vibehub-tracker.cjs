@@ -3025,7 +3025,8 @@ var AttestedMetadataAdapter = class {
 var import_node_crypto5 = require("node:crypto");
 
 // src/adapters/jsonlTail.ts
-var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util2 = require("node:util"), MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_BACKLOG_BYTES = 64 * 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 4096, MAX_FILE_BYTES = 256 * 1024 * 1024, utf82 = new import_node_util2.TextDecoder("utf-8", { fatal: !0 }), samePath2 = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile2 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
+var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util2 = require("node:util");
+var MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_BACKLOG_BYTES = 64 * 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 4096, MAX_FILE_BYTES = 256 * 1024 * 1024, MAX_SUBAGENT_DEPTH = 5, MAX_SUBAGENT_DIRS_PER_POLL = 256, MAX_SUBAGENT_ENTRIES_PER_POLL = 2048, NAME = /^[A-Za-z0-9_-]+$/, LOG_NAME = /^[A-Za-z0-9_-]+\.jsonl$/, utf82 = new import_node_util2.TextDecoder("utf-8", { fatal: !0 }), samePath2 = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile2 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
   constructor(source) {
     this.source = source;
     this.configRoot = import_node_path.default.join(this.home, source === "claude-code" ? ".claude" : ".codex"), this.root = import_node_path.default.join(this.configRoot, source === "claude-code" ? "projects" : "sessions"), this.overrideName = source === "claude-code" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
@@ -3037,12 +3038,35 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
   overrideName;
   states = /* @__PURE__ */ new Map();
   listed = /* @__PURE__ */ new Set();
+  /** The metadata `files()` saw, so an unchanged file is skipped without opening it. */
+  listedStats = /* @__PURE__ */ new Map();
   nextGeneration = 1;
+  /** Start of the latest `files()` call, and of the one before it (null = no state yet). */
+  lastPollAt = null;
+  previousPollAt = null;
   clear() {
-    this.states.clear(), this.listed.clear();
+    this.states.clear(), this.listed.clear(), this.listedStats.clear(), this.lastPollAt = null, this.previousPollAt = null;
   }
   generation(file) {
     return this.states.get(file)?.generation ?? 0;
+  }
+  /** True while this file's current generation was created since the previous poll (Codex zero baseline). */
+  bornFresh(file) {
+    return this.states.get(file)?.bornFresh === !0;
+  }
+  /**
+   * For a subagent transcript: its parent session file and project directory, so the
+   * adapter can attribute the work to the parent's project. null for any other file.
+   */
+  subagentParent(file) {
+    if (this.source !== "claude-code") return null;
+    let parts = import_node_path.default.relative(this.root, file).split(import_node_path.default.sep);
+    return parts.length < 4 || parts[2] !== "subagents" ? null : { sessionFile: import_node_path.default.join(this.root, parts[0], `${parts[1]}.jsonl`), projectDir: parts[0] };
+  }
+  /** The encoded project directory a Claude file lives under. */
+  projectDir(file) {
+    let parts = import_node_path.default.relative(this.root, file).split(import_node_path.default.sep);
+    return this.source === "claude-code" && parts.length >= 2 ? parts[0] : null;
   }
   rootsAllowed() {
     let override = process.env[this.overrideName];
@@ -3058,8 +3082,10 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
   }
   layout(parts, isDirectory) {
     if (parts.some((p) => !p || p.length > 200 || /[\x00-\x20\x7f\\/:]/.test(p) || p === "." || p === "..")) return !1;
-    if (this.source === "claude-code")
-      return isDirectory ? parts.length <= 1 && parts.every((p) => /^[A-Za-z0-9_-]+$/.test(p)) : parts.length === 2 && /^[A-Za-z0-9_-]+$/.test(parts[0]) && /^[A-Za-z0-9_-]+\.jsonl$/.test(parts[1]);
+    if (this.source === "claude-code") {
+      let dirs = isDirectory ? parts : parts.slice(0, -1);
+      return !dirs.every((p) => NAME.test(p)) || dirs.length > 2 && (dirs[2] !== "subagents" || dirs.length > 3 + MAX_SUBAGENT_DEPTH) ? !1 : isDirectory ? dirs.length <= 3 + MAX_SUBAGENT_DEPTH : LOG_NAME.test(parts[parts.length - 1]) && (dirs.length === 1 || dirs.length >= 3);
+    }
     let directories = [/^\d{4}$/, /^(?:0[1-9]|1[0-2])$/, /^(?:0[1-9]|[12]\d|3[01])$/], count = isDirectory ? parts.length : parts.length - 1;
     return count > 3 || !isDirectory && count !== 3 || !parts.slice(0, count).every((p, i) => directories[i].test(p)) ? !1 : isDirectory || /^rollout-[A-Za-z0-9_-]+\.jsonl$/.test(parts[3]);
   }
@@ -3079,29 +3105,31 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
       return null;
     }
   }
+  /**
+   * A file found by the walk inside a directory the walk has just verified: layout,
+   * plain regular file and no link. Cheaper than checkedPath (which re-verifies every
+   * ancestor) - readNewLines still runs the full check before any byte is read.
+   */
+  listedFile(file) {
+    let relative = import_node_path.default.relative(this.root, file);
+    if (relative.startsWith("..") || import_node_path.default.isAbsolute(relative) || !this.layout(relative.split(import_node_path.default.sep), !1)) return null;
+    try {
+      let s = import_node_fs2.default.lstatSync(file, { bigint: !0 });
+      return regularFile2(s) && samePath2(import_node_fs2.default.realpathSync(file), file) ? s : null;
+    } catch {
+      return null;
+    }
+  }
   /** Bounded directory metadata enumeration ONLY within the exact layouts above. */
   files(signal) {
-    this.listed.clear();
-    let remaining = MAX_DIRECTORY_ENTRIES, candidates = [], walk = (dir, depth) => {
-      if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
-      let handle;
+    let started = Date.now();
+    this.previousPollAt = this.lastPollAt, this.lastPollAt = started, this.listed.clear(), this.listedStats.clear();
+    let remaining = MAX_DIRECTORY_ENTRIES, sub = { dirs: MAX_SUBAGENT_DIRS_PER_POLL, entries: MAX_SUBAGENT_ENTRIES_PER_POLL }, recent = started - MAX_RECORD_AGE_MS, candidates = [], readEntries = (dir, take) => {
+      let handle, entries = [];
       try {
-        if (handle = import_node_fs2.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return;
-        let entries = [], entry;
-        for (; remaining-- > 0 && !signal?.aborted && (entry = handle.readSync()); ) entries.push(entry);
-        entries.sort((a, b) => b.name.localeCompare(a.name));
-        for (let e of entries) {
-          if (signal?.aborted) break;
-          let file = import_node_path.default.join(dir, e.name);
-          if (!e.isSymbolicLink()) {
-            if (e.isDirectory() && depth < (this.source === "claude-code" ? 1 : 3))
-              walk(file, depth + 1);
-            else if (e.isFile()) {
-              let s = this.checkedPath(file, !1);
-              s && candidates.push({ file, mtime: Number(s.mtimeMs) });
-            }
-          }
-        }
+        if (handle = import_node_fs2.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return [];
+        let entry;
+        for (; !signal?.aborted && take() && (entry = handle.readSync()); ) entries.push(entry);
       } catch {
       } finally {
         try {
@@ -3109,9 +3137,51 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
         } catch {
         }
       }
+      return entries.sort((a, b) => b.name.localeCompare(a.name));
+    }, addFile = (file, minMtime = -1 / 0) => {
+      let s = this.listedFile(file);
+      return !s || Number(s.mtimeMs) < minMtime ? null : (candidates.push({ file, stats: s }), Number(s.mtimeMs));
+    }, recentDir = (dir) => {
+      try {
+        return Number(import_node_fs2.default.lstatSync(dir).mtimeMs) >= recent;
+      } catch {
+        return !1;
+      }
+    }, walkSubagents = (dir, level) => {
+      if (!(signal?.aborted || sub.dirs-- <= 0 || !this.checkedPath(dir, !0)))
+        for (let e of readEntries(dir, () => sub.entries-- > 0)) {
+          if (signal?.aborted) break;
+          let child = import_node_path.default.join(dir, e.name);
+          e.isSymbolicLink() || (e.isFile() ? addFile(child, recent) : e.isDirectory() && level < MAX_SUBAGENT_DEPTH && recentDir(child) && walkSubagents(child, level + 1));
+        }
+    }, walk = (dir, depth) => {
+      if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
+      let entries = readEntries(dir, () => remaining-- > 0), sessionMtime = /* @__PURE__ */ new Map(), sessionDirs = [];
+      for (let e of entries) {
+        if (signal?.aborted) break;
+        let file = import_node_path.default.join(dir, e.name);
+        if (!e.isSymbolicLink()) {
+          if (e.isDirectory() && depth < (this.source === "claude-code" ? 1 : 3))
+            walk(file, depth + 1);
+          else if (e.isDirectory() && this.source === "claude-code" && depth === 1 && NAME.test(e.name))
+            sessionDirs.push(e.name);
+          else if (e.isFile()) {
+            let mtime = addFile(file);
+            mtime !== null && e.name.endsWith(".jsonl") && sessionMtime.set(e.name.slice(0, -6), mtime);
+          }
+        }
+      }
+      for (let name of sessionDirs) {
+        if (signal?.aborted) break;
+        let sessionDir = import_node_path.default.join(dir, name);
+        if ((sessionMtime.get(name) ?? -1 / 0) < recent && !recentDir(sessionDir)) continue;
+        let subagents = import_node_path.default.join(sessionDir, "subagents");
+        (recentDir(subagents) || (sessionMtime.get(name) ?? -1 / 0) >= recent) && walkSubagents(subagents, 0);
+      }
     };
-    walk(this.root, 0);
-    for (let { file } of candidates.sort((a, b) => b.mtime - a.mtime).slice(0, MAX_LOG_FILES)) this.listed.add(file);
+    this.rootsAllowed() && walk(this.root, 0);
+    for (let { file, stats } of candidates.sort((a, b) => Number(b.stats.mtimeMs) - Number(a.stats.mtimeMs)).slice(0, MAX_LOG_FILES))
+      this.listed.add(file), this.listedStats.set(file, stats);
     for (let file of this.states.keys()) this.listed.has(file) || this.states.delete(file);
     return [...this.listed];
   }
@@ -3128,11 +3198,32 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
       size,
       mtime: s.mtimeNs,
       skipPartial,
-      generation: this.nextGeneration++
+      generation: this.nextGeneration++,
+      fromStart: !1,
+      bornFresh: !1
+    };
+  }
+  /** A cursor at byte 0 for a file that is new work since the previous poll (U1). */
+  fromStart(s, since) {
+    let born = Number(s.birthtimeMs);
+    return {
+      dev: s.dev,
+      ino: s.ino,
+      offset: 0,
+      size: 0,
+      mtime: s.mtimeNs,
+      skipPartial: !1,
+      generation: this.nextGeneration++,
+      fromStart: !0,
+      // birthtime is 0/unknown on some filesystems: then it is NOT fresh and a Codex
+      // file keeps the safe baseline rule rather than recounting its totals.
+      bornFresh: born > 0 && born >= since
     };
   }
   readNewLines(file, visit, signal) {
     if (signal?.aborted || !this.listed.has(file)) return;
+    let seen = this.listedStats.get(file), known2 = this.states.get(file);
+    if (seen && known2 && known2.dev === seen.dev && known2.ino === seen.ino && known2.offset === known2.size && BigInt(known2.size) === seen.size && known2.mtime === seen.mtimeNs) return;
     let fd;
     try {
       let before = this.checkedPath(file, !1);
@@ -3146,8 +3237,8 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
         this.states.delete(file);
         return;
       }
-      let size = Number(s.size), cursor = this.states.get(file);
-      if (!cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_BACKLOG_BYTES) {
+      let size = Number(s.size), cursor = this.states.get(file), since = this.previousPollAt;
+      if (!cursor && since !== null && Number(s.mtimeMs) >= since && size <= MAX_BACKLOG_BYTES && (cursor = this.fromStart(s, since), this.states.set(file, cursor)), !cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_BACKLOG_BYTES) {
         this.states.set(file, this.prime(fd, s));
         return;
       }
@@ -3221,6 +3312,21 @@ var UsageAccumulator = class {
 };
 
 // src/adapters/claudeCode.ts
+var MAX_RECEIPTS = 16384, MAX_PROJECT_HINTS = 512, REQUEST_ID = /^req_[A-Za-z0-9_-]{1,120}$/;
+function projectSlug(folder) {
+  return folder.replace(/[^A-Za-z0-9]/g, "-");
+}
+function launchFolder(cwd, projectDir) {
+  if (typeof cwd != "string" || !projectDir || cwd.length > 1024 || /[\x00-\x1f\x7f]/.test(cwd)) return null;
+  let prefix = cwd.replace(/[\\/]+$/, "");
+  for (let depth = 0; prefix && depth < 64; depth++) {
+    if (projectSlug(prefix) === projectDir) return folderFromCwd(prefix);
+    let cut = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("\\"));
+    if (cut <= 0) break;
+    prefix = prefix.slice(0, cut);
+  }
+  return null;
+}
 var ClaudeCodeAdapter = class {
   constructor(recentWindowMs) {
     this.recentWindowMs = recentWindowMs;
@@ -3230,17 +3336,21 @@ var ClaudeCodeAdapter = class {
   tailer = new JsonlTailer("claude-code");
   fileMeta = /* @__PURE__ */ new Map();
   receipts = /* @__PURE__ */ new Map();
+  projectHints = /* @__PURE__ */ new Map();
   clear() {
-    this.tailer.clear(), this.fileMeta.clear(), this.receipts.clear();
+    this.tailer.clear(), this.fileMeta.clear(), this.receipts.clear(), this.projectHints.clear();
+  }
+  rememberHint(projectDir, hint) {
+    if (projectDir)
+      for (this.projectHints.delete(projectDir), this.projectHints.set(projectDir, hint); this.projectHints.size > MAX_PROJECT_HINTS; ) this.projectHints.delete(this.projectHints.keys().next().value);
   }
   async poll(now = Date.now(), signal) {
     let files = this.tailer.files(signal), present = new Set(files);
     for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
-    for (let [id, receipt] of this.receipts) now - receipt.seenAt > MAX_EVENT_AGE_MS && this.receipts.delete(id);
-    let out = [];
-    for (let file of files) {
+    let out = [], ordered = [...files].sort((a, b) => +(this.tailer.subagentParent(a) !== null) - +(this.tailer.subagentParent(b) !== null));
+    for (let file of ordered) {
       if (signal?.aborted) break;
-      let meta = this.fileMeta.get(file), usage = new UsageAccumulator();
+      let meta = this.fileMeta.get(file), parent = this.tailer.subagentParent(file), projectDir = this.tailer.projectDir(file), usage = new UsageAccumulator();
       if (this.tailer.readNewLines(file, (raw, generation) => {
         let line = objectRecord(raw);
         if (!line || line.type !== "assistant") return;
@@ -3248,20 +3358,20 @@ var ClaudeCodeAdapter = class {
         if (!message || message.role !== "assistant" || !counts || at === null || typeof message.id != "string" || message.id.length > 128 || !/^msg_[A-Za-z0-9_-]+$/.test(message.id) || /\s/.test(message.id) || message.model === "<synthetic>" || !isCount(counts.input_tokens) || !isCount(counts.output_tokens) || !isCount(counts.cache_read_input_tokens ?? 0) || !isCount(counts.cache_creation_input_tokens ?? 0)) return;
         let cacheWrite = counts.cache_creation_input_tokens ?? 0, cacheRead = counts.cache_read_input_tokens ?? 0, input = counts.input_tokens + cacheWrite, output = counts.output_tokens;
         if (!isCount(input)) return;
-        let projectHint = folderFromCwd(line.cwd);
-        if (!projectHint || (meta?.generation === generation && meta.projectHint !== projectHint && (meta.invalidProject = !0), meta?.generation === generation && meta.invalidProject)) return;
-        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto5.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
-        if (previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output || cacheRead < previous.cacheRead || cacheWrite < previous.cacheWrite)) return;
+        let dir = parent?.projectDir ?? projectDir, known2 = (meta?.generation === generation ? meta.projectHint : null) ?? (parent ? this.fileMeta.get(parent.sessionFile)?.projectHint : null) ?? (dir ? this.projectHints.get(dir) : void 0) ?? null, projectHint = launchFolder(line.cwd, dir) ?? known2 ?? folderFromCwd(line.cwd);
+        if (!projectHint) return;
+        let model = safeModel(message.model, "claude-code"), requestId = typeof line.requestId == "string" && REQUEST_ID.test(line.requestId) ? line.requestId : "", id = (0, import_node_crypto5.createHash)("sha256").update(`${message.id}\0${requestId}`).digest("hex").slice(0, 32), previous = this.receipts.get(id);
+        if (previous && (this.receipts.delete(id), this.receipts.set(id, previous)), previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output || cacheRead < previous.cacheRead || cacheWrite < previous.cacheWrite)) return;
         let inputDelta = input - (previous?.input ?? 0), outputDelta = output - (previous?.output ?? 0), cacheReadDelta = cacheRead - (previous?.cacheRead ?? 0), cacheWriteDelta = cacheWrite - (previous?.cacheWrite ?? 0);
         if (!(!(inputDelta || outputDelta || cacheReadDelta) || !usage.add(model, inputDelta, outputDelta, !1, { cacheRead: cacheReadDelta, cacheWrite: cacheWriteDelta }))) {
-          for (this.receipts.set(id, { input, output, cacheRead, cacheWrite, model, at, seenAt: now }); this.receipts.size > 2048; ) this.receipts.delete(this.receipts.keys().next().value);
-          (!meta || meta.generation !== generation) && (meta = { generation, projectHint, model: null, lastActivityAt: 0, invalidProject: !1 }), meta.projectHint = folderFromCwd(line.cwd), meta.model = model, meta.lastActivityAt = Math.max(meta.lastActivityAt, at);
+          for (this.receipts.set(id, { input, output, cacheRead, cacheWrite, model, at }); this.receipts.size > MAX_RECEIPTS; ) this.receipts.delete(this.receipts.keys().next().value);
+          (!meta || meta.generation !== generation) && (meta = { generation, projectHint, model: null, lastActivityAt: 0 }), meta.projectHint = projectHint, parent || this.rememberHint(projectDir, projectHint), meta.model = model, meta.lastActivityAt = Math.max(meta.lastActivityAt, at);
         }
       }, signal), !meta || meta.generation !== this.tailer.generation(file)) {
         this.fileMeta.delete(file);
         continue;
       }
-      if (this.fileMeta.set(file, meta), meta.invalidProject) continue;
+      this.fileMeta.set(file, meta);
       let late = now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS), list = usage.toList();
       late && !list.length || out.push({
         tool: this.name,
@@ -3284,7 +3394,6 @@ var ClaudeCodeAdapter = class {
 // src/adapters/codex.ts
 var emptyMeta = (generation) => ({
   generation,
-  invalidProject: !1,
   contextModel: null,
   contextProject: null,
   contextAt: 0,
@@ -3306,6 +3415,16 @@ var emptyMeta = (generation) => ({
   clear() {
     this.tailer.clear(), this.fileMeta.clear();
   }
+  /**
+   * L1 follow-up (U1): a rollout CREATED since the previous poll is read from byte 0 and
+   * its totals start at zero, so its first turn counts. Any other file keeps the rule
+   * that its first counter is a baseline - a file that merely re-entered the listing
+   * must never have its whole cumulative total booked again.
+   */
+  freshMeta(file, generation) {
+    let meta = emptyMeta(generation);
+    return this.tailer.bornFresh(file) && (meta.input = 0, meta.output = 0, meta.cached = 0), meta;
+  }
   async poll(now = Date.now(), signal) {
     let files = this.tailer.files(signal), present = new Set(files);
     for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
@@ -3317,16 +3436,16 @@ var emptyMeta = (generation) => ({
         let line = objectRecord(raw), payload = objectRecord(line?.payload), at = countTime(line?.timestamp, now);
         if (!line || !payload || at === null) return;
         if (line.type === "turn_context") {
-          if ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.contextAt) return;
+          if ((!meta || meta.generation !== generation) && (meta = this.freshMeta(file, generation)), at < meta.contextAt) return;
           let project = folderFromCwd(payload.cwd);
-          (!project || meta.contextProject !== null && meta.contextProject !== project) && (meta.invalidProject = !0), meta.contextModel = safeModel(payload.model, "codex"), meta.contextProject = project, meta.contextAt = at;
+          meta.contextProject ??= project, meta.contextModel = safeModel(payload.model, "codex"), meta.contextAt = at;
           return;
         }
         if (line.type !== "event_msg" || payload.type !== "token_count") return;
         let info = objectRecord(payload.info), total = objectRecord(info?.total_token_usage);
-        if (!total || !isCount(total.input_tokens, 1e12) || !isCount(total.output_tokens, 1e12) || ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.counterAt)) return;
+        if (!total || !isCount(total.input_tokens, 1e12) || !isCount(total.output_tokens, 1e12) || ((!meta || meta.generation !== generation) && (meta = this.freshMeta(file, generation)), at < meta.counterAt)) return;
         let input = total.input_tokens, output = total.output_tokens, cached = isCount(total.cached_input_tokens, 1e12) ? Math.min(total.cached_input_tokens, input) : 0, baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output || cached < meta.cached, cacheReadDelta = baseline ? 0 : cached - meta.cached, inputDelta = baseline ? 0 : Math.max(0, input - meta.input - cacheReadDelta), outputDelta = baseline ? 0 : output - meta.output;
-        if (meta.input = input, meta.output = output, meta.cached = cached, meta.counterAt = at, baseline || meta.invalidProject || !(inputDelta || outputDelta || cacheReadDelta)) return;
+        if (meta.input = input, meta.output = output, meta.cached = cached, meta.counterAt = at, baseline || !(inputDelta || outputDelta || cacheReadDelta)) return;
         let hasContext = meta.contextProject !== null && at - meta.contextAt <= MAX_RECORD_AGE_MS;
         if (!hasContext) return;
         let model = meta.contextModel;
@@ -3335,7 +3454,7 @@ var emptyMeta = (generation) => ({
         this.fileMeta.delete(file);
         continue;
       }
-      if (this.fileMeta.set(file, meta), meta.invalidProject || !meta.lastActivityAt) continue;
+      if (this.fileMeta.set(file, meta), !meta.lastActivityAt) continue;
       let late = now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS), list = usage.toList();
       late && !list.length || out.push({
         tool: this.name,

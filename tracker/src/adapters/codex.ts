@@ -5,7 +5,6 @@ import { UsageAccumulator } from "./usage";
 
 interface FileMeta {
   generation: number;
-  invalidProject: boolean;
   contextModel: string | null;
   contextProject: string | null;
   contextAt: number;
@@ -17,7 +16,7 @@ interface FileMeta {
   counterAt: number;
   lastActivityAt: number;
 }
-const emptyMeta = (generation: number): FileMeta => ({ generation, invalidProject: false, contextModel: null, contextProject: null,
+const emptyMeta = (generation: number): FileMeta => ({ generation, contextModel: null, contextProject: null,
   contextAt: 0, model: null, projectHint: null, input: null, output: null, cached: 0, counterAt: 0, lastActivityAt: 0 });
 
 /**
@@ -32,6 +31,18 @@ export class CodexAdapter implements Adapter {
   private fileMeta = new Map<string, FileMeta>();
   constructor(private recentWindowMs: number) {}
   clear(): void { this.tailer.clear(); this.fileMeta.clear(); }
+
+  /**
+   * L1 follow-up (U1): a rollout CREATED since the previous poll is read from byte 0 and
+   * its totals start at zero, so its first turn counts. Any other file keeps the rule
+   * that its first counter is a baseline - a file that merely re-entered the listing
+   * must never have its whole cumulative total booked again.
+   */
+  private freshMeta(file: string, generation: number): FileMeta {
+    const meta = emptyMeta(generation);
+    if (this.tailer.bornFresh(file)) { meta.input = 0; meta.output = 0; meta.cached = 0; }
+    return meta;
+  }
 
   async poll(now = Date.now(), signal?: AbortSignal): Promise<Observation[]> {
     const files = this.tailer.files(signal);
@@ -48,12 +59,14 @@ export class CodexAdapter implements Adapter {
         const at = countTime(line?.timestamp, now);
         if (!line || !payload || at === null) return;
         if (line.type === "turn_context") {
-          if (!meta || meta.generation !== generation) meta = emptyMeta(generation);
+          if (!meta || meta.generation !== generation) meta = this.freshMeta(file, generation);
           if (at < meta.contextAt) return;
           const project = folderFromCwd(payload.cwd);
-          if (!project || (meta.contextProject !== null && meta.contextProject !== project)) meta.invalidProject = true;
+          // L1 P0: the first project a rollout names is its project. A later turn in
+          // another folder (or one with no usable cwd) keeps it, instead of invalidating
+          // the file and dropping every later token and its presence.
+          meta.contextProject ??= project;
           meta.contextModel = safeModel(payload.model, "codex");
-          meta.contextProject = project;
           meta.contextAt = at;
           return;
         }
@@ -61,7 +74,7 @@ export class CodexAdapter implements Adapter {
         const info = objectRecord(payload.info);
         const total = objectRecord(info?.total_token_usage);
         if (!total || !isCount(total.input_tokens, 1_000_000_000_000) || !isCount(total.output_tokens, 1_000_000_000_000)) return;
-        if (!meta || meta.generation !== generation) meta = emptyMeta(generation);
+        if (!meta || meta.generation !== generation) meta = this.freshMeta(file, generation);
         if (at < meta.counterAt) return;
         // QA fix (R2): Codex's input_tokens INCLUDES cached_input_tokens. Fresh input is
         // the difference; the cached part rides as cache reads. A malformed or oversized
@@ -75,7 +88,7 @@ export class CodexAdapter implements Adapter {
         const inputDelta = baseline ? 0 : Math.max(0, input - meta.input! - cacheReadDelta);
         const outputDelta = baseline ? 0 : output - meta.output!;
         meta.input = input; meta.output = output; meta.cached = cached; meta.counterAt = at;
-        if (baseline || meta.invalidProject || !(inputDelta || outputDelta || cacheReadDelta)) return;
+        if (baseline || !(inputDelta || outputDelta || cacheReadDelta)) return;
         // The turn context must be from the same stretch of work as the counter it labels;
         // measured against the counter's own time, so a late-read counter keeps its context.
         const hasContext = meta.contextProject !== null && at - meta.contextAt <= MAX_RECORD_AGE_MS;
@@ -88,7 +101,7 @@ export class CodexAdapter implements Adapter {
       }, signal);
       if (!meta || meta.generation !== this.tailer.generation(file)) { this.fileMeta.delete(file); continue; }
       this.fileMeta.set(file, meta);
-      if (meta.invalidProject || !meta.lastActivityAt) continue;
+      if (!meta.lastActivityAt) continue;
       // Same rule as Claude Code: stale activity is not presence, its fresh usage counts.
       const late = now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS);
       const list = usage.toList();
