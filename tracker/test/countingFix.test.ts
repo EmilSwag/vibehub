@@ -7,13 +7,15 @@
 //   R3  nothing read is silently dropped: big appends are caught up in chunks, a record
 //       cap pauses instead of skipping, late records still count (never as presence), and
 //       usage from a heartbeat that failed goes out with the next one.
+//   R4  a flaky network (a VPN dropping TLS handshakes) neither loses usage nor flashes
+//       "offline": requests that never left are retried in-tick, one bad tick is a blink.
 //
 // SAFETY: same sandbox rule as every tracker test - HOME is redirected BEFORE any tracker
 // module loads and the redirect is asserted, network is a local stub, processes are
 // forbidden. A real ~/.vibehub, ~/.claude or ~/.codex is never read or written.
 
 import { strict as assert } from "node:assert";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { after, describe, it, mock } from "node:test";
 import type { TrackerConfig } from "../src/types";
@@ -28,7 +30,7 @@ process.env.HOMEPATH = sandbox.slice(2);
 delete process.env.CLAUDE_CONFIG_DIR;
 delete process.env.CODEX_HOME;
 
-const { CONFIG_DIR } = require("../src/paths") as typeof import("../src/paths");
+const { CONFIG_DIR, STATUS_PATH } = require("../src/paths") as typeof import("../src/paths");
 if (!CONFIG_DIR.startsWith(sandbox)) {
   throw new Error(`refusing to run: the tracker resolves ${CONFIG_DIR}, not the sandbox ${sandbox}`);
 }
@@ -37,7 +39,8 @@ const { ClaudeCodeAdapter } = require("../src/adapters/claudeCode") as typeof im
 const { CodexAdapter } = require("../src/adapters/codex") as typeof import("../src/adapters/codex");
 const { MAX_CHUNK_BYTES, MAX_RECORDS_PER_FILE } = require("../src/adapters/jsonlTail") as typeof import("../src/adapters/jsonlTail");
 const { Detector } = require("../src/detector") as typeof import("../src/detector");
-const { createLoopState, tick } = require("../src/heartbeat") as typeof import("../src/heartbeat");
+const { createLoopState, tick, failedBeforeSend, verifyConnection, CONNECTED_GRACE_MS } =
+  require("../src/heartbeat") as typeof import("../src/heartbeat");
 
 const forbidden = (): never => { throw new Error("process calls are forbidden in isolated counting tests"); };
 mock.method(process, "kill", forbidden);
@@ -241,6 +244,132 @@ describe("R3: nothing read is dropped", () => {
       await tick(config, state);
       assert.equal(beats.length, 1, "the next beat goes through");
       assert.deepEqual(beats[0].usage, [{ tool: "claude-code", model: "claude-opus-5-5", tokensInputDelta: 1, tokensOutputDelta: 2 }]);
+    } finally {
+      fetchMock.mock.restore();
+      warn.mock.restore();
+    }
+  });
+});
+
+describe("R4: a flaky network neither loses usage nor flashes offline", () => {
+  // Exactly what Node's fetch throws when a VPN with a dead upstream drops the handshake.
+  const tlsDrop = (): Error => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(
+    new Error("Client network socket disconnected before secure TLS connection was established"), { code: "ECONNRESET" }) });
+  const fetchFailed = (code: string, message: string): Error =>
+    Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(message), { code }) });
+  const receipt = (): Response => new Response(JSON.stringify({ protocol: "connection-v1", connected: true,
+    lastSeenAt: new Date().toISOString() }), { status: 200 });
+  const status = (): { connected?: boolean; authRejected?: boolean } => JSON.parse(readFileSync(STATUS_PATH, "utf8"));
+  const config = (deviceToken: string): TrackerConfig => ({ apiUrl: "http://127.0.0.1:9", deviceToken, projectAliases: {} });
+
+  it("tells a request that never left from one that may have been counted", () => {
+    assert.equal(failedBeforeSend(tlsDrop()), true, "TLS handshake dropped");
+    assert.equal(failedBeforeSend(fetchFailed("ENOTFOUND", "getaddrinfo ENOTFOUND api")), true);
+    assert.equal(failedBeforeSend(fetchFailed("ECONNREFUSED", "connect ECONNREFUSED")), true);
+    assert.equal(failedBeforeSend(fetchFailed("UND_ERR_CONNECT_TIMEOUT", "Connect Timeout Error")), true);
+    assert.equal(failedBeforeSend(fetchFailed("ECONNRESET", "read ECONNRESET")), false, "reset mid-response may have landed");
+    assert.equal(failedBeforeSend(Object.assign(new Error("This operation was aborted"), { name: "AbortError" })), false,
+      "our own timeout may have landed");
+    assert.equal(failedBeforeSend("boom"), false);
+    const loop: Error & { cause?: unknown } = new Error("loop");
+    loop.cause = loop;
+    assert.equal(failedBeforeSend(loop), false, "a cyclic cause chain terminates");
+  });
+
+  it("retries a dropped handshake twice, never a 5xx", async () => {
+    let script: Array<() => Response> = [];
+    let calls = 0;
+    const fetchMock = mock.method(globalThis, "fetch", async () => {
+      calls++;
+      const next = script.shift();
+      if (!next) throw new Error("unexpected extra request");
+      return next();
+    });
+    const drop = (): Response => { throw tlsDrop(); };
+    try {
+      script = [drop, receipt];
+      assert.equal((await verifyConnection(config("token-R1"), undefined, [0, 0])).ok, true);
+      assert.equal(calls, 2, "connected on the retry");
+
+      calls = 0;
+      script = [drop, drop, drop];
+      const down = await verifyConnection(config("token-R1"), undefined, [0, 0]);
+      assert.deepEqual([down.ok, down.preSend, down.transient, calls], [false, true, true, 3], "gives up after two retries");
+
+      calls = 0;
+      script = [() => new Response("{}", { status: 503 })];
+      const busy = await verifyConnection(config("token-R1"), undefined, [0, 0]);
+      assert.deepEqual([busy.ok, busy.transient, busy.preSend, calls], [false, true, undefined, 1], "a 5xx waits for the next tick");
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("re-sends a heartbeat that never left, counting it exactly once", async () => {
+    const file = newClaudeLog();
+    const cfg = config("token-R2");
+    const state = createLoopState(cfg);
+    state.loadConfig = () => cfg;
+    state.retryDelaysMs = [0, 0];
+    const beats: Record<string, unknown>[] = [];
+    let drops = 0;
+    const fetchMock = mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/connection")) return receipt();
+      const body = JSON.parse(String(init?.body));
+      if (body.eventType !== "heartbeat") return new Response("{}", { status: 200 });
+      if (drops > 0) { drops--; throw tlsDrop(); }
+      beats.push(body);
+      return new Response("{}", { status: 200 });
+    });
+    try {
+      await tick(cfg, state); // primes the logs
+      appendFileSync(file, assistant(OPUS_TURN));
+      drops = 1;
+      await tick(cfg, state);
+      assert.equal(beats.length, 1, "delivered by the in-tick retry");
+      assert.deepEqual(beats[0].usage, [{ tool: "claude-code", model: "claude-opus-5-5", tokensInputDelta: 210,
+        tokensOutputDelta: 50, tokensCacheReadDelta: 5_000, tokensCacheWriteDelta: 200 }]);
+      assert.equal(state.pendingUsage.size, 0);
+      await tick(cfg, state);
+      assert.deepEqual(beats.slice(1).flatMap((b) => (b.usage as unknown[]) ?? []), [], "nothing is sent twice");
+      assert.equal(status().connected, true);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("stays connected through a blink, reports a lasting outage, never masks a revoked token", async () => {
+    const cfg = config("token-R3");
+    const state = createLoopState(cfg);
+    state.loadConfig = () => cfg;
+    state.retryDelaysMs = [0, 0];
+    let mode: "ok" | "drop" | "busy" | "revoked" = "ok";
+    const warn = mock.method(console, "warn", () => {});
+    const fetchMock = mock.method(globalThis, "fetch", async (url: string) => {
+      if (!String(url).endsWith("/connection")) return new Response("{}", { status: 200 });
+      if (mode === "drop") throw tlsDrop();
+      if (mode === "busy") return new Response("{}", { status: 502 });
+      if (mode === "revoked") return new Response("{}", { status: 401 });
+      return receipt();
+    });
+    try {
+      await tick(cfg, state);
+      assert.equal(status().connected, true);
+      mode = "drop";
+      await tick(cfg, state);
+      assert.equal(status().connected, true, "one tick of dropped handshakes is a blink");
+      mode = "busy";
+      await tick(cfg, state);
+      assert.equal(status().connected, true, "a 502 inside the grace too");
+      state.lastConnectedAt = Date.now() - CONNECTED_GRACE_MS - 1;
+      await tick(cfg, state);
+      assert.equal(status().connected, false, "an outage past the grace is reported");
+      mode = "ok";
+      await tick(cfg, state);
+      assert.equal(status().connected, true, "and clears on the next good tick");
+      mode = "revoked";
+      await tick(cfg, state);
+      assert.deepEqual([status().connected, status().authRejected], [false, true], "a revoked token is never a blink");
     } finally {
       fetchMock.mock.restore();
       warn.mock.restore();

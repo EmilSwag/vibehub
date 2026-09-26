@@ -20,6 +20,18 @@ interface ActiveSession {
 export const MODEL_SWITCH_POLLS = 2;
 const STOP_REQUEST_POLL_MS = 1000;
 const IN_FLIGHT_GRACE_MS = 3000;
+/**
+ * A VPN/proxy that can't reach upstream drops a TLS handshake now and then (measured on a
+ * live Mac: 1 in 5-10 fresh connections, failing in ~5 s). A request that never reached the
+ * server gets two more tries before anything is reported. Only those: they fail fast and
+ * can't double count, so a tick stays well inside the watchdog.
+ */
+export const CONNECTION_RETRY_DELAYS_MS: readonly number[] = [1000, 3000];
+/**
+ * One failed tick right after a good one is a blink, not a disconnect: the last connected
+ * snapshot is kept. Two ticks (30 s each) is the limit, safely under the app's 90 s staleness.
+ */
+export const CONNECTED_GRACE_MS = 60_000;
 
 export interface LoopState {
   activeSession: ActiveSession | null;
@@ -44,6 +56,10 @@ export interface LoopState {
   binding: string | null;
   requestAbort: AbortController | null;
   loadConfig: () => TrackerConfig | null;
+  /** When a connected snapshot was last written; a transient failure inside the grace keeps it. */
+  lastConnectedAt: number | null;
+  /** Retry spacing for dropped requests; injectable so tests don't sleep. */
+  retryDelaysMs: readonly number[];
 }
 
 export function createLoopState(config?: TrackerConfig): LoopState {
@@ -55,7 +71,8 @@ export function createLoopState(config?: TrackerConfig): LoopState {
     pendingUsage: new Map(), pendingSince: null, sourcesSeen: new Map(), modelChallenger: null,
     activeWindowMs, attestedTools, stopping: false, epoch: 0,
     binding: valid ? configFingerprint(valid) : null,
-    requestAbort: null, loadConfig: readConfig };
+    requestAbort: null, loadConfig: readConfig,
+    lastConnectedAt: null, retryDelaysMs: CONNECTION_RETRY_DELAYS_MS };
 }
 
 /** Discard evidence on consent/config/account changes, cancellation or failed verification. */
@@ -70,6 +87,8 @@ export function clearCollectedState(state: LoopState, config?: TrackerConfig): v
   state.pendingSince = null;
   state.sourcesSeen.clear();
   state.modelChallenger = null;
+  // A connected snapshot from the old config/account proves nothing about the new one.
+  state.lastConnectedAt = null;
   state.binding = config ? configFingerprint(config) : null;
   // Withdrawing consent must take the receiver away, not merely stop using it, so a
   // detector built under the old setting is replaced rather than reused.
@@ -128,6 +147,34 @@ function sameConfig(config: TrackerConfig, load: () => TrackerConfig | null): bo
   } catch { return false; }
 }
 
+const PRE_SEND_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/**
+ * True only when fetch failed before the request could reach the server: DNS, TCP connect
+ * or the TLS handshake. Such a request can be re-sent without any risk of double counting;
+ * anything else (a reset mid-response, a timeout after sending) might already be counted.
+ */
+export function failedBeforeSend(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  for (let e = error; e && typeof e === "object" && !seen.has(e); e = (e as { cause?: unknown }).cause) {
+    seen.add(e);
+    const code = String((e as { code?: unknown }).code ?? "");
+    const message = String((e as { message?: unknown }).message ?? "");
+    if (PRE_SEND_CODES.has(code) || /before secure TLS connection was established/i.test(message)) return true;
+  }
+  return false;
+}
+
+/** Sleeps `ms`; false when the signal aborted first. */
+function pause(ms: number, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(false); return; }
+    const onAbort = (): void => { clearTimeout(timer); resolve(false); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(true); }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /** Only the already-configured origin and existing tracker routes; no redirects. */
 async function requestTracker(
   apiUrl: string, deviceToken: string, payload?: HeartbeatPayload, signal?: AbortSignal, retiring = false
@@ -157,8 +204,13 @@ async function requestTracker(
     }
     try { await res.body?.cancel(); } catch {}
     const refused = res.status === 400 || res.status === 413 || res.status === 422;
-    return { ok: !controller.signal.aborted && res.ok, authRejected, ...(refused ? { refused } : {}) };
-  } catch { return { ok: false, authRejected: false }; }
+    return { ok: !controller.signal.aborted && res.ok, authRejected, ...(refused ? { refused } : {}),
+      ...(res.status >= 500 ? { transient: true } : {}) };
+  } catch (error) {
+    // The caller cancelling is not a network problem; our own 15 s timeout is.
+    if (signal?.aborted) return { ok: false, authRejected: false };
+    return { ok: false, authRejected: false, transient: true, ...(failedBeforeSend(error) ? { preSend: true } : {}) };
+  }
   finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
 }
 
@@ -172,8 +224,15 @@ export async function postHeartbeat(
 }
 
 /** Connection-v1 transport receipt, NOT login verification or a fake ACTIVE event. */
-export function verifyConnection(config: TrackerConfig, signal?: AbortSignal): Promise<SendResult> {
-  return requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+export async function verifyConnection(
+  config: TrackerConfig, signal?: AbortSignal, retryDelaysMs: readonly number[] = CONNECTION_RETRY_DELAYS_MS
+): Promise<SendResult> {
+  let result = await requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+  for (const ms of retryDelaysMs) {
+    if (result.ok || !result.preSend || !await pause(ms, signal)) break;
+    result = await requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+  }
+  return result;
 }
 
 /** Best-effort bodyless clean stop; a failed receipt expires under the server lease. */
@@ -216,6 +275,7 @@ function buildTools(state: LoopState, config: TrackerConfig): HeartbeatTool[] {
 function writeSnapshot(state: LoopState, config: TrackerConfig | undefined, connected: boolean, rejected = false, receipt?: string): void {
   const now = new Date().toISOString();
   const session = connected ? state.activeSession : null;
+  if (connected) state.lastConnectedAt = Date.now();
   writeStatus({ configFingerprint: config ? configFingerprint(config) : undefined, connected,
     attestedReceiver: config ? attestedToolsFor(config).length > 0 : false,
     lastConnectionCheckAt: now, lastConnectionSeenAt: connected ? receipt : undefined,
@@ -257,6 +317,10 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     unsent = [];
   };
   const failed = (result: SendResult, carriedUsage = false): void => {
+    // The network blinked right after a good tick: keep the last connected snapshot instead
+    // of flashing "offline". Usage handling below is unchanged, so nothing is lost either way.
+    const blink = result.transient === true && !result.authRejected && state.lastConnectedAt !== null &&
+      Date.now() - state.lastConnectedAt < CONNECTED_GRACE_MS;
     if (result.authRejected) {
       unsent = [];
       clearCollectedState(state, safe);
@@ -272,18 +336,24 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
       keepUnsent();
       softReset(state);
     }
-    writeSnapshot(state, safe, false, result.authRejected);
+    if (blink) console.warn("tracker: network blinked; retrying next tick");
+    else writeSnapshot(state, safe, false, result.authRejected);
   };
   const send = async (payload: HeartbeatPayload): Promise<boolean> => {
     if (!allowed()) return false;
-    const result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    let result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    // Only a request that provably never reached the server is re-sent: no double counting.
+    for (const ms of state.retryDelaysMs) {
+      if (result.ok || !result.preSend || !allowed() || !await pause(ms, controller.signal)) break;
+      result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    }
     if (!allowed()) return false;
     if (!result.ok) { failed(result, payload.eventType === "heartbeat"); return false; }
     return true;
   };
   try {
     // No source reads with invalid/revoked credentials or unavailable verification.
-    const connection = await verifyConnection(safe, controller.signal);
+    const connection = await verifyConnection(safe, controller.signal, state.retryDelaysMs);
     if (!allowed()) return;
     if (!connection.ok) { failed(connection); return; }
     const current = state.activeSession ? { tool: state.activeSession.tool, cwd: null, projectHint: state.activeSession.projectHint } : undefined;

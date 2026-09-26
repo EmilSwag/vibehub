@@ -3977,7 +3977,7 @@ function clearStopRequest() {
 }
 
 // src/heartbeat.ts
-var STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3;
+var STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3, CONNECTION_RETRY_DELAYS_MS = [1e3, 3e3], CONNECTED_GRACE_MS = 6e4;
 function createLoopState(config) {
   let valid = projectConfig(config), activeWindowMs = valid ? idleThresholdMs(valid) : 3e5, attestedTools = valid ? attestedToolsFor(valid) : [];
   return {
@@ -3994,11 +3994,13 @@ function createLoopState(config) {
     epoch: 0,
     binding: valid ? configFingerprint(valid) : null,
     requestAbort: null,
-    loadConfig: readConfig
+    loadConfig: readConfig,
+    lastConnectedAt: null,
+    retryDelaysMs: CONNECTION_RETRY_DELAYS_MS
   };
 }
 function clearCollectedState(state, config) {
-  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.pendingSince = null, state.sourcesSeen.clear(), state.modelChallenger = null, state.binding = config ? configFingerprint(config) : null;
+  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.pendingSince = null, state.sourcesSeen.clear(), state.modelChallenger = null, state.lastConnectedAt = null, state.binding = config ? configFingerprint(config) : null;
   let nextTools = config ? attestedToolsFor(config) : [], consentChanged = nextTools.join("\0") !== state.attestedTools.join("\0");
   config && (idleThresholdMs(config) !== state.activeWindowMs || consentChanged) ? (state.activeWindowMs = idleThresholdMs(config), state.attestedTools = nextTools, state.detector = new Detector(state.activeWindowMs, void 0, nextTools)) : !config && state.attestedTools.length && (state.attestedTools = [], state.detector = new Detector(state.activeWindowMs));
 }
@@ -4022,6 +4024,30 @@ function sameConfig(config, load) {
   } catch {
     return !1;
   }
+}
+var PRE_SEND_CODES = /* @__PURE__ */ new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+function failedBeforeSend(error) {
+  let seen = /* @__PURE__ */ new Set();
+  for (let e = error; e && typeof e == "object" && !seen.has(e); e = e.cause) {
+    seen.add(e);
+    let code = String(e.code ?? ""), message = String(e.message ?? "");
+    if (PRE_SEND_CODES.has(code) || /before secure TLS connection was established/i.test(message)) return !0;
+  }
+  return !1;
+}
+function pause(ms, signal) {
+  return new Promise((resolve3) => {
+    if (signal?.aborted) {
+      resolve3(!1);
+      return;
+    }
+    let onAbort = () => {
+      clearTimeout(timer), resolve3(!1);
+    }, timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort), resolve3(!0);
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: !0 });
+  });
 }
 async function requestTracker(apiUrl, deviceToken, payload, signal, retiring = !1) {
   let origin = safeApiOrigin(apiUrl);
@@ -4050,9 +4076,14 @@ async function requestTracker(apiUrl, deviceToken, payload, signal, retiring = !
     } catch {
     }
     let refused = res.status === 400 || res.status === 413 || res.status === 422;
-    return { ok: !controller.signal.aborted && res.ok, authRejected, ...refused ? { refused } : {} };
-  } catch {
-    return { ok: !1, authRejected: !1 };
+    return {
+      ok: !controller.signal.aborted && res.ok,
+      authRejected,
+      ...refused ? { refused } : {},
+      ...res.status >= 500 ? { transient: !0 } : {}
+    };
+  } catch (error) {
+    return signal?.aborted ? { ok: !1, authRejected: !1 } : { ok: !1, authRejected: !1, transient: !0, ...failedBeforeSend(error) ? { preSend: !0 } : {} };
   } finally {
     clearTimeout(timer), signal?.removeEventListener("abort", cancel);
   }
@@ -4061,8 +4092,13 @@ async function postHeartbeat(apiUrl, deviceToken, payload, signal) {
   let safe = projectHeartbeat(payload);
   return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: !1, authRejected: !1, refused: !0 };
 }
-function verifyConnection(config, signal) {
-  return requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+async function verifyConnection(config, signal, retryDelaysMs = CONNECTION_RETRY_DELAYS_MS) {
+  let result = await requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+  for (let ms of retryDelaysMs) {
+    if (result.ok || !result.preSend || !await pause(ms, signal)) break;
+    result = await requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+  }
+  return result;
 }
 function retireConnection(config, signal) {
   return requestTracker(config.apiUrl, config.deviceToken, void 0, signal, !0);
@@ -4100,7 +4136,7 @@ function buildTools(state, config) {
 }
 function writeSnapshot(state, config, connected, rejected = !1, receipt) {
   let now = (/* @__PURE__ */ new Date()).toISOString(), session = connected ? state.activeSession : null;
-  writeStatus({
+  connected && (state.lastConnectedAt = Date.now()), writeStatus({
     configFingerprint: config ? configFingerprint(config) : void 0,
     connected,
     attestedReceiver: config ? attestedToolsFor(config).length > 0 : !1,
@@ -4133,14 +4169,19 @@ async function tick(config, state) {
   let epoch = ++state.epoch, allowed = () => state.stopping || controller.signal.aborted || state.epoch !== epoch ? !1 : sameConfig(safe, state.loadConfig) ? !0 : (clearCollectedState(state), writeSnapshot(state, void 0, !1), !1), binding = state.binding, unsent = [], keepUnsent = () => {
     unsent.length && !state.stopping && state.binding === binding && binding !== null && stashUsage(state, unsent), unsent = [];
   }, failed = (result, carriedUsage = !1) => {
-    result.authRejected ? (unsent = [], clearCollectedState(state, safe)) : result.refused && carriedUsage ? (unsent = [], state.pendingUsage.clear(), state.pendingSince = null, console.warn("tracker: server refused a heartbeat; its usage was dropped"), softReset(state)) : (keepUnsent(), softReset(state)), writeSnapshot(state, safe, !1, result.authRejected);
+    let blink = result.transient === !0 && !result.authRejected && state.lastConnectedAt !== null && Date.now() - state.lastConnectedAt < CONNECTED_GRACE_MS;
+    result.authRejected ? (unsent = [], clearCollectedState(state, safe)) : result.refused && carriedUsage ? (unsent = [], state.pendingUsage.clear(), state.pendingSince = null, console.warn("tracker: server refused a heartbeat; its usage was dropped"), softReset(state)) : (keepUnsent(), softReset(state)), blink ? console.warn("tracker: network blinked; retrying next tick") : writeSnapshot(state, safe, !1, result.authRejected);
   }, send = async (payload) => {
     if (!allowed()) return !1;
     let result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    for (let ms of state.retryDelaysMs) {
+      if (result.ok || !result.preSend || !allowed() || !await pause(ms, controller.signal)) break;
+      result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    }
     return allowed() ? result.ok ? !0 : (failed(result, payload.eventType === "heartbeat"), !1) : !1;
   };
   try {
-    let connection = await verifyConnection(safe, controller.signal);
+    let connection = await verifyConnection(safe, controller.signal, state.retryDelaysMs);
     if (!allowed()) return;
     if (!connection.ok) {
       failed(connection);
