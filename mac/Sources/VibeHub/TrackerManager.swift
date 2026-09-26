@@ -312,18 +312,23 @@ final class TrackerManager: ObservableObject {
     /// Rewrites the plist from this bundle's *current* paths and forces a fresh start.
     /// Used by an account change (N1) and by the upgrade reconcile (N2) — both need the
     /// running job replaced, not merely signalled.
-    private func restartAgent() async {
-        guard let node = embeddedNodeURL, let cjs = embeddedCjsURL else { return }
+    /// Returns true when the job is running on this bundle's binaries afterwards.
+    @discardableResult
+    private func restartAgent() async -> Bool {
+        guard let node = embeddedNodeURL, let cjs = embeddedCjsURL else { return false }
         let agent = launchAgent
         let nodePath = node.path
         let cjsPath = cjs.path
+        defer { isTrackAtLoginEnabled = launchAgent.isInstalled }
         do {
-            try await Task.detached { try agent.install(nodePath: nodePath, cjsPath: cjsPath) }.value
+            // Off-main: `install` polls launchd and backs off with blocking sleeps.
+            _ = try await Task.detached { try agent.install(nodePath: nodePath, cjsPath: cjsPath) }.value
             lastActionError = nil
+            return true
         } catch {
             lastActionError = error.localizedDescription
+            return false
         }
-        isTrackAtLoginEnabled = launchAgent.isInstalled
     }
 
     /// "Name it" for a Private project: maps a local folder name to the name friends
@@ -470,7 +475,7 @@ final class TrackerManager: ObservableObject {
         let nodePath = node.path
         let cjsPath = cjs.path
         do {
-            try await Task.detached { try agent.install(nodePath: nodePath, cjsPath: cjsPath) }.value
+            _ = try await Task.detached { try agent.install(nodePath: nodePath, cjsPath: cjsPath) }.value
         } catch {
             lastActionError = error.localizedDescription
             isTrackAtLoginEnabled = launchAgent.isInstalled
@@ -545,22 +550,29 @@ final class TrackerManager: ObservableObject {
         #if DEBUG
         if isFixture { return }
         #endif
-        defer { settings.recordCurrentBundleVersion() }
-
+        // The version marker is written only once this launch's reconcile is settled:
+        // nothing to do, or the restart onto the new binaries actually succeeded. A
+        // failed restart leaves the old marker so the next launch tries again, instead
+        // of recording "upgraded" over a job still running replaced binaries.
         if settings.userDisabledTracking {
             if launchAgent.isInstalled {
                 let agent = launchAgent
                 try? await Task.detached { try agent.uninstall() }.value
                 isTrackAtLoginEnabled = launchAgent.isInstalled
             }
+            settings.recordCurrentBundleVersion()
             return
         }
 
-        guard launchAgent.isInstalled, hasEmbeddedTracker else { return }
-        guard let current = settings.currentBundleVersion else { return }
-        guard settings.lastRunBundleVersion != current else { return }
-        await restartAgent()
+        guard launchAgent.isInstalled, hasEmbeddedTracker,
+              let current = settings.currentBundleVersion,
+              settings.lastRunBundleVersion != current else {
+            settings.recordCurrentBundleVersion()
+            return
+        }
+        let restarted = await restartAgent()
         refreshLocalStatus()
+        if restarted { settings.recordCurrentBundleVersion() }
     }
 
     /// FC5, "auth-invalid halts the daemon itself". The collector is the authority here —

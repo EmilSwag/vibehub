@@ -1,3 +1,10 @@
+# 1.2.1 (build 4) — LaunchAgent bootout race (2026-09-26)
+
+- `LaunchAgent.install` waited for nothing between `bootout` and `bootstrap`; bootout is async, so a slow-exiting tracker made bootstrap fail (reproduced: `Bootstrap failed: 5`, 7/10) and the catch then deleted the plist. Now it polls `launchctl print` until the job is really gone, retries 5/37 with exponential backoff, and never deletes the plist on failure (only `uninstall` does).
+- Unchanged plist + loaded job → `kickstart -k` only; after a bootstrap no redundant `kickstart -k` (it blocked for launchd's respawn throttle: 10s default, 30s for the tracker).
+- `reconcileOnLaunch` records the bundle version only after the restart succeeded, so a failed upgrade restart is retried next launch. All launchctl work stays off-main (asserted).
+- Proof: DEBUG `--qa-launchagent-race <dir> [--slow-exit] [--no-wait]` on a throwaway `com.vibehub.qa-race-test` job; logs in `.temp/qa/mac/race/`.
+
 # L3 QA-fix (2026-09-26) — first 30 seconds, island default, numbers
 
 - Onboarding is one screen (mark + Connect) → browser pairing → "You're live ✓" (drawn check) → closes itself; notch Macs get a one-time island demo pulse, then a one-time "VibeHub lives up here" pointer (`MenuBarHint.swift`).

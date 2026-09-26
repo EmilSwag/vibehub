@@ -149,7 +149,7 @@ describe("the artifact is the documented user-scope mechanism, per platform", ()
     const swift = resolve(__dirname, "../../mac/Sources/VibeHub/LaunchAgent.swift");
     if (!existsSync(swift)) return; // tracker checked out on its own
     const source = readFileSync(swift, "utf8");
-    assert.ok(source.includes(`static let label = "${autostart.LAUNCH_AGENT_LABEL}"`), "the labels have diverged");
+    assert.ok(source.includes(`static let trackerLabel = "${autostart.LAUNCH_AGENT_LABEL}"`), "the labels have diverged");
     assert.ok(source.includes('"KeepAlive": ["SuccessfulExit": false]'), "the KeepAlive contract has diverged");
     assert.ok(source.includes('"ThrottleInterval": 30'), "the throttle interval has diverged");
     assert.ok(/ProgramArguments": \[nodePath, cjsPath, "serve"\]/.test(source), "the Mac app no longer runs `serve`");

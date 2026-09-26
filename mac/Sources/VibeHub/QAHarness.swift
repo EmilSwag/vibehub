@@ -36,6 +36,13 @@ enum QAHarness {
             FileHandle.standardError.write(Data("snapshot: wrote \(written) PNGs to \(dir)\n".utf8))
             return true
         }
+        if let index = arguments.firstIndex(of: "--qa-launchagent-race") {
+            let dir = arguments.indices.contains(index + 1) ? arguments[index + 1] : NSTemporaryDirectory()
+            let iterations = arguments.firstIndex(of: "--iterations").flatMap { Int(arguments[$0 + 1]) } ?? 10
+            exit(runLaunchAgentRace(plistDirectory: URL(fileURLWithPath: dir, isDirectory: true),
+                                    iterations: iterations, slowExit: arguments.contains("--slow-exit"),
+                                    noWait: arguments.contains("--no-wait")) ? 0 : 1)
+        }
         if let index = arguments.firstIndex(of: "--qa-island") {
             let state = arguments.indices.contains(index + 1) ? arguments[index + 1] : "loaded"
             runLiveIsland(state: state, expanded: arguments.contains("--expanded"), cycle: arguments.contains("--qa-cycle"))
@@ -216,7 +223,11 @@ enum QAHarness {
             if explicit { d.set(true, forKey: "IslandModeExplicit") }
             table.append("island \(label) -> \(AppSettings(defaults: d, hasNotch: notch).islandMode.rawValue)")
         }
+        table.append("this Mac: hasNotchedScreen=\(AppSettings.hasNotchedScreen) screens=\(NSScreen.screens.count)")
+        islandCase("this Mac (real detection), old implicit off", stored: "off", explicit: false, notch: AppSettings.hasNotchedScreen)
         islandCase("notch, fresh", stored: nil, explicit: false, notch: true)
+        islandCase("notch, old implicit always", stored: "always", explicit: false, notch: true)
+        islandCase("notch, explicit always", stored: "always", explicit: true, notch: true)
         islandCase("notch, old implicit off", stored: "off", explicit: false, notch: true)
         islandCase("notch, explicit off", stored: "off", explicit: true, notch: true)
         islandCase("notchless, implicit off", stored: "off", explicit: false, notch: false)
@@ -278,6 +289,86 @@ enum QAHarness {
         window.contentView = nil
         guard let png = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: url)) != nil
+    }
+
+    // MARK: - LaunchAgent race proof
+
+    /// Drives the real `LaunchAgent` against a throwaway job — never `com.vibehub.tracker`.
+    /// Each iteration changes the plist (forcing the bootout → wait → bootstrap path the
+    /// race lived in) and checks the job is running on a new pid with the plist intact;
+    /// then a few unchanged installs must take the kickstart-only path. Cleans up always.
+    /// `noWait`: unload timeout 0, so bootstrap *does* race the teardown — proves the
+    /// 37/5 retry-with-backoff path on its own, not just the wait in front of it.
+    private static func runLaunchAgentRace(plistDirectory: URL, iterations: Int, slowExit: Bool, noWait: Bool) -> Bool {
+        var failures = 0
+        let group = DispatchGroup()
+        group.enter()
+        // Off the main thread, exactly as the app calls it.
+        DispatchQueue.global(qos: .userInitiated).async {
+            failures = raceWorker(plistDirectory: plistDirectory, iterations: iterations, slowExit: slowExit, noWait: noWait)
+            group.leave()
+        }
+        while group.wait(timeout: .now()) == .timedOut { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        raceLog("RESULT: \(failures == 0 ? "PASS" : "FAIL") — \(failures) failure(s), \(iterations) changed + 3 unchanged installs\(slowExit ? ", slow-exit job" : "")\(noWait ? ", no unload wait (retry path)" : "")")
+        return failures == 0
+    }
+
+    nonisolated private static func raceLog(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    nonisolated private static func raceWorker(plistDirectory: URL, iterations: Int, slowExit: Bool, noWait: Bool) -> Int {
+        let label = "com.vibehub.qa-race-test"
+        precondition(label.hasPrefix("com.vibehub.qa-"), "race proof must never use a real label")
+        var agent = LaunchAgent(label: label, plistDirectory: plistDirectory)
+        if noWait { agent.unloadTimeout = 0 }
+        // `--slow-exit`: SIGTERM takes 2s to land, like the tracker closing its session.
+        let program: [String] = slowExit
+            ? ["/bin/bash", "-c", "trap 'sleep 2; exit 0' TERM; /bin/sleep 600 & wait"]
+            : ["/bin/sleep", "600"]
+        func plist(_ iteration: Int) -> [String: Any] {
+            ["ProgramArguments": program, "RunAtLoad": true, "EnvironmentVariables": ["QA_ITERATION": "\(iteration)"]]
+        }
+
+        var failures = 0
+        var lastPID: Int?
+        for i in 1...iterations {
+            let started = Date()
+            do {
+                let outcome = try agent.install(plist: plist(i))
+                let pid = agent.runningPID
+                let ok = pid != nil && pid != lastPID && agent.isInstalled
+                if !ok { failures += 1 }
+                raceLog(String(format: "changed   %2d: %@ %@ pid=%@ plist=%@ (%.2fs)", i, ok ? "OK  " : "FAIL",
+                               "\(outcome)", pid.map(String.init) ?? "nil", agent.isInstalled ? "kept" : "MISSING",
+                               Date().timeIntervalSince(started)))
+                lastPID = pid
+            } catch {
+                failures += 1
+                raceLog("changed   \(i): FAIL \(error.localizedDescription) plist=\(agent.isInstalled ? "kept" : "MISSING")")
+            }
+        }
+        for i in 1...3 {
+            let started = Date()
+            do {
+                let outcome = try agent.install(plist: plist(iterations))
+                let pid = agent.runningPID
+                let ok = outcome == .kickstarted && pid != nil && pid != lastPID
+                if !ok { failures += 1 }
+                raceLog(String(format: "unchanged %2d: %@ %@ pid=%@ (%.2fs)", i, ok ? "OK  " : "FAIL", "\(outcome)",
+                               pid.map(String.init) ?? "nil", Date().timeIntervalSince(started)))
+                lastPID = pid
+            } catch {
+                failures += 1
+                raceLog("unchanged \(i): FAIL \(error.localizedDescription)")
+            }
+        }
+        agent.unloadTimeout = 15
+        do { try agent.uninstall() } catch { raceLog("cleanup: \(error.localizedDescription)") }
+        let clean = !agent.isLoaded && !agent.isInstalled
+        if !clean { failures += 1 }
+        raceLog("cleanup: \(clean ? "job unloaded, plist removed" : "NOT CLEAN")")
+        return failures
     }
 
     // MARK: - Live mode
