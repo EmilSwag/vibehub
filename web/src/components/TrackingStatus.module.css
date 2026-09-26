@@ -630,3 +630,11 @@
     text-align: center;
   }
 }
+
+/* QA R2: cache reads — real, but secondary. Never the headline token number. */
+.cached {
+  font-size: 12px;
+  color: var(--vh-text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { statsApi } from "../lib/api";
 import { formatActiveTime, formatTokens, humanizeModel, modelFamily, toolFamily, toolLabel } from "../lib/format";
 import { isTokenlessTool, TOKENS_NOT_REPORTED } from "../lib/supportedTools";
-import { estimateTokenCost, isValidTokenCount, tokenlessCost } from "../lib/tokenCost";
+import { isValidTokenCount, preferServerCost, tokenlessCost } from "../lib/tokenCost";
 import { topToolOf, topToolShare } from "../lib/topTool";
 import type { UserStats } from "../types";
 import { Button } from "./ui/Button";
@@ -37,7 +37,11 @@ function Tiles({ stats, onTopModel }: TilesProps) {
   // block that correctly said "tokens not reported" two lines below (fix F-A).
   const rows = stats?.byModel ?? [];
   const unmeasured = rows.length > 0 && rows.every((row) => isTokenlessTool(row.tool));
-  const cost = unmeasured ? tokenlessCost(null) : estimateTokenCost(stats?.byModel, stats?.totalTokens);
+  // The server's own ≈$ first (it prices cache the web cannot see); exact client
+  // estimate from the same rows otherwise. Unknown models never get a guessed rate.
+  const cost = unmeasured
+    ? tokenlessCost(null)
+    : preferServerCost(stats?.byModel.filter((row) => !isTokenlessTool(row.tool)), stats?.totalTokens, stats?.totalEstimatedUsd);
 
   return (
     <>
@@ -70,7 +74,13 @@ function Tiles({ stats, onTopModel }: TilesProps) {
               ? TOKENS_NOT_REPORTED
               : isValidTokenCount(stats.totalTokens) ? formatTokens(stats.totalTokens) : "—"
             : undefined}
-          companion={<TokenCost estimate={cost} />}
+          companion={
+            <>
+              <TokenCost estimate={cost} />
+              {/* QA R2: cache reads are real but secondary — beside the count, never in it. */}
+              {!unmeasured && (stats?.totalCachedTokens ?? 0) > 0 && ` · ${formatTokens(stats!.totalCachedTokens!)} cached`}
+            </>
+          }
         />
       </div>
       <TokenCostDetails />

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { friendsApi, presenceApi } from "../lib/api";
 import { isCurrentAuth } from "../lib/authSession";
+import { projectLabel } from "../lib/format";
 import { mergeLastSeenAt } from "../lib/lastOnline";
 import { VibeHubSocket } from "../lib/ws";
 import { ToastStack } from "../components/ui/Toast";
@@ -173,7 +174,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
             liveToastAtRef.current.set(event.username, Date.now());
             pushToast({
               title: `@${event.username} is live`,
-              body: event.activity ? `Vibing in ${event.activity.projectAlias}` : undefined,
+              body: event.activity ? `Vibing in ${projectLabel(event.activity.projectAlias)}` : undefined,
               href: `/u/${event.username}`,
             });
           }

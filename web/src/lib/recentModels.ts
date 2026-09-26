@@ -10,7 +10,7 @@
 
 import { humanizeModel, toolLabel } from "./format";
 import { isLegacyEstimateTool, isTokenlessTool } from "./supportedTools";
-import { estimateTokenCost, tokenlessCost } from "./tokenCost";
+import { preferServerCost, tokenlessCost } from "./tokenCost";
 import type { TokenCostEstimate } from "./tokenCost";
 import type { StatByModel } from "../types";
 
@@ -207,10 +207,11 @@ export function groupStatsByModelWithCosts(rows: StatByModel[]): PricedRecentMod
     const measured = group.byTool.filter((bucket) => !bucket.tokenless).flatMap((bucket) => tools.get(bucket.tool) ?? []);
     return {
       ...group,
-      cost: group.tokenless ? tokenlessCost(group.tokens) : estimateTokenCost(measured, group.tokens),
+      // Server bucket ≈$ first (finite >= 0), exact client estimate otherwise.
+      cost: group.tokenless ? tokenlessCost(group.tokens) : preferServerCost(measured, group.tokens),
       byTool: group.byTool.map((bucket) => ({
         ...bucket,
-        cost: bucket.tokenless ? tokenlessCost(bucket.tokens) : estimateTokenCost(tools.get(bucket.tool), bucket.tokens),
+        cost: bucket.tokenless ? tokenlessCost(bucket.tokens) : preferServerCost(tools.get(bucket.tool), bucket.tokens),
       })),
     };
   });

@@ -18,7 +18,6 @@ import {
 import type { ModelSelection, PricedRecentModelRow } from "../lib/recentModels";
 import { isValidTokenCount } from "../lib/tokenCost";
 import { TOKENS_NOT_REPORTED, TOKENS_NOT_REPORTED_TITLE } from "../lib/supportedTools";
-import { ensureModelRowsPriced } from "../lib/trackerCost";
 import { TokenCost, TokenCostDetails } from "./ui/TokenCost";
 import type { UserStats } from "../types";
 import type { PresenceLike } from "./ui/PresenceBlock";
@@ -383,7 +382,8 @@ export function RecentModels({ username, isSelf, presence, focus, className }: P
   }, [username, attempt]);
 
   const rows = useMemo(
-    () => (lifetime ? ensureModelRowsPriced(groupStatsByModelWithCosts(lifetime.byModel), lifetime.byModel) : []),
+    // Server bucket ≈$ first, exact client estimate otherwise — never a guessed rate.
+    () => (lifetime ? groupStatsByModelWithCosts(lifetime.byModel) : []),
     [lifetime],
   );
   const live = useMemo(() => liveLabels(presence), [presence]);

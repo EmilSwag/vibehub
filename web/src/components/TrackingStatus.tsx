@@ -101,14 +101,30 @@ export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
 
   if (devices.length === 0) return <span className={styles.dim}>No devices yet.</span>;
 
+  // QA R4: every opened connect sheet used to mint a device, so accounts collected
+  // rows of "Mac · Sep 5 — never used". They are not machines: fold them into one line.
+  const used = devices.filter((d) => d.lastUsedAt);
+  const unused = devices.filter((d) => !d.lastUsedAt);
+  const removeUnused = async () => {
+    if (!onRevoke) return;
+    setBusy("unused");
+    try {
+      for (const d of unused) await onRevoke(d.id);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className={styles.rows}>
-      {devices.map((d) => (
+      {used.map((d) => (
         <div key={d.id} className={styles.row}>
           <span className={styles.rowMain}>
             <span className={styles.rowTool}>{d.label}</span>
           </span>
-          <span className={styles.rowRight}>{d.lastUsedAt ? `seen ${agoShort(d.lastUsedAt, now)}` : "never used"}</span>
+          <span className={styles.rowRight}>
+            {d.connected ? "live now" : `seen ${agoShort(d.lastSeenAt ?? d.lastUsedAt!, now)}`}
+          </span>
           {onRevoke && (
             <Button size="sm" variant="ghost" onClick={() => revoke(d)} loading={busy === d.id}>
               Revoke
@@ -116,6 +132,18 @@ export function DeviceList({ devices, now, onRevoke }: DeviceListProps) {
           )}
         </div>
       ))}
+      {unused.length > 0 && (
+        <div className={styles.row}>
+          <span className={styles.rowMain}>
+            <span className={styles.dim}>{unused.length === 1 ? "1 unused setup link" : `${unused.length} unused setup links`}</span>
+          </span>
+          {onRevoke && (
+            <Button size="sm" variant="ghost" onClick={() => void removeUnused()} loading={busy === "unused"}>
+              Remove
+            </Button>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirming !== null}
@@ -165,6 +193,9 @@ function SourceRow({ source, now, index }: { source: TrackerSource; now: number;
         <span className={styles.rowTokens} title={isTokenlessTool(source.tool) ? TOKENS_NOT_REPORTED_TITLE : undefined}>
           {isTokenlessTool(source.tool) && source.tokensToday === 0 ? TOKENS_NOT_REPORTED : `${formatTokens(source.tokensToday)} today`}
         </span>
+        {(source.cachedTokensToday ?? 0) > 0 && (
+          <span className={styles.cached}>{formatTokens(source.cachedTokensToday!)} cached</span>
+        )}
         <TokenCost estimate={cost} />
         <span className={styles.sep} aria-hidden="true">
           ·
@@ -214,7 +245,7 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
   const parts = activity ? presenceParts(activity, now) : null;
   const today = sumToday(status.sources);
   const todayCost = estimateTodayCost(status.sources, today.tokens);
-  const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
+  const heartbeat = status.lastSeenAt ? `updated ${agoShort(status.lastSeenAt, now)}` : "waiting for first update";
 
   return (
     <Card className={cx(styles.strip, className)} data-live={live || undefined} aria-label="Your tracker">
@@ -271,6 +302,7 @@ export function TrackingStrip({ status, settingsHref, onGoOnline, className }: T
               </span>
               <span className={styles.counterUnit}>tokens</span>
               <TokenCost estimate={todayCost} />
+              {today.cachedTokens > 0 && <span className={styles.cached}>{formatTokens(today.cachedTokens)} cached</span>}
             </span>
           ) : (
             <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
@@ -434,12 +466,11 @@ export function TrackingStatus({
   // opening the sheet is not one); Settings lists every non-revoked token — Revoke lives there.
   const devices = variant === "settings" ? status.devices : homeDevices(status.devices);
   const showDevices = variant === "settings" || showHomeDevices(status.devices);
-  const heartbeat = status.lastSeenAt ? `last ping ${agoShort(status.lastSeenAt, now)}` : "no ping yet";
+  const heartbeat = status.lastSeenAt ? `updated ${agoShort(status.lastSeenAt, now)}` : "waiting for first update";
   const today = sumToday(status.sources);
   const todayCost = estimateTodayCost(status.sources, today.tokens);
-  const todayCostFormatted = todayCost && todayCost.usd !== null && todayCost.usd > 0
-    ? presentTokenCost(todayCost).amount
-    : "≈ $0";
+  // "≈ $—" for an unknown model, never a made-up "≈ $0".
+  const todayCostFormatted = presentTokenCost(todayCost).amount;
 
   // For compact models:
   // "compact models (top few + "Show all", hide zero rows)"
@@ -472,7 +503,7 @@ export function TrackingStatus({
             <strong className={cx(styles.title, variant === "settings" && styles.titleBig, live && styles.titleLive)}>{trackerTitle(status)}</strong>
           </span>
           <span className={styles.meta}>
-            {variant === "settings" ? heartbeat : `${heartbeat} · ${everyLabel(status.heartbeatIntervalMs)}`}
+            {variant === "settings" ? `${heartbeat} · ${everyLabel(status.heartbeatIntervalMs)}` : heartbeat}
           </span>
         </div>
         <StaleTrackerHint status={status} className={styles.headHint} />
@@ -493,7 +524,9 @@ export function TrackingStatus({
                   <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>
                 )}
               </span>
-              <span className={styles.bigStatLabel}>tokens</span>
+              <span className={styles.bigStatLabel}>
+                tokens{today.cachedTokens > 0 && <span className={styles.cached}> · {formatTokens(today.cachedTokens)} cached</span>}
+              </span>
             </div>
             <div className={styles.bigStatGroup}>
               <span className={styles.bigStatValue}>{todayCostFormatted}</span>
@@ -514,6 +547,7 @@ export function TrackingStatus({
                 </span>
                 <span className={styles.counterUnit}>tokens</span>
                 <TokenCost estimate={todayCost} />
+                {today.cachedTokens > 0 && <span className={styles.cached}>{formatTokens(today.cachedTokens)} cached</span>}
               </span>
             ) : (
               <span className={styles.counterUnit} title={TOKENS_NOT_REPORTED_TITLE}>{TOKENS_NOT_REPORTED}</span>

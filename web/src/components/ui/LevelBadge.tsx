@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { LevelBreakdown } from "../../types";
 import { formatTokens } from "../../lib/format";
-import { estimateTokenCost, isValidTokenCount } from "../../lib/tokenCost";
+import { isTokenlessTool } from "../../lib/supportedTools";
+import { isValidTokenCount, preferServerCost } from "../../lib/tokenCost";
 import { TokenCost, TokenCostDetails } from "./TokenCost";
 import styles from "./LevelBadge.module.css";
 
@@ -205,8 +206,10 @@ export function LevelBadge({ level, breakdown, size = "md", className }: Props) 
             {label === "Tokens" ? (
               <>
                 <span>{value}</span>
-                {/* Lifetime total only: do not borrow another surface's model range. */}
-                <TokenCost estimate={estimateTokenCost(undefined, breakdown?.totalTokens)} />
+                {/* Lifetime total only: do not borrow another surface's model range. The
+                    server's total first; else exact pricing of the lifetime per-model rows
+                    the profile route sends. No rows → no ≈$, never a guess. */}
+                <TokenCost estimate={preferServerCost(breakdown?.byModel?.filter((row) => !isTokenlessTool(row.tool)), breakdown?.totalTokens, breakdown?.totalEstimatedUsd)} />
               </>
             ) : value}
           </span>

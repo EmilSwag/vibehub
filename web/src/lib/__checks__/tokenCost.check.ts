@@ -34,6 +34,8 @@ const verified: [string, number, number][] = [
   // Retired, still priced on the official page (pricing "Model pricing" table, 2026-09-17).
   ["claude-opus-4-1-20250805", 15, 75], ["claude-opus-4-20250514", 15, 75],
   ["claude-sonnet-4-20250514", 3, 15], ["claude-3-5-haiku-20241022", 0.80, 4],
+  // QA fix R1 (meta/plans/vibehub-qa-fix.md "Verified prices", Sep 2026).
+  ["claude-opus-5-5", 4, 20], ["gpt-6-sol", 2, 10], ["gpt-6-luna", 0.10, 0.50],
 ];
 eq("all and only researched tariff entries", TOKEN_PRICES.length, verified.length);
 eq("source snapshot date", TOKEN_PRICING_CHECKED_AT, "2026-09-16");

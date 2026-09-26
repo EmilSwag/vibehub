@@ -39,6 +39,14 @@ for (const [index, web] of TOKEN_PRICES.entries()) {
   }
 }
 
+// QA fix R2: verified cache rates live in both tables too, and must agree.
+for (const [index, web] of TOKEN_PRICES.entries()) {
+  const mirror = server.TOKEN_PRICES[index] as { cacheReadUsdPerMillion?: number; cacheWriteUsdPerMillion?: number } | undefined;
+  eq(`${web.modelId}: cache read/write rates`,
+    `${mirror?.cacheReadUsdPerMillion}/${mirror?.cacheWriteUsdPerMillion}`,
+    `${web.cacheReadUsdPerMillion}/${web.cacheWriteUsdPerMillion}`);
+}
+
 // Every id and alias resolves on both sides to the same tariff (or on neither).
 const ids = TOKEN_PRICES.flatMap((p) => [p.modelId, ...p.aliases]);
 for (const id of ids) {

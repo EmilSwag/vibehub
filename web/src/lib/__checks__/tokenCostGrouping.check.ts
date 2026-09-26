@@ -40,12 +40,12 @@ eq("tool ordering still follows hours", gpt.tools, ["claude-code", "codex"]);
 eq("each raw source bucket is included once in its tool subtotal", gpt.byTool.map((b) => [b.tool, b.cost.usd]), [["claude-code", 8], ["codex", 3.8]]);
 eq("tool tokens sum to model tokens", gpt.byTool.reduce((n, b) => n + b.tokens, 0), gpt.tokens);
 eq("tool prices sum EXACTLY to model price", gpt.byTool.reduce((n, b) => n + b.cost.amountUnits!, 0n), gpt.cost.amountUnits);
-eq("legacy-estimate flag is preserved", grouped.find((g) => g.label === "Claude Sonnet 5")?.estimated, true);
+eq("legacy-estimate flag is preserved", grouped.find((g) => g.label === "Sonnet 5")?.estimated, true);
 // A tokenless tool's legacy figure is NOT billable usage: the vendor publishes no
 // counts, so the row is unpriced rather than priced at whatever the model costs.
-eq("a wholly tokenless row is unpriced, not zero", grouped.find((g) => g.label === "Claude Sonnet 5")?.cost.usd, null);
+eq("a wholly tokenless row is unpriced, not zero", grouped.find((g) => g.label === "Sonnet 5")?.cost.usd, null);
 eq("every tokenless group says why it has no price", grouped.filter((g) => g.tokenless).map((g) => [g.label, g.cost.reason]),
-  [["Claude Sonnet 5", "tokenless-tool"], ["Cursor", "tokenless-tool"]]);
+  [["Sonnet 5", "tokenless-tool"], ["Cursor", "tokenless-tool"]]);
 const total = estimateTokenCost(source, count(source));
 eq("unknown nonzero usage makes the full range partial", total.status, "partial");
 const measuredRows = source.filter((r) => !isTokenlessTool(r.tool));

@@ -30,6 +30,7 @@ import type {
 } from "../types";
 
 import { assertAuthGeneration, authGeneration, expireAuthSession } from "./authSession";
+import { recentlySeen } from "./trackerPing";
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 /** Absolute API origin for user-facing snippets (curl prompts, install one-liners). */
@@ -180,7 +181,14 @@ export const usersApi = {
     // Kept as a separate step (not folded into the literal above) so the source still
     // reads `presence: raw.presence ?? {...}` verbatim, unchanged from before this
     // field existed (pinned by connectUx.check.ts's source-text check).
-    return { ...status, presence: { ...status.presence, lastSeenAt: status.presence.lastSeenAt ?? null } };
+    const normalized = { ...status, presence: { ...status.presence, lastSeenAt: status.presence.lastSeenAt ?? null } };
+    // QA R4: a device that heartbeated in the last few intervals IS connected, whatever
+    // the presence word says (it lags, and it tracks AI sessions, not the tracker). Every
+    // surface — sheet, Home, Settings — reads this one answer, so none can wait forever.
+    if (normalized.presence.status === "offline" && recentlySeen(normalized)) {
+      return { ...normalized, connected: true, presence: { ...normalized.presence, status: "idle", activity: null } };
+    }
+    return normalized;
   },
   updateMe: (body: { username?: string; displayName?: string; bio?: string; roles?: UserRole[] }) =>
     request<{ user: User }>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),

@@ -433,7 +433,7 @@ function ConnectToolsForUser({ variant = "compact", onConnected, onCelebrated }:
           {variant !== "compact" && (
             <div className={styles.head}>
               <strong className={styles.title}>Connect VibeHub</strong>
-              <span className={styles.sub}>{DEVICE_CONNECT_SCOPE}</span>
+              <span className={styles.sub}>See your AI coding time, live.</span>
             </div>
           )}
           <Button className={styles.copy} onClick={() => setSheetOpen(true)}>Connect VibeHub</Button>
@@ -441,13 +441,16 @@ function ConnectToolsForUser({ variant = "compact", onConnected, onCelebrated }:
             <div className={styles.foot}>
               <span className={styles.waiting} role="status">
                 <span className={cx(styles.pulse, !attempted && styles.pulseStill)} aria-hidden="true" />
-                {attempted ? "Waiting for a tracker connection…" : "Not connected"}
+                {attempted ? "Waiting for your device…" : "Not connected yet"}
               </span>
             </div>
           )}
           {variant === "full" && status && (
             <>
-              <p className={styles.privacy}>{TRACKER_LOCAL_READS} {TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
+              <details className={styles.privacy}>
+                <summary>What it reads</summary>
+                <p>{TRACKER_LOCAL_READS} {TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
+              </details>
               <div className={styles.devices}>
                 <span className={styles.label}>Devices</span>
                 <DeviceList devices={status.devices} now={now} onRevoke={revoke} />

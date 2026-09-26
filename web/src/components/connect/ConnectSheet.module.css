@@ -544,3 +544,36 @@
     animation: none;
   }
 }
+
+/* ---- already connected (QA R4): success first, setup one tap away ---- */
+
+.success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 4px;
+  text-align: center;
+}
+.success .helpToggle {
+  align-self: center;
+  min-height: 44px;
+}
+.successMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--vh-live);
+  border: 1px solid currentColor;
+}
+
+/* The single live line replaces the old three-step list. */
+p.pstep {
+  margin: 0;
+}
+p.pstepDone {
+  color: var(--vh-live);
+}

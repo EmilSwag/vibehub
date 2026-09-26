@@ -163,7 +163,9 @@ function humanizeClaude(id: string): string {
     }
     extras.push(capWord(t));
   }
-  return ["Claude", family && capWord(family), version.length ? version.join(".") : null, ...extras]
+  // QA contract: the family IS the name ("Opus 5.5", "Sonnet 5") — the glyph already
+  // says Claude. Only a family-less id keeps the brand ("claude-2.1" → "Claude 2.1").
+  return [family ? capWord(family) : "Claude", version.length ? version.join(".") : null, ...extras]
     .filter(Boolean)
     .join(" ");
 }
@@ -215,7 +217,7 @@ export function humanizeModel(raw: string | null | undefined): string | null {
   }
 }
 
-/** "Claude Fable 5.1 · Claude Code", or just "Cursor" when the tool exposes no model. */
+/** "Fable 5.1 · Claude Code", or just "Cursor" when the tool exposes no model. */
 export function modelWithTool(model: string | null | undefined, tool: string | null | undefined): string {
   const m = humanizeModel(model);
   const t = toolLabel(tool);
@@ -235,11 +237,11 @@ export interface ActivityLike {
 }
 
 export interface PresenceParts {
-  /** Raw project alias as the tracker reports it — never re-cased. */
+  /** Project alias as the tracker reports it — never re-cased; "Private project" when hidden. */
   project: string;
   /** Display label, e.g. "Claude Code". */
   tool: string;
-  /** Display name, e.g. "Claude Fable 5.1"; null when the tool exposes no model. */
+  /** Display name, e.g. "Fable 5.1"; null when the tool exposes no model. */
   model: string | null;
   /** "just now" / "12m" / "1h 42m" since `startedAt`. */
   elapsed: string;
@@ -247,9 +249,17 @@ export interface PresenceParts {
 
 /** The four things a presence line is built from — PresenceBlock lays them out on
  * separate lines; `presenceLine` joins them for toasts, modals and titles. */
+/** QA R5: the tracker hides project names unless an alias is mapped (privacy default),
+ * and "unknown" read as broken. A hidden project is a *private* one — say so. */
+export const PRIVATE_PROJECT = "Private project";
+export function projectLabel(alias: string | null | undefined): string {
+  const a = (alias ?? "").trim();
+  return !a || NULL_IDS.has(a.toLowerCase()) || a === "<private>" || a.toLowerCase() === "private" ? PRIVATE_PROJECT : a;
+}
+
 export function presenceParts(activity: ActivityLike, now: number = Date.now()): PresenceParts {
   return {
-    project: activity.projectAlias,
+    project: projectLabel(activity.projectAlias),
     tool: toolLabel(activity.tool),
     model: humanizeModel(activity.model),
     elapsed: elapsedShort(activity.startedAt, now),
@@ -271,10 +281,11 @@ export function presenceStatusLabel(status: "active" | "idle" | "offline" | null
   return "Offline";
 }
 
+/** 1.5k, 101k, 1M, 197M: one decimal only while it still tells you something. */
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
+  const [v, unit] = n >= 999_500 ? [n / 1_000_000, "M"] : n >= 1_000 ? [n / 1_000, "k"] : [n, ""];
+  if (!unit) return String(n);
+  return `${v >= 100 ? Math.round(v) : Number(v.toFixed(1))}${unit}`;
 }
 
 /** Compact repository counts, with the same lowercase k used by token totals. */

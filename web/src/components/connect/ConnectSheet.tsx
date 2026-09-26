@@ -17,13 +17,12 @@ import {
   TRACKER_VISIBILITY,
   buildPairConnectCommand,
 } from "../../lib/connectPrompt";
-import { claimConnectCelebration, deviceLabel, detectOs, ensureConnectToken } from "../../lib/connectToken";
+import { claimConnectCelebration, detectOs } from "../../lib/connectToken";
 import { detectInstallChoice, scriptOs } from "../../lib/macInstall";
 import type { InstallChoice } from "../../lib/macInstall";
 import { useExitTransition } from "../../lib/motion";
 import { formatElapsed, useTrackerPing } from "../../lib/useTrackerPing";
 import { installedNote, shouldCelebrate, staleSinceWaiting, staleTrackerHint } from "../../lib/trackerPing";
-import type { StaleTrackerHintCopy } from "../../lib/trackerPing";
 import { toolLabel } from "../../lib/format";
 import { useAuth } from "../../context/AuthContext";
 import { agoShort } from "../TrackingStatus";
@@ -45,8 +44,6 @@ const OSES: { id: InstallChoice; label: string }[] = [
 
 type AttemptCopy = "connect" | "start";
 type Copied = AttemptCopy;
-const firstStep = (copied: AttemptCopy | null) =>
-  copied === "connect" ? "Command copied" : "Copy or run the command above";
 
 function OsPicker({ value, onChange }: { value: InstallChoice; onChange: (os: InstallChoice) => void }) {
   return (
@@ -66,85 +63,54 @@ function OsPicker({ value, onChange }: { value: InstallChoice; onChange: (os: In
   );
 }
 
-function Progress({
+/** Where the account is being seen from right now: the device with the newest
+ *  heartbeat, else the account's own last ping. Never a never-used token. */
+function liveWhere(status: TrackerStatus | null, ago: (iso: string) => string): string | null {
+  if (!status) return null;
+  const newest = (key: "lastSeenAt" | "lastUsedAt") => status.devices
+    .filter((d) => d[key])
+    .sort((x, y) => ((x[key] ?? "") < (y[key] ?? "") ? 1 : -1))[0];
+  // Heartbeat evidence first; an older server only dates devices by last use.
+  const seen = status.devices.find((d) => d.connected) ?? newest("lastSeenAt") ?? newest("lastUsedAt");
+  const at = seen?.lastSeenAt ?? status.lastSeenAt;
+  return [seen?.label, at && `seen ${ago(at)}`].filter(Boolean).join(" · ") || null;
+}
+
+/** One live line — never a dead wait (ADHD rule 3). */
+function LiveStatus({
   stage,
   elapsedMs,
-  stalled,
+  showElapsed,
   device,
   tool,
-  copied,
   anchor,
-  stale,
 }: {
-  stage: "waiting" | "pinged" | "live";
+  stage: "idle" | "waiting" | "pinged" | "live";
   elapsedMs: number;
-  stalled: boolean;
+  showElapsed: boolean;
   device: string | null;
   tool: string | null;
-  copied: AttemptCopy | null;
   anchor: RefObject<HTMLDivElement>;
-  stale: StaleTrackerHintCopy | null;
 }) {
-  const [helpOpen, setHelpOpen] = useState(false);
-  const helpId = useId();
-  const rows = [
-    { label: firstStep(copied), done: copied !== null, active: false },
-    {
-      label: stage === "waiting" ? stale?.lead ?? "Waiting for connection…" : "Server accepted connection",
-      done: stage !== "waiting",
-      active: stage === "waiting",
-    },
-    { label: "Tracker connected", done: stage === "live", active: stage === "pinged" },
-  ];
+  const done = stage === "live";
   return (
-    <div className={styles.step} ref={anchor}>
-      <h3 className={styles.stepTitle}>Connection status</h3>
-      <ol className={styles.progress}>
-        {rows.map((row, i) => (
-          <li key={i} className={cx(styles.pstep, row.done && styles.pstepDone, row.active && styles.pstepActive)}>
-            <span className={styles.pmark} aria-hidden="true">
-              {row.done ? <Icon name="check" size={12} /> : <span className={styles.pdot} />}
+    <div className={styles.step} ref={anchor} role="status" aria-live="polite">
+      <p className={cx(styles.pstep, done ? styles.pstepDone : styles.pstepActive)}>
+        <span className={styles.pmark} aria-hidden="true">
+          {done ? <Icon name="check" size={12} /> : <span className={styles.pdot} />}
+        </span>
+        <span className={styles.plabel}>
+          {done ? "Connected" : stage === "pinged" ? "Almost there…" : "Waiting for your device…"}
+          {!done && showElapsed && (
+            <span className={styles.elapsed} aria-label={`${formatElapsed(elapsedMs)} elapsed`}>
+              {formatElapsed(elapsedMs)}
             </span>
-            <span className={styles.plabel}>
-              {row.label}
-              {i === 1 &&
-                (stage === "waiting" ? (
-                  <span className={styles.elapsed} aria-label={`${formatElapsed(elapsedMs)} elapsed`}>
-                    {formatElapsed(elapsedMs)}
-                  </span>
-                ) : (
-                  device && (
-                    <span className={styles.stepMeta}>
-                      {[device, tool && toolLabel(tool)].filter(Boolean).join(" · ")}
-                    </span>
-                  )
-                ))}
-            </span>
-            {row.active && <span className={styles.pline} aria-hidden="true" />}
-          </li>
-        ))}
-      </ol>
-      {stage === "waiting" && stale && <p className={styles.staleFix}>{stale.fix}</p>}
-      {stalled && (
-        <div className={styles.help}>
-          <button
-            type="button"
-            className={styles.helpToggle}
-            aria-expanded={helpOpen}
-            aria-controls={helpId}
-            onClick={() => setHelpOpen((v) => !v)}
-          >
-            Still waiting? Common fixes
-          </button>
-          {helpOpen && (
-            <ul id={helpId} className={cx(styles.helpList, "fade-in")}>
-              <li>Copying does not run setup. Run the command in PowerShell or Terminal.</li>
-              <li>A browser window will open to approve this device. Click &ldquo;Allow this device&rdquo;.</li>
-              <li>Keep your terminal open until pairing completes.</li>
-            </ul>
           )}
-        </div>
-      )}
+          {done && device && (
+            <span className={styles.stepMeta}>{[device, tool && toolLabel(tool)].filter(Boolean).join(" · ")}</span>
+          )}
+        </span>
+      </p>
     </div>
   );
 }
@@ -167,18 +133,19 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const id = useId();
   const [choice, setChoice] = useState<InstallChoice>(() => detectInstallChoice(detectOs()));
   const os = scriptOs(choice);
-  const [retry] = useState(0);
   const [copied, setCopied] = useState<Copied | null>(null);
   const [attemptCopy, setAttemptCopy] = useState<AttemptCopy | null>(null);
   const [error, setError] = useState<{ what: Copied; message: string } | null>(null);
   const [celebrationState, setCelebrationState] = useState<{ userId: string; status: TrackerStatus | null } | null>(null);
-  const [noteOpen, setNoteOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [started, setStarted] = useState(false);
 
   const { render, closing } = useExitTransition(open, EXIT_MS);
   const ping = useTrackerPing(open, started);
-  const showProgress = !ping.liveAtOpen && ping.stage !== "idle";
+  // Already live on open → a success screen, not a setup (QA R4). Setup is one tap away.
+  const showSuccess = ping.liveAtOpen && !addOpen;
+  const showProgress = !showSuccess && !ping.liveAtOpen;
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const progress = useRef<HTMLDivElement>(null);
@@ -195,19 +162,13 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   useEffect(() => {
     if (!open) return;
     setStarted(false);
-    setNoteOpen(false);
+    setAddOpen(false);
     setDetailsOpen(false);
   }, [open, userId]);
 
-  // Keep per-user token deduplication and cancel old opens, users and retry attempts.
-  useEffect(() => {
-    if (!open || !userId) return;
-    let cancelled = false;
-    ensureConnectToken(userId, deviceLabel(detectOs()))
-      .then(() => { if (!cancelled) { /* token cached */ } })
-      .catch(() => { if (!cancelled) { /* ignore */ } });
-    return () => { cancelled = true; };
-  }, [open, userId, retry]);
+  // No token is minted on open (QA R4): the pairing command below is tokenless and the
+  // Mac app pairs in the browser, so an open that mints only piles up "never used"
+  // devices. Tokens are minted lazily, by an explicit Add device / Create key action.
 
   const command = useMemo(() => {
     try {
@@ -314,9 +275,8 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
   const staleNow = staleSinceWaiting(staleHint, ping.waitingSince);
   const copyError = (what: Copied) =>
     error?.what === what ? <p className={styles.error} role="alert">{error.message}</p> : null;
-
-  // The Mac panel opens with its own one-liner, so the sheet stays quiet on that tab.
-  const honestLine = choice === "mac-app" ? null : "One command. Approve in your browser, no tokens.";
+  const where = showSuccess ? liveWhere(ping.status, agoShort) : null;
+  const pasteIn = choice === "windows" ? "Paste in PowerShell. Approve in your browser." : "Paste in Terminal. Approve in your browser.";
 
   return createPortal(
     <>
@@ -332,96 +292,105 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
           onKeyDown={onKeyDown}
         >
           <header className={styles.head}>
-            <h2 id="connect-sheet-title" className={styles.title}>Connect VibeHub</h2>
+            <h2 id="connect-sheet-title" className={styles.title}>
+              {showSuccess ? "You're connected" : addOpen ? "Add a device" : "Connect VibeHub"}
+            </h2>
             <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
               <Icon name="x" size={16} />
             </button>
           </header>
           <div className={styles.body}>
-            {honestLine && <p className={styles.scope}>{honestLine}</p>}
-
-            {installed && (
-              <div className={styles.installed}>
-                <p className={styles.installedLead}>{installed.lead}</p>
-                {installed.detail && (
-                  <>
-                    <button
-                      type="button"
-                      className={styles.helpToggle}
-                      aria-expanded={noteOpen}
-                      aria-controls={`${id}-installed`}
-                      onClick={() => setNoteOpen((v) => !v)}
-                    >
-                      Already installed?
-                    </button>
-                    {noteOpen && <p id={`${id}-installed`} className={styles.installedDetail}>{installed.detail}</p>}
-                  </>
-                )}
+            {showSuccess ? (
+              <div className={cx(styles.success, "fade-in")}>
+                <span className={styles.successMark} aria-hidden="true"><Icon name="check" size={20} /></span>
+                {where && <p className={styles.scope}>{where}</p>}
+                <Button className={styles.copy} onClick={onClose}>Done</Button>
+                <button type="button" className={styles.helpToggle} onClick={() => setAddOpen(true)}>
+                  Add another device
+                </button>
               </div>
-            )}
+            ) : (
+              <>
+                <div className={styles.step}>
+                  <OsPicker value={choice} onChange={setChoice} />
 
-            <div className={styles.step}>
-              <OsPicker value={choice} onChange={setChoice} />
-
-              {choice === "mac-app" ? (
-                <MacInstall />
-              ) : (
-                <>
-                  {command ? (
+                  {choice === "mac-app" ? (
+                    <MacInstall onStarted={() => { setStarted(true); onStarted?.(); }} />
+                  ) : command ? (
                     <div className={styles.step}>
                       <pre className={styles.text} tabIndex={0} aria-label="Install and start command">
                         {command}
                       </pre>
                       <Button className={styles.copy} onClick={() => void copy("connect", command)}>
                         <Icon name={copied === "connect" ? "check" : "copy"} size={14} />
-                        {copied === "connect" ? "Command copied" : "Copy install command"}
+                        {copied === "connect" ? "Copied" : "Copy command"}
                       </Button>
+                      <p className={styles.scope}>{pasteIn}</p>
                       {copyError("connect")}
                     </div>
                   ) : (
                     <p className={styles.error} role="alert">{CONNECT_COMMAND_ERROR}</p>
                   )}
-                </>
-              )}
-            </div>
-
-            {/* Accessible Details disclosure. The Mac tab carries its own ("What it reads
-                and sends"), so the sheet's would be a second toggle for the same facts. */}
-            {choice !== "mac-app" && <div className={styles.help}>
-              <button
-                type="button"
-                className={styles.helpToggle}
-                aria-expanded={detailsOpen}
-                aria-controls={`${id}-data`}
-                onClick={() => setDetailsOpen((v) => !v)}
-              >
-                Details {detailsOpen ? "▴" : "▾"}
-              </button>
-              {detailsOpen && (
-                <div id={`${id}-data`} className={styles.stepDetails}>
-                  <p className={styles.explain}>{DEVICE_CONNECT_SCOPE}</p>
-                  <p className={styles.explain}>{NODE_SETUP_NOTICE}</p>
-                  <p className={styles.explain}>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
-                  <p className={styles.explain}>{TRACKER_LOCAL_READS}</p>
-                  <p className={styles.explain}>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
-                  <p className={styles.explain}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
-                  <p className={styles.explain}>{TRACKER_STATE_NOTICE}</p>
-                  <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
                 </div>
-              )}
-            </div>}
 
-            {showProgress && (
-              <Progress
-                stage={ping.stage as "waiting" | "pinged" | "live"}
-                elapsedMs={ping.elapsedMs}
-                stalled={ping.stalled}
-                device={ping.device}
-                tool={ping.tool}
-                copied={attemptCopy}
-                anchor={progress}
-                stale={staleNow ? staleHint : null}
-              />
+                {showProgress && (
+                  <LiveStatus
+                    stage={ping.stage}
+                    elapsedMs={ping.elapsedMs}
+                    showElapsed={attemptCopy !== null || started}
+                    device={ping.device}
+                    tool={ping.tool}
+                    anchor={progress}
+                  />
+                )}
+                {showProgress && !addOpen && installed && installed.lead !== "Your account is already connected." && (
+                  <p className={styles.installedLead}>{installed.lead}</p>
+                )}
+                {showProgress && (staleNow && staleHint ? (
+                  <p className={styles.staleFix}>{staleHint.fix}</p>
+                ) : ping.stalled && (
+                  <p className={styles.staleFix}>
+                    {choice === "mac-app" ? "Taking a while? Open VibeHub, click Connect in Browser." : "Taking a while? Check Trouble below."}
+                  </p>
+                ))}
+
+                {/* One quiet disclosure for everything else (ADHD rule 2): fixes, the
+                    already-installed note, and what the tracker reads and sends. */}
+                {(choice !== "mac-app" || installed?.detail || staleHint) && <div className={styles.help}>
+                  <button
+                    type="button"
+                    className={styles.helpToggle}
+                    aria-expanded={detailsOpen}
+                    aria-controls={`${id}-data`}
+                    onClick={() => setDetailsOpen((v) => !v)}
+                  >
+                    Trouble? {detailsOpen ? "▴" : "▾"}
+                  </button>
+                  {detailsOpen && (
+                    <div id={`${id}-data`} className={cx(styles.stepDetails, "fade-in")}>
+                      <ul className={styles.helpList}>
+                        {choice !== "mac-app" && <>
+                          <li>Copying does not run setup. Paste the command into PowerShell or Terminal.</li>
+                          <li>A browser tab opens to approve this device. Click &ldquo;Allow&rdquo;.</li>
+                          <li>Keep the terminal open until it says connected.</li>
+                        </>}
+                        {installed?.detail && <li>{installed.detail}</li>}
+                        {staleHint && <li>{staleHint.lead} {staleHint.fix}</li>}
+                      </ul>
+                      {choice !== "mac-app" && <>
+                      <p className={styles.explain}>{DEVICE_CONNECT_SCOPE}</p>
+                      <p className={styles.explain}>{NODE_SETUP_NOTICE}</p>
+                      <p className={styles.explain}>{INSTALL_START_MEANS} {BACKGROUND_START_MEANS}</p>
+                      <p className={styles.explain}>{TRACKER_LOCAL_READS}</p>
+                      <p className={styles.explain}>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
+                      <p className={styles.explain}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
+                      <p className={styles.explain}>{TRACKER_STATE_NOTICE}</p>
+                      <p className={styles.explain}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
+                      </>}
+                    </div>
+                  )}
+                </div>}
+              </>
             )}
           </div>
         </div>

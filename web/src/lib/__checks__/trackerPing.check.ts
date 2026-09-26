@@ -21,6 +21,7 @@ import {
   newer,
   observePing,
   connectionAlive,
+  recentlySeen,
   pingStage,
   revokePrompt,
   sessionKeyOf,
@@ -455,6 +456,24 @@ eq("idle label cannot turn a cached heartbeat into a new connection", pingStage(
 eq("the first response is not a witnessed new connection", freshPing({ ...freshIdleInputs, baselineReady: false }), false);
 eq("connection check never changes AI presence to active", idleSnapshot.presence.status, "idle");
 eq("connection observation never mutates the receipt-only status", JSON.stringify(idleSnapshot), idleBefore);
+
+// ---- QA R4: any recently-seen device counts as connected ----
+// The sheet waited forever while the Mac app heartbeated on another token and the
+// presence word still said "offline". A heartbeat within 3 intervals (min 3 min) wins.
+const NOW_R4 = Date.parse("2026-09-26T00:00:00.000Z");
+const agoR4 = (msAgo: number) => new Date(NOW_R4 - msAgo).toISOString();
+const offlineRecent = { lastSeenAt: agoR4(20_000), connected: false, presence: { status: "offline" }, heartbeatIntervalMs: 30_000 };
+eq("R4: a 20s-old heartbeat is connected even while presence says offline", connectionAlive(offlineRecent, NOW_R4), true);
+eq("R4: the same heartbeat an hour old stays offline", connectionAlive({ ...offlineRecent, lastSeenAt: agoR4(3_600_000) }, NOW_R4), false);
+eq("R4: the window is never shorter than 3 minutes", recentlySeen({ ...offlineRecent, lastSeenAt: agoR4(170_000), heartbeatIntervalMs: 1_000 }, NOW_R4), true);
+eq("R4: the window stretches to 3 intervals", recentlySeen({ ...offlineRecent, lastSeenAt: agoR4(250_000), heartbeatIntervalMs: 90_000 }, NOW_R4), true);
+eq("R4: any device's heartbeat counts, whichever token sent it",
+  recentlySeen({ lastSeenAt: agoR4(3_600_000), presence: { status: "offline" }, devices: [{ lastSeenAt: null }, { lastSeenAt: agoR4(30_000) }] }, NOW_R4), true);
+eq("R4: a device the server marks live counts", recentlySeen({ lastSeenAt: null, presence: { status: "offline" }, devices: [{ connected: true }] }, NOW_R4), true);
+eq("R4: a far-future timestamp is not proof", recentlySeen({ ...offlineRecent, lastSeenAt: new Date(NOW_R4 + 600_000).toISOString() }, NOW_R4), false);
+eq("R4: no heartbeat at all is not connected", recentlySeen({ lastSeenAt: null, presence: { status: "offline" }, devices: [{ lastSeenAt: null }] }, NOW_R4), false);
+eq("R4: an already-live open is liveAtOpen (success screen, no celebration)",
+  observePing(null, { ...offlineRecent, lastSeenAt: new Date().toISOString() }).liveAtOpen, true);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`trackerPing check failed: ${failures.join(", ")}`);
