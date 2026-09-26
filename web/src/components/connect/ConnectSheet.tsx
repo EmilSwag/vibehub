@@ -350,7 +350,7 @@ function ConnectSheetForUser({ open, onClose, onStarted, onCelebrated }: Props) 
                   <p className={styles.staleFix}>{staleHint.fix}</p>
                 ) : ping.stalled && (
                   <p className={styles.staleFix}>
-                    {choice === "mac-app" ? "Taking a while? Open VibeHub, click Connect in Browser." : "Taking a while? Check Trouble below."}
+                    {choice === "mac-app" ? "Taking a while? Open VibeHub, click Connect." : "Taking a while? Check Trouble below."}
                   </p>
                 ))}
 

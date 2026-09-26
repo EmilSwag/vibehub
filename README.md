@@ -44,7 +44,7 @@ curl -fsSL https://web-production-da778.up.railway.app/tracker/mac.sh | bash
 ```
 
 Or get the `.pkg` from [Releases](https://github.com/EmilSwag/vibehub/releases/latest). Open
-VibeHub → **Connect in Browser** → approve → **Start Tracking**. Nothing is tracked before that.
+VibeHub → **Connect** → approve in the browser. Nothing is tracked before that.
 Not notarised yet: if macOS blocks the first launch, use System Settings → Privacy &
 Security → **Open Anyway**.
 

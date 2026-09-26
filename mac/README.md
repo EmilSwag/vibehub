@@ -56,9 +56,10 @@ register a login item for an app running from `~/Downloads`, a disk image or `.b
 
 ## First run
 
-Welcome → Connect this Mac ("Connect in Browser", or "Use a token instead") → Start
-Tracking → Done. A returning, signed-out user gets the same connect controls in the
-popover; a replacement token can also be pasted in Settings → Account.
+One screen: **Connect** → approve in the browser → "You're live ✓". Connecting also
+starts tracking; *Trouble?* takes a pasted device key instead. A returning, signed-out
+user gets the same connect controls in the popover; a replacement token can also be
+pasted in Settings → Account.
 The app verifies the token against the server before saving it anywhere; then it goes
 into the login Keychain (this device only, never synced) and, via the embedded CLI's
 `login --token-stdin`, into the tracker's own `~/.vibehub/config.json`. It is never placed

@@ -17,8 +17,8 @@ Or download it from VibeHub → **Connect VibeHub → macOS app**, or the `.pkg`
 `mac-v*` release (`GET /api/v1/mac/latest`); the command checks the published SHA-256
 first and stops if it is missing or wrong.
 
-Then open VibeHub → **Connect in Browser** → approve on the page that opens. No token is
-ever in the download, the command or a URL. *Use a token instead* accepts a pasted device key.
+Then open VibeHub → **Connect** → approve on the page that opens. No token is ever in the
+download, the command or a URL. *Trouble?* takes a pasted device key instead.
 
 | | |
 |---|---|

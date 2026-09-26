@@ -222,7 +222,7 @@ export function MacInstall({ token, className, onStarted }: { token?: string; cl
           >
             Download VibeHub for Mac
           </a>
-          {pairs && <p className={styles.lead}>Open it, click <strong>Connect in Browser</strong>.</p>}
+          {pairs && <p className={styles.lead}>Open it, click <strong>Connect</strong>.</p>}
           <p className={styles.meta} title={MAC_REQUIREMENTS}>
             {[`v${state.release.version}`, "macOS 13+"].join(" · ")}
           </p>
