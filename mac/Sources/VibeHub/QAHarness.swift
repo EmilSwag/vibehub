@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import Security
 import SwiftUI
 
 /// DEBUG-only visual QA. Two modes, both fully sandboxed from the real install:
@@ -13,7 +14,7 @@ import SwiftUI
 /// `<state>` is loaded | loading | needsToken | failed.
 ///
 /// Isolation, which is the point of this file:
-/// - The Keychain is never read (`Keychain.fixtureToken`) — a differently-signed debug
+/// - No token is ever read (`Keychain.fixtureToken` short-circuits `TokenStore`) — a differently-signed debug
 ///   build would raise an access prompt, and fixtures must not see a real token.
 /// - Preferences go to a throwaway `com.vibehub.qa` suite, wiped before and after, never
 ///   the real `com.vibehub.menubar` domain.
@@ -36,6 +37,18 @@ enum QAHarness {
             FileHandle.standardError.write(Data("snapshot: wrote \(written) PNGs to \(dir)\n".utf8))
             return true
         }
+        if let index = arguments.firstIndex(of: "--qa-keychain") {
+            let service = arguments.indices.contains(index + 1) ? arguments[index + 1] : ""
+            let dir = arguments.indices.contains(index + 2) ? arguments[index + 2] : NSTemporaryDirectory()
+            exit(runKeychainProof(service: service, dir: URL(fileURLWithPath: dir, isDirectory: true)) ? 0 : 1)
+        }
+        if let index = arguments.firstIndex(of: "--qa-launchagent-race") {
+            let dir = arguments.indices.contains(index + 1) ? arguments[index + 1] : NSTemporaryDirectory()
+            let iterations = arguments.firstIndex(of: "--iterations").flatMap { Int(arguments[$0 + 1]) } ?? 10
+            exit(runLaunchAgentRace(plistDirectory: URL(fileURLWithPath: dir, isDirectory: true),
+                                    iterations: iterations, slowExit: arguments.contains("--slow-exit"),
+                                    noWait: arguments.contains("--no-wait")) ? 0 : 1)
+        }
         if let index = arguments.firstIndex(of: "--qa-island") {
             let state = arguments.indices.contains(index + 1) ? arguments[index + 1] : "loaded"
             runLiveIsland(state: state, expanded: arguments.contains("--expanded"), cycle: arguments.contains("--qa-cycle"))
@@ -53,22 +66,23 @@ enum QAHarness {
     /// One fixed instant, so every "since" and live timer renders identically per run.
     nonisolated static let now = Date(timeIntervalSince1970: 1_790_000_000)
 
-    static func me(now: Date = now) -> TrackerMe {
+    /// `project: nil` renders the Private project + "Name it" state (R5).
+    static func me(now: Date = now, project: String? = "neon-app") -> TrackerMe {
         let since = now.addingTimeInterval(-(1 * 3600 + 42 * 60))
         return TrackerMe(
             user: .init(id: "u1", username: "mira", displayName: "Mira Chen", avatarUrl: nil, level: 7),
             presence: .init(
                 status: .active,
-                activity: .init(project: "neon-app", tool: "claude-code", model: "claude-opus-4-1", since: since),
+                activity: .init(project: project, tool: "claude-code", model: "claude-opus-5-5", since: since),
                 lastSeenAt: now
             ),
-            today: .init(activeSeconds: 2 * 3600 + 14 * 60, tokens: 1_284_000, sessionStartedAt: since, estimatedUsd: 3.2, byModel: nil),
+            today: .init(activeSeconds: 2 * 3600 + 14 * 60, tokens: 1_284_000, sessionStartedAt: since, estimatedUsd: 3.2, byModel: nil, cachedTokens: 54_000_000),
             tracker: .init(connected: true, lastSeenAt: now, devices: [.init(name: "Mira's MacBook Air", lastSeenAt: now)]),
             friendsOnline: .init(count: 5, sample: [
                 .init(username: "jonas", displayName: "Jonas Berg", avatarUrl: nil, status: .active,
                       activity: .init(project: "atlas", tool: "cursor", model: nil, since: now.addingTimeInterval(-1800)), lastSeenAt: now),
                 .init(username: "ada", displayName: "Ada Okafor", avatarUrl: nil, status: .active,
-                      activity: .init(project: "ledger", tool: "claude-code", model: "claude-sonnet-4-5", since: now.addingTimeInterval(-600)), lastSeenAt: now),
+                      activity: .init(project: "ledger", tool: "claude-code", model: "gpt-6-sol", since: now.addingTimeInterval(-600)), lastSeenAt: now),
                 .init(username: "sol", displayName: "Sol Park", avatarUrl: nil, status: .idle,
                       activity: .init(project: "notes", tool: "codex", model: nil, since: now.addingTimeInterval(-3000)), lastSeenAt: now),
             ])
@@ -174,13 +188,74 @@ enum QAHarness {
 
         for (index, step) in OnboardingStep.allCases.enumerated() {
             for dark in [false, true] {
-                // Welcome and Token are pre-sign-in; Start and Done happen after it.
-                let rig = rig(step.rawValue < OnboardingStep.startTracking.rawValue ? .needsToken : .loaded)
-                let wizard = OnboardingWizard(store: rig.store, settings: rig.settings, tracker: rig.tracker, initialStep: step, onFinished: {})
+                let rig = rig(step == .connect ? .needsToken : .loaded)
+                let wizard = OnboardingWizard(store: rig.store, settings: rig.settings, tracker: rig.tracker,
+                                              initialStep: step, autoStart: false, onFinished: { _ in })
                 save("onboarding-\(index + 1)-\(step)-\(dark ? "dark" : "light")",
                      wizard.background(Color(nsColor: .windowBackgroundColor)), dark: dark)
             }
         }
+
+        // Private project (null alias) → "Private project" + "Name it".
+        do {
+            let rig = rig(.loaded)
+            let store = StatusStore(settings: rig.settings, fixture: .loaded(me(project: nil)), now: now)
+            let popover = PopoverView(store: store, settings: rig.settings, tracker: rig.tracker)
+            save("popover-private-project-light", PopoverChrome(content: popover), dark: false)
+            let island = IslandController(settings: rig.settings, store: store)
+            let snap = island.debugSnapshot(expanded: true)
+            save("island-expanded-private-project", snap.view.frame(width: snap.size.width, height: snap.size.height), size: snap.size, dark: true)
+        }
+
+        for dark in [false, true] {
+            // On a mid-grey "desktop" so the bubble's edge and arrow are judged honestly.
+            save("menubar-hint-\(dark ? "dark" : "light")", MenuBarHintView(arrowX: 150).padding(16).background(Color(white: 0.45)), dark: dark)
+        }
+
+        // Model/format table, for eyeballing alongside the PNGs.
+        let samples = ["claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5",
+                       "claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022", "claude-opus-4-1[1m]",
+                       "gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra", "gpt-4o-2024-08-06", "o3", "gemini-2.5-pro",
+                       "unknown", "null", "", "<synthetic>"]
+        var table = samples.map { "\($0.isEmpty ? "(empty)" : $0) -> \(Format.modelLabel($0) ?? "nil")" }
+        table += ["project nil -> \(Format.projectLabel(nil))", "project unknown -> \(Format.projectLabel("unknown"))",
+                  "project neon-app -> \(Format.projectLabel("neon-app"))",
+                  "cached 540000000 -> \(Format.cachedLine(540_000_000) ?? "nil")", "cached nil -> \(Format.cachedLine(nil) ?? "nil")"]
+        // Island default: notch Mac + implicit `off` → on; an explicit choice sticks.
+        func islandCase(_ label: String, stored: String?, explicit: Bool, notch: Bool) {
+            wipeSuite()
+            let d = UserDefaults(suiteName: suiteName)!
+            if let stored { d.set(stored, forKey: "IslandMode") }
+            if explicit { d.set(true, forKey: "IslandModeExplicit") }
+            table.append("island \(label) -> \(AppSettings(defaults: d, hasNotch: notch).islandMode.rawValue)")
+        }
+        table.append("this Mac: hasNotchedScreen=\(AppSettings.hasNotchedScreen) screens=\(NSScreen.screens.count)")
+        islandCase("this Mac (real detection), old implicit off", stored: "off", explicit: false, notch: AppSettings.hasNotchedScreen)
+        islandCase("notch, fresh", stored: nil, explicit: false, notch: true)
+        islandCase("notch, old implicit always", stored: "always", explicit: false, notch: true)
+        islandCase("notch, explicit always", stored: "always", explicit: true, notch: true)
+        islandCase("notch, old implicit off", stored: "off", explicit: false, notch: true)
+        islandCase("notch, explicit off", stored: "off", explicit: true, notch: true)
+        islandCase("notchless, implicit off", stored: "off", explicit: false, notch: false)
+        do {
+            wipeSuite()
+            let settings = AppSettings(defaults: UserDefaults(suiteName: suiteName)!, hasNotch: true)
+            settings.chooseIslandMode(.off)
+            let reread = AppSettings(defaults: UserDefaults(suiteName: suiteName)!, hasNotch: true)
+            table.append("island chooseIslandMode(off) then relaunch -> \(reread.islandMode.rawValue) explicit=\(reread.islandModeIsExplicit)")
+            wipeSuite()
+        }
+        // Decode must not fail when cachedTokens/project are absent or null.
+        let json = #"{"user":{"id":"u","username":"a","displayName":null,"avatarUrl":null,"level":1},"presence":{"status":"active","activity":{"project":null,"tool":"claude-code","model":"claude-opus-5-5","since":"2026-09-26T00:00:00Z"},"lastSeenAt":null},"today":{"activeSeconds":60,"tokens":10,"sessionStartedAt":null},"tracker":{"connected":true,"lastSeenAt":null,"devices":[]},"friendsOnline":{"count":0,"sample":[]}}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            let me = try decoder.decode(TrackerMe.self, from: Data(json.utf8))
+            table.append("decode without cachedTokens/estimatedUsd, null project -> ok (cached=\(String(describing: me.today.cachedTokens)), line=\(Format.activityLine(me.presence.activity!)))")
+        } catch {
+            table.append("decode FAILED: \(error)")
+        }
+        try? table.joined(separator: "\n").appending("\n").write(to: dir.appendingPathComponent("format-check.txt"), atomically: true, encoding: .utf8)
         return count
     }
 
@@ -220,6 +295,159 @@ enum QAHarness {
         window.contentView = nil
         guard let png = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: url)) != nil
+    }
+
+    // MARK: - Keychain no-prompt proof
+
+    /// Expects two items under a throwaway `com.vibehub.qa-*` service, created by the
+    /// caller with the `security` CLI (so this binary is NOT the creator):
+    ///   account `tracker-token` — ACL trusts no app (`-T ""`): reading must not prompt;
+    /// Every read runs off the main thread under a watchdog: a hang means a prompt.
+    private static func runKeychainProof(service: String, dir: URL) -> Bool {
+        guard service.hasPrefix("com.vibehub.qa-") else {
+            raceLog("refusing: service must start with com.vibehub.qa-")
+            return false
+        }
+        var failures = 0
+        func check(_ name: String, timeout: TimeInterval = 8, _ body: @escaping @Sendable () -> (ok: Bool, detail: String)) {
+            let started = Date()
+            var result: (ok: Bool, detail: String)?
+            let done = DispatchSemaphore(value: 0)
+            DispatchQueue.global(qos: .userInitiated).async {
+                result = body()
+                done.signal()
+            }
+            // Main thread stays free (and keeps its run loop turning) the whole time.
+            while done.wait(timeout: .now()) == .timedOut, Date().timeIntervalSince(started) < timeout {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+            let elapsed = Date().timeIntervalSince(started)
+            guard let result else {
+                failures += 1
+                raceLog(String(format: "FAIL %@ — no answer after %.1fs (a prompt is blocking)", name, elapsed))
+                return
+            }
+            if !result.ok { failures += 1 }
+            raceLog(String(format: "%@ %@ — %@ (%.3fs, main thread free)", result.ok ? "OK  " : "FAIL", name, result.detail, elapsed))
+        }
+
+        check("untrusted item, legacy read") {
+            let read = Keychain.readLegacyToken(service: service, account: "tracker-token")
+            return (read.token == nil, "\(read)")
+        }
+        // A `security`-CLI item is partitioned to Apple tools even with `-A`, so another
+        // binary can never read it silently (see the untrusted check). The readable case is
+        // an item this binary creates itself — test-only, throwaway service, removed below.
+        check("own item (readable), legacy read") {
+            let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                       kSecAttrService as String: service, kSecAttrAccount as String: "self"]
+            var add = base
+            add[kSecValueData as String] = Data("vh_qa_self_token".utf8)
+            let added = SecItemAdd(add as CFDictionary, nil)
+            let read = Keychain.readLegacyToken(service: service, account: "self")
+            let removed = SecItemDelete(base as CFDictionary)
+            return (added == errSecSuccess && read.token == "vh_qa_self_token" && removed == errSecSuccess,
+                    "add=\(added) read=\(read.token == nil ? "\(read)" : "token(<matches>)") cleanup=\(removed)")
+        }
+        let configURL = dir.appendingPathComponent("config.json")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? #"{"apiUrl":"https://example.invalid","deviceToken":"vh_qa_config_token","projectAliases":{}}"#
+            .write(to: configURL, atomically: true, encoding: .utf8)
+        check("config.json wins over Keychain") {
+            let r = TokenStore.resolve(configURL: configURL, allowLegacy: true, legacyService: service)
+            return (r.token == "vh_qa_config_token" && r.source == .config, "source=\(r.source)")
+        }
+        try? FileManager.default.removeItem(at: configURL)
+        check("no config, legacy retired → no Keychain read") {
+            let r = TokenStore.resolve(configURL: configURL, allowLegacy: false, legacyService: service)
+            return (r.token == nil && r.source == .none, "source=\(r.source)")
+        }
+        check("no config, legacy allowed, item not readable → no token") {
+            let r = TokenStore.resolve(configURL: configURL, allowLegacy: true, legacyService: service)
+            return (r.token == nil && r.source == .none, "source=\(r.source)")
+        }
+        raceLog("RESULT: \(failures == 0 ? "PASS" : "FAIL") — \(failures) failure(s)")
+        return failures == 0
+    }
+
+    // MARK: - LaunchAgent race proof
+
+    /// Drives the real `LaunchAgent` against a throwaway job — never `com.vibehub.tracker`.
+    /// Each iteration changes the plist (forcing the bootout → wait → bootstrap path the
+    /// race lived in) and checks the job is running on a new pid with the plist intact;
+    /// then a few unchanged installs must take the kickstart-only path. Cleans up always.
+    /// `noWait`: unload timeout 0, so bootstrap *does* race the teardown — proves the
+    /// 37/5 retry-with-backoff path on its own, not just the wait in front of it.
+    private static func runLaunchAgentRace(plistDirectory: URL, iterations: Int, slowExit: Bool, noWait: Bool) -> Bool {
+        var failures = 0
+        let group = DispatchGroup()
+        group.enter()
+        // Off the main thread, exactly as the app calls it.
+        DispatchQueue.global(qos: .userInitiated).async {
+            failures = raceWorker(plistDirectory: plistDirectory, iterations: iterations, slowExit: slowExit, noWait: noWait)
+            group.leave()
+        }
+        while group.wait(timeout: .now()) == .timedOut { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        raceLog("RESULT: \(failures == 0 ? "PASS" : "FAIL") — \(failures) failure(s), \(iterations) changed + 3 unchanged installs\(slowExit ? ", slow-exit job" : "")\(noWait ? ", no unload wait (retry path)" : "")")
+        return failures == 0
+    }
+
+    nonisolated private static func raceLog(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    nonisolated private static func raceWorker(plistDirectory: URL, iterations: Int, slowExit: Bool, noWait: Bool) -> Int {
+        let label = "com.vibehub.qa-race-test"
+        precondition(label.hasPrefix("com.vibehub.qa-"), "race proof must never use a real label")
+        var agent = LaunchAgent(label: label, plistDirectory: plistDirectory)
+        if noWait { agent.unloadTimeout = 0 }
+        // `--slow-exit`: SIGTERM takes 2s to land, like the tracker closing its session.
+        let program: [String] = slowExit
+            ? ["/bin/bash", "-c", "trap 'sleep 2; exit 0' TERM; /bin/sleep 600 & wait"]
+            : ["/bin/sleep", "600"]
+        func plist(_ iteration: Int) -> [String: Any] {
+            ["ProgramArguments": program, "RunAtLoad": true, "EnvironmentVariables": ["QA_ITERATION": "\(iteration)"]]
+        }
+
+        var failures = 0
+        var lastPID: Int?
+        for i in 1...iterations {
+            let started = Date()
+            do {
+                let outcome = try agent.install(plist: plist(i))
+                let pid = agent.runningPID
+                let ok = pid != nil && pid != lastPID && agent.isInstalled
+                if !ok { failures += 1 }
+                raceLog(String(format: "changed   %2d: %@ %@ pid=%@ plist=%@ (%.2fs)", i, ok ? "OK  " : "FAIL",
+                               "\(outcome)", pid.map(String.init) ?? "nil", agent.isInstalled ? "kept" : "MISSING",
+                               Date().timeIntervalSince(started)))
+                lastPID = pid
+            } catch {
+                failures += 1
+                raceLog("changed   \(i): FAIL \(error.localizedDescription) plist=\(agent.isInstalled ? "kept" : "MISSING")")
+            }
+        }
+        for i in 1...3 {
+            let started = Date()
+            do {
+                let outcome = try agent.install(plist: plist(iterations))
+                let pid = agent.runningPID
+                let ok = outcome == .kickstarted && pid != nil && pid != lastPID
+                if !ok { failures += 1 }
+                raceLog(String(format: "unchanged %2d: %@ %@ pid=%@ (%.2fs)", i, ok ? "OK  " : "FAIL", "\(outcome)",
+                               pid.map(String.init) ?? "nil", Date().timeIntervalSince(started)))
+                lastPID = pid
+            } catch {
+                failures += 1
+                raceLog("unchanged \(i): FAIL \(error.localizedDescription)")
+            }
+        }
+        agent.unloadTimeout = 15
+        do { try agent.uninstall() } catch { raceLog("cleanup: \(error.localizedDescription)") }
+        let clean = !agent.isLoaded && !agent.isInstalled
+        if !clean { failures += 1 }
+        raceLog("cleanup: \(clean ? "job unloaded, plist removed" : "NOT CLEAN")")
+        return failures
     }
 
     // MARK: - Live mode

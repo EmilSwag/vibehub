@@ -238,10 +238,14 @@ case "$VERSION" in
     echo "    2. paste your device key (from ${WEB_URL}/connect) into the app"
     echo "    3. press Start                (tracker + app then launch at login on their own)"
     ;;
-  *)
+  1.1.*)
     echo "  Next, in the VibeHub menu-bar app:"
     echo "    1. click 'Connect in Browser' to sign in with one click"
     echo "    2. press Start                (tracker + app then launch at login on their own)"
+    ;;
+  *)
+    echo "  Next: open VibeHub, click Connect, approve in the browser. Done."
+    echo "  (It starts at login on its own.)"
     ;;
 esac
 echo

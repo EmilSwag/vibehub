@@ -2,7 +2,7 @@
 // Evidence, exact aliases and assumptions: meta/resources/vibehub-token-pricing.md.
 // No network requests, provider SDKs, family matching or inferred model identities.
 
-export const TOKEN_PRICING_CHECKED_AT = "2026-09-16";
+export const TOKEN_PRICING_CHECKED_AT = "2026-09-26";
 
 export const TOKEN_PRICING_SOURCES = Object.freeze({
   openai: "https://developers.openai.com/api/docs/pricing",
@@ -19,7 +19,31 @@ export interface TokenPrice {
   readonly checkedAt: string;
   readonly sourceUrl: string;
   readonly modelSourceUrl: string;
+  /**
+   * QA fix (R2): USD per 1,000,000 cache-READ / cache-WRITE tokens, only where a verified
+   * rate exists (CACHE_RATES). Absent = no verified cache price: cache reads stay unpriced
+   * (never guessed). Mirrors server/src/lib/token-pricing.ts; tokenPricingSync pins both.
+   */
+  readonly cacheReadUsdPerMillion?: number;
+  readonly cacheWriteUsdPerMillion?: number;
 }
+
+/**
+ * Verified cache rates (meta/plans/vibehub-qa-fix.md, "Verified prices", Sep 2026).
+ * [read, write]; write null = the provider bills no separate cache write. Not a
+ * multiplier rule: Opus 5.5 reads at 0.05x input and Fable at 0.025x.
+ */
+const CACHE_RATES: Readonly<Record<string, readonly [number, number | null]>> = Object.freeze({
+  "claude-opus-5-5": [0.20, 5],
+  "claude-fable-5-1": [0.25, 12.5],
+  "claude-opus-5": [0.50, 6.25],
+  "claude-sonnet-5": [0.20, 2.5],
+  "claude-haiku-4-5-20251001": [0.10, 1.25],
+  "gpt-6-sol": [0.20, null],
+  "gpt-6-luna": [0.01, null],
+  "gpt-5.6-sol": [0.40, null], // developers.openai.com: cached input $0.40 at the $4/$20 promo rate
+  "gpt-5.6-terra": [0.20, null],
+});
 
 function price(
   provider: TokenPrice["provider"],
@@ -29,12 +53,15 @@ function price(
   aliases: readonly string[] = [],
   modelSourceUrl: string = TOKEN_PRICING_SOURCES[provider],
 ): TokenPrice {
+  const cache = CACHE_RATES[modelId];
   return Object.freeze({
     provider, modelId, inputUsdPerMillion, outputUsdPerMillion,
     aliases: Object.freeze([...aliases]),
     checkedAt: TOKEN_PRICING_CHECKED_AT,
     sourceUrl: TOKEN_PRICING_SOURCES[provider],
     modelSourceUrl,
+    ...(cache ? { cacheReadUsdPerMillion: cache[0] } : {}),
+    ...(cache && cache[1] !== null ? { cacheWriteUsdPerMillion: cache[1] } : {}),
   });
 }
 
@@ -106,6 +133,12 @@ export const TOKEN_PRICES: readonly TokenPrice[] = Object.freeze([
   price("anthropic", "claude-opus-4-20250514", 15, 75, ["claude-opus-4-0"], claudeDeprecations),
   price("anthropic", "claude-sonnet-4-20250514", 3, 15, ["claude-sonnet-4-0"], claudeDeprecations),
   price("anthropic", "claude-3-5-haiku-20241022", 0.80, 4, ["claude-3-5-haiku-latest"], claudeDeprecations),
+  // QA fix (R1), meta/plans/vibehub-qa-fix.md "Verified prices" (Sep 2026). APPENDED in
+  // this exact order - server/src/lib/token-pricing.ts appends the same three rows, and
+  // tokenPricingSync compares the two tables index by index.
+  price("anthropic", "claude-opus-5-5", 4, 20),
+  price("openai", "gpt-6-sol", 2, 10),
+  price("openai", "gpt-6-luna", 0.10, 0.50),
 ]);
 
 // A private Map avoids prototype-key lookups and exposes no mutable registry API.

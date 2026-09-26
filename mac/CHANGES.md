@@ -1,3 +1,38 @@
+# 1.2.5 (build 8) — "Starting…" instead of "Not counting" right after install (2026-09-26)
+
+- A freshly installed Node takes ~20 s to launch (macOS scans the new binary) before the daemon writes its pid file; the popover said "Not counting" for that whole window after every upgrade or connect. For 60 s after the app (re)starts the LaunchAgent job, a missing pid now reads "Starting…".
+
+# 1.2.4 (build 7) — no false "Can't reach VibeHub" on start (2026-09-26)
+
+- Every tracker start writes an offline snapshot before its first connection check; the popover read it as "Can't reach VibeHub" for 20-30 s after each start (right after installing or connecting). "Can't reach" now needs a check that ran and failed (`lastConnectionCheckAt`); before that the row says "Running".
+- Popover: dropped the "This Mac checked in recently…" line under "Counting"; the Now block already says whether an AI tool is in use.
+
+# 1.2.3 (build 6) — tracker rides out VPN blips (2026-09-26)
+
+- Embeds tracker `436be7a7b8f3`: requests that never reached the server (DNS, connect, TLS handshake dropped by a VPN) are retried in-tick (1 s, 3 s) — only those, so nothing is counted twice; one failed tick right after a good one keeps "connected" (60 s grace, never for a revoked token). Live: the grace fired once, status stayed connected.
+
+# 1.2.2 (build 5) — Keychain prompt froze the app on upgrade (2026-09-26)
+
+- The token's single source of truth is now the tracker's `~/.vibehub/config.json` (`TokenStore`), read once off-main at launch and held in memory. `StatusStore.init`, every poll and every `store.token` used to call `SecItemCopyMatching` on the main thread; a differently-signed upgrade got an "allow access" prompt and froze before `reconcileOnLaunch` ran.
+- The Keychain item is legacy, read-only: read once, only if config.json has no token, never prompting (measured: `kSecUseAuthenticationUISkip` alone still blocked; it now also disables file-keychain interaction around the read, resolved at runtime), migrated into config.json via `login`, then retired. Never written or deleted; not-allowed = no token.
+- Launch audit: Handoff file, local status poll (status.json/pid/kill), `SMAppService` status/register/unregister moved off-main.
+- Proof: DEBUG `--qa-keychain <com.vibehub.qa-*> <dir>`; logs in `.temp/qa/mac/keychain/`.
+
+# 1.2.1 (build 4) — LaunchAgent bootout race (2026-09-26)
+
+- `LaunchAgent.install` waited for nothing between `bootout` and `bootstrap`; bootout is async, so a slow-exiting tracker made bootstrap fail (reproduced: `Bootstrap failed: 5`, 7/10) and the catch then deleted the plist. Now it polls `launchctl print` until the job is really gone, retries 5/37 with exponential backoff, and never deletes the plist on failure (only `uninstall` does).
+- Unchanged plist + loaded job → `kickstart -k` only; after a bootstrap no redundant `kickstart -k` (it blocked for launchd's respawn throttle: 10s default, 30s for the tracker).
+- `reconcileOnLaunch` records the bundle version only after the restart succeeded, so a failed upgrade restart is retried next launch. All launchctl work stays off-main (asserted).
+- Proof: DEBUG `--qa-launchagent-race <dir> [--slow-exit] [--no-wait]` on a throwaway `com.vibehub.qa-race-test` job; logs in `.temp/qa/mac/race/`.
+
+# L3 QA-fix (2026-09-26) — first 30 seconds, island default, numbers
+
+- Onboarding is one screen (mark + Connect) → browser pairing → "You're live ✓" (drawn check) → closes itself; notch Macs get a one-time island demo pulse, then a one-time "VibeHub lives up here" pointer (`MenuBarHint.swift`).
+- Island defaults ON on notch Macs until the user picks a mode in Settings (`IslandModeExplicit`); old implicit `IslandMode=off` is migrated. Pill = live timer + fresh tokens + ≈$ (no ≈$ without a verified price).
+- Model ids humanized (`claude-opus-5-5` → Opus 5.5, `gpt-6-sol` → GPT-6 Sol, unknown → raw, never "null"); null/"unknown" project → "Private project" + "Name it" (runs the tracker's `set <folder> <alias>`).
+- `today.cachedTokens` decoded optionally and shown as a secondary "+540M cached"; `activity.project` is nullable. Token entry lives behind "Trouble?" in onboarding, popover and Settings; no jargon on the main path.
+- Verified: debug + `bundle.sh` green; QAHarness snapshots + `format-check.txt` in `.temp/qa/mac/qafix`. Not verified on a real first install (live pairing, pulse timing, status-item anchor of the pointer).
+
 # Lane A (Archy) — VibeHub for Mac: changed files, deviations, verification
 
 Session: 2026-09-19. Windows workstation, no Swift toolchain — everything below is

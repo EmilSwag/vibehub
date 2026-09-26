@@ -3,6 +3,9 @@ export interface UsageDelta {
   model: string | null;
   tokensInputDelta: number;
   tokensOutputDelta: number;
+  /** Cache reads (not part of tokensInputDelta) and cache writes (a subset of it). */
+  tokensCacheReadDelta?: number;
+  tokensCacheWriteDelta?: number;
   /** Legacy type compatibility only. Strict collection rejects estimates. */
   estimated?: boolean;
 }
@@ -23,6 +26,11 @@ export interface Observation {
   usage: UsageDelta[];
   /** Legacy presence value is rejected by the strict detector. */
   confidence: "activity" | "presence";
+  /**
+   * QA fix (R3): usage read this poll whose activity is no longer fresh (a record read
+   * late). The detector books its tokens and never treats it as presence.
+   */
+  late?: boolean;
 }
 
 export interface Adapter {

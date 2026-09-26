@@ -75,7 +75,7 @@ type Copyable = "command" | "key";
  * release published no checksum — a working download beside a command that is explicitly
  * withheld, because `mac.sh` aborts on a null checksum rather than installing unverified.
  */
-export function MacInstall({ token, className }: { token?: string; className?: string }) {
+export function MacInstall({ token, className, onStarted }: { token?: string; className?: string; onStarted?: () => void }) {
   const id = useId();
   const [state, setState] = useState<MacReleaseState>({ kind: "loading" });
   const [retry, setRetry] = useState(0);
@@ -149,24 +149,49 @@ export function MacInstall({ token, className }: { token?: string; className?: s
   const pairs = state.kind === "ready" && isVersionAtLeast(state.release.version, "1.1.0");
   const showsKey = canInstall && !pairs;
 
+  // ADHD rules (QA R6): one button, one line. Terminal, first-launch help and the data
+  // story are all one quiet "Other ways" click away.
+  const otherWays = (
+    <div id={`${id}-mac-data`} className={cx(styles.details, "fade-in")}>
+      <p className={styles.sub}>{MAC_INSTALL_MEANS} {MAC_AUTOSTART_MEANS}</p>
+      {state.kind === "ready" && (
+        state.commandUsable ? (
+          command.text ? (
+            <>
+              <p className={styles.sub}>{MAC_COMMAND_MEANS}</p>
+              <pre className={styles.cmd} tabIndex={0} aria-label="Mac install command">{command.text}</pre>
+              <Button variant="secondary" className={styles.action} onClick={() => { onStarted?.(); void copy("command", command.text!); }}>
+                {copied === "command" ? "Command copied" : "Copy install command"}
+              </Button>
+            </>
+          ) : (
+            <p className={styles.state} role="alert">{command.error}</p>
+          )
+        ) : (
+          <p className={styles.sub}>{MAC_CHECKSUM_MISSING}</p>
+        )
+      )}
+      <p className={styles.sub}>Blocked on first launch? System Settings → Privacy &amp; Security → Open Anyway.</p>
+      <p className={styles.sub}>
+        {MAC_APP_SCOPE} {MAC_TOKENLESS_NOTICE}{" "}
+        {/* Mirrors the steps: only point at "below" when the key block is really there. */}
+        {showsKey ? MAC_TOKEN_MEANS : MAC_PAIRING_MEANS}
+      </p>
+      <p className={styles.sub}>{TRACKER_LOCAL_READS}</p>
+      <p className={styles.sub}>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
+      <p className={styles.sub}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
+      <p className={styles.sub}>{TRACKER_STATE_NOTICE}</p>
+      <p className={styles.sub}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
+    </div>
+  );
+
   return (
     <div className={cx(styles.mac, className, "fade-in")}>
-      <p className={styles.lead}>{MAC_APP_SCOPE}</p>
-
-      {/* Load-bearing before either entrance: what installing does, and that tracking
-          resumes at login once started. The rest of the data story sits one click away
-          in the disclosure at the bottom, so the download reads in a glance. */}
-      <p className={styles.consent} aria-label="Before you install">
-        {MAC_INSTALL_MEANS} {MAC_AUTOSTART_MEANS}
-      </p>
-
       {state.kind === "loading" && (
-        // Same silhouette as the ready state: download button, meta line, command, copy.
+        // Same silhouette as the ready state: download button, one line.
         <div className={styles.release} aria-busy="true" aria-label="Checking for a Mac release">
           <Skeleton variant="pill" height={44} width="100%" />
           <Skeleton height={12} width="62%" />
-          <Skeleton variant="block" height={76} width="100%" />
-          <Skeleton variant="pill" height={44} width="100%" />
         </div>
       )}
 
@@ -193,78 +218,43 @@ export function MacInstall({ token, className }: { token?: string; className?: s
             href={state.release.pkgUrl}
             rel="noopener noreferrer"
             download
+            onClick={() => onStarted?.()}
           >
             Download VibeHub for Mac
           </a>
-          <p className={styles.meta}>
-            {[
-              `Version ${state.release.version}`,
-              state.release.publishedAt && formatShortDate(state.release.publishedAt),
-              MAC_REQUIREMENTS,
-            ].filter(Boolean).join(" · ")}
+          {pairs && <p className={styles.lead}>Open it, click <strong>Connect</strong>.</p>}
+          <p className={styles.meta} title={MAC_REQUIREMENTS}>
+            {[`v${state.release.version}`, "macOS 13+"].join(" · ")}
           </p>
-
-          {state.commandUsable ? (
-            command.text ? (
-              <>
-                <p className={styles.sub}>{MAC_COMMAND_MEANS}</p>
-                <pre className={styles.cmd} tabIndex={0} aria-label="Mac install command">{command.text}</pre>
-                <Button variant="secondary" className={styles.action} onClick={() => void copy("command", command.text!)}>
-                  {copied === "command" ? "Command copied" : "Copy install command"}
-                </Button>
-              </>
-            ) : (
-              <p className={styles.state} role="alert">{command.error}</p>
-            )
-          ) : (
-            <p className={styles.sub}>{MAC_CHECKSUM_MISSING}</p>
-          )}
         </div>
       )}
 
-      {canInstall && (
+      {canInstall && !pairs && (
         <div className={styles.keyBlock}>
-          {pairs ? (
-            <div className={styles.next}>
-              <p className={styles.lead}>Then</p>
-              <ol className={styles.steps}>
-                <li>Open VibeHub from Applications.</li>
-                <li>Click <strong>Connect in Browser</strong>. No keys to copy.</li>
-              </ol>
-              <p className={styles.hint}>Blocked on first launch? System Settings → Privacy &amp; Security → Open Anyway.</p>
-            </div>
-          ) : (
-            <div className={styles.next}>
-              <p className={styles.lead}>Then</p>
-              <ol className={styles.steps}>
-                <li>Open VibeHub from Applications.</li>
-                <li>Paste the device key below, then press Start.</li>
-              </ol>
-              <p className={styles.hint}>Blocked on first launch? System Settings → Privacy &amp; Security → Open Anyway.</p>
-
-              <h4 className={styles.keyTitle}>{MAC_KEY_TITLE}</h4>
-              {key ? (
-                <>
-                  <p className={styles.sub}>{MAC_KEY_ONCE}</p>
-                  <p className={styles.sub}>{MAC_KEY_PRIVATE}</p>
-                  <pre className={styles.token} tabIndex={0} aria-label="Device key">{key}</pre>
-                  <Button variant="secondary" className={styles.action} onClick={() => void copy("key", key)}>
-                    {copied === "key" ? "Key copied" : "Copy device key"}
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="secondary"
-                  className={styles.action}
-                  disabled={issuing}
-                  onClick={() => void issueDeviceKey()}
-                >
-                  {issuing ? MAC_KEY_PENDING : issueError ? MAC_KEY_RETRY : MAC_KEY_ACTION}
+          <div className={styles.next}>
+            <p className={styles.lead}>Open VibeHub, paste this key, press Start.</p>
+            <h4 className={styles.keyTitle}>{MAC_KEY_TITLE}</h4>
+            {key ? (
+              <>
+                <p className={styles.sub}>{MAC_KEY_ONCE}</p>
+                <p className={styles.sub}>{MAC_KEY_PRIVATE}</p>
+                <pre className={styles.token} tabIndex={0} aria-label="Device key">{key}</pre>
+                <Button variant="secondary" className={styles.action} onClick={() => void copy("key", key)}>
+                  {copied === "key" ? "Key copied" : "Copy device key"}
                 </Button>
-              )}
-              {issueError && <p className={styles.state} role="alert">{issueError}</p>}
-            </div>
-          )}
+              </>
+            ) : (
+              <Button
+                variant="secondary"
+                className={styles.action}
+                disabled={issuing}
+                onClick={() => void issueDeviceKey()}
+              >
+                {issuing ? MAC_KEY_PENDING : issueError ? MAC_KEY_RETRY : MAC_KEY_ACTION}
+              </Button>
+            )}
+            {issueError && <p className={styles.state} role="alert">{issueError}</p>}
+          </div>
         </div>
       )}
 
@@ -277,22 +267,9 @@ export function MacInstall({ token, className }: { token?: string; className?: s
         aria-controls={`${id}-mac-data`}
         onClick={() => setDetailsOpen((value) => !value)}
       >
-        What it reads and sends
+        Other ways &amp; details
       </button>
-      {detailsOpen && (
-        <div id={`${id}-mac-data`} className={cx(styles.details, "fade-in")}>
-          <p className={styles.sub}>
-            {MAC_TOKENLESS_NOTICE}{" "}
-            {/* Mirrors the steps: only point at "below" when the key block is really there. */}
-            {showsKey ? MAC_TOKEN_MEANS : MAC_PAIRING_MEANS}
-          </p>
-          <p className={styles.sub}>{TRACKER_LOCAL_READS}</p>
-          <p className={styles.sub}>{TRACKER_UPLOADS} {TRACKER_VISIBILITY}</p>
-          <p className={styles.sub}>{TRACKER_SUPPORT_NOTICE} {TRACKER_SUPPORT_DETAILS}</p>
-          <p className={styles.sub}>{TRACKER_STATE_NOTICE}</p>
-          <p className={styles.sub}>{TRACKER_CONTROL_NOTICE} {TRACKER_HISTORY_NOTICE}</p>
-        </div>
-      )}
+      {detailsOpen && otherWays}
     </div>
   );
 }

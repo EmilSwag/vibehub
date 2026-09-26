@@ -33,6 +33,9 @@ const EXECUTABLE = new Set([
   // read tool identity from tools.ts. Both are pure and Prisma-free, so they execute
   // under fixtures exactly as the rest do.
   "src/lib/token-pricing.ts", "src/lib/tools.ts",
+  // Local-day rule ("today" = the host's local calendar day): pure, shared by
+  // sessions.ts, tracker-me.ts and both routes.
+  "src/lib/local-day.ts",
   "src/services/trackerConnection.ts", "src/middleware/auth.ts", "src/routes/tracker.ts",
   "src/routes/users.ts", "src/jobs/session-rollup.ts",
 ]);
@@ -455,7 +458,7 @@ test("idle transport has no AI details, sources, elapsed time or tokens on eithe
   eq(menu.presence, { status: "idle", activity: null, lastSeenAt: date(BASE).toISOString() });
   // An idle transport is an EMPTY day: nothing was measured and nothing was priced,
   // so the cost is a real 0, not the null an unmeasured tokenless day reports.
-  eq(menu.today, { tokens: 0, activeSeconds: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} });
+  eq(menu.today, { tokens: 0, cachedTokens: 0, activeSeconds: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} });
   eq(browser.devices.find((item) => item.id === D1).lastSeenAt, date(BASE).toISOString());
   eq(browser.devices.find((item) => item.id === D2).lastSeenAt, null);
   eq(menu.tracker.devices.find((item) => item.name === D1).lastSeenAt, date(BASE).toISOString());
@@ -1166,6 +1169,78 @@ test("v2 usage deltas remain independent and are not counted twice at Session cl
   eq(h.tables.dailyStat[0].tokensInput + h.tables.dailyStat[0].tokensOutput, 5);
   eq(h.tables.userStreak.length, 1);
   eq(h.tables.githubCommitDay, []);
+});
+
+// ---- "today" is the user's LOCAL day (meta/plans/vibehub-qa-fix.md, lib/local-day.ts) ----
+// Day under test: local 2026-09-17 for a UTC+3 host. Beats stay < 10 min apart so the
+// idle sweep never closes the session mid-case. Both status surfaces must agree.
+const T = (h, m) => Date.UTC(2026, 8, 16, h, m);
+const DAY17 = date(Date.UTC(2026, 8, 17)).toISOString();
+const DAY16 = date(Date.UTC(2026, 8, 16)).toISOString();
+function localDayHarness() {
+  const h = harness({ allowAiWrites: true });
+  h.beat = (eventType, at, { tz, usage } = {}) => {
+    h.clock = at;
+    return h.request(h.tracker, "post", "/tracker/heartbeat", { raw: RAW_A, body: {
+      eventType, projectAlias: "fixture-project", tool: "claude-code", model: "fixture-model",
+      occurredAt: date(at).toISOString(), ...(tz === undefined ? {} : { tzOffsetMinutes: tz }),
+      ...(usage ? { usage: [{ tool: "claude-code", model: "fixture-model", tokensInputDelta: usage[0], tokensOutputDelta: usage[1] }] } : {}) } });
+  };
+  h.today = async () => {
+    const menu = (await h.menu()).body.today;
+    const source = (await h.browser()).body.sources.find((item) => item.tool === "claude-code") ?? { activeSecondsToday: 0, tokensToday: 0 };
+    return { menu: [menu.activeSeconds, menu.tokens], home: [source.activeSecondsToday, source.tokensToday] };
+  };
+  h.statKeys = () => h.tables.dailyStat.map((row) => [row.date.toISOString(), row.activeSeconds, row.tokensInput + row.tokensOutput]);
+  return h;
+}
+
+test("local day: a late-night start (after local midnight, before UTC midnight) counts as today", async () => {
+  const h = localDayHarness();
+  // 23:50Z = 02:50 on the 17th for UTC+3. At 00:05Z the old UTC rule showed only the 300 s
+  // and 5 tokens since UTC midnight; the user's day began at 21:00Z, so all of it is today.
+  eq((await h.beat("session_start", T(23, 50), { tz: 180 })).status, 200);
+  eq((await h.beat("heartbeat", T(23, 55), { tz: 180, usage: [4, 6] })).status, 200);
+  eq((await h.beat("heartbeat", T(24, 5), { tz: 180, usage: [2, 3] })).status, 200);
+  eq(await h.today(), { menu: [900, 15], home: [900, 15] }, "whole session and every token are today");
+  eq(h.statKeys(), [[DAY17, 0, 15]], "usage booked on local 2026-09-17, not on UTC 2026-09-16");
+});
+
+test("local day: activity before local midnight rolls to yesterday after it", async () => {
+  const h = localDayHarness();
+  // 20:50Z-20:55Z = 23:50-23:55 on the 16th local. At 21:02Z (00:02 local) it is yesterday,
+  // even though UTC is still on the 16th.
+  eq((await h.beat("session_start", T(20, 50), { tz: 180 })).status, 200);
+  eq((await h.beat("heartbeat", T(20, 55), { tz: 180, usage: [7, 3] })).status, 200);
+  eq(await h.today(), { menu: [300, 10], home: [300, 10] }, "before local midnight it is today");
+  h.clock = T(21, 2);
+  eq(await h.today(), { menu: [0, 0], home: [0, 0] }, "after local midnight it is yesterday");
+  eq(h.statKeys(), [[DAY16, 0, 10]]);
+});
+
+test("local day: a null tz (older tracker) keeps the UTC day, unchanged", async () => {
+  const h = localDayHarness();
+  // Same timeline as the late-night case, no zone: today is the UTC day, so only the part
+  // after 00:00Z counts - exactly the pre-fix numbers.
+  eq((await h.beat("session_start", T(23, 50))).status, 200);
+  eq((await h.beat("heartbeat", T(23, 55), { usage: [4, 6] })).status, 200);
+  eq((await h.beat("heartbeat", T(24, 5), { usage: [2, 3] })).status, 200);
+  eq(h.tables.session[0].tzOffsetMinutes, null);
+  eq(await h.today(), { menu: [300, 5], home: [300, 5] });
+  eq(h.statKeys(), [[DAY16, 0, 10], [DAY17, 0, 5]], "usage keyed by UTC date");
+});
+
+test("local day: a session that crosses local midnight is split there at close", async () => {
+  const h = localDayHarness();
+  // 20:55Z-21:05Z = 23:55-00:05 local: 300 s on the 16th, 300 s on the 17th.
+  eq((await h.beat("session_start", T(20, 55), { tz: 180 })).status, 200);
+  eq((await h.beat("heartbeat", T(21, 0), { tz: 180 })).status, 200);
+  eq((await h.beat("heartbeat", T(21, 5), { tz: 180 })).status, 200);
+  const live = await h.today();
+  eq(live, { menu: [300, 0], home: [300, 0] }, "live: only today's part");
+  eq((await h.beat("session_end", T(21, 5), { tz: 180 })).status, 200);
+  eq(h.statKeys(), [[DAY16, 300, 0], [DAY17, 300, 0]], "split at local midnight, keyed by local date");
+  eq(await h.today(), live, "the folded number equals the live one");
 });
 
 // Deliberately no server build/type-program/import resolution: a normal build

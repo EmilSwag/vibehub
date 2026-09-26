@@ -46,15 +46,46 @@ export function visibleSnapshot<T>(snap: { session: number; status: T } | null, 
 /** Transport connectivity is not AI activity: an idle tracker still reports.
  * A verified key or a status word without an accepted heartbeat proves neither.
  * The optional connected flag preserves older observation/test shapes; an explicit
- * server-side false always wins over the presence label. */
+ * server-side false wins over the presence label — but not over a recent heartbeat
+ * (see `recentlySeen`). */
 export interface ConnectionSnapshot {
   lastSeenAt: string | null;
-  presence: { status: string };
+  presence: { status: string; lastSeenAt?: string | null };
   connected?: boolean;
+  heartbeatIntervalMs?: number;
+  /** Per-device heartbeat evidence (server `trackerConnections.snapshot`). `lastUsedAt`
+   *  is deliberately not read: `/tracker/verify` bumps it without any daemon running. */
+  devices?: readonly { connected?: boolean; lastSeenAt?: string | null }[];
 }
 
-export function connectionAlive(status: ConnectionSnapshot | null | undefined): boolean {
-  if (!status || (status.connected !== undefined && status.connected !== true)) return false;
+/** Never shorter than this, whatever cadence the server advertises. */
+export const RECENTLY_SEEN_MIN_MS = 3 * 60_000;
+
+/**
+ * QA R4: ANY device of the account heartbeating recently means "connected". The sheet
+ * used to wait for the presence word too, and for one specific freshly minted token
+ * before that — so a person whose Mac app was already reporting on another token sat in
+ * "Waiting for connection…" forever. A heartbeat within 3 intervals (min 3 min) is the
+ * proof; which token or device sent it does not matter.
+ */
+export function recentlySeen(status: ConnectionSnapshot | null | undefined, now: number = Date.now()): boolean {
+  if (!status) return false;
+  const windowMs = Math.max(RECENTLY_SEEN_MIN_MS, 3 * (status.heartbeatIntervalMs ?? 30_000));
+  const devices = status.devices ?? [];
+  if (devices.some((d) => d.connected === true)) return true;
+  const stamps = [status.lastSeenAt, status.presence?.lastSeenAt ?? null, ...devices.map((d) => d.lastSeenAt ?? null)];
+  return stamps.some((iso) => {
+    if (!iso) return false;
+    const at = Date.parse(iso);
+    // A minute of clock skew either way; a timestamp from the far future is not proof.
+    return Number.isFinite(at) && now - at <= windowMs && at - now <= 60_000;
+  });
+}
+
+export function connectionAlive(status: ConnectionSnapshot | null | undefined, now: number = Date.now()): boolean {
+  if (!status) return false;
+  if (recentlySeen(status, now)) return true;
+  if (status.connected !== undefined && status.connected !== true) return false;
   return newer(status.lastSeenAt, null) &&
     (status.presence?.status === "active" || status.presence?.status === "idle");
 }

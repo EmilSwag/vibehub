@@ -6,6 +6,12 @@ export interface SendResult {
   connectionLastSeenAt?: string;
   /** Rejected authentication must suspend collection, not produce a retry backlog. */
   authRejected: boolean;
+  /** The server refused this body (400/413/422): re-sending the same one cannot succeed. */
+  refused?: boolean;
+  /** Worth another try: the network dropped it (timeout, reset, TLS) or the server said 5xx. */
+  transient?: boolean;
+  /** Provably never reached the server (DNS, connect, TLS handshake): re-sending can't double count. */
+  preSend?: boolean;
 }
 
 /**

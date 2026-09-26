@@ -12,7 +12,7 @@
 // Pure and Prisma-free on purpose: `__checks__/tokenPricing.check.ts` pins it without
 // a database, and the web's sync check imports it directly.
 
-export const TOKEN_PRICING_CHECKED_AT = "2026-09-16";
+export const TOKEN_PRICING_CHECKED_AT = "2026-09-26";
 
 export const TOKEN_PRICING_SOURCES = Object.freeze({
   openai: "https://developers.openai.com/api/docs/pricing",
@@ -29,7 +29,34 @@ export interface TokenPrice {
   readonly checkedAt: string;
   readonly sourceUrl: string;
   readonly modelSourceUrl: string;
+  /**
+   * QA fix (R2): USD per 1,000,000 cache-READ / cache-WRITE tokens, only where a
+   * verified rate exists (see CACHE_RATES). Absent means "no verified cache price":
+   * cache reads then stay unpriced and cache writes are priced as ordinary input.
+   * Server-only - the web keeps its own cache-read rates, and the sync check pins the
+   * base fields above, not these.
+   */
+  readonly cacheReadUsdPerMillion?: number;
+  readonly cacheWriteUsdPerMillion?: number;
 }
+
+/**
+ * Verified cache rates (meta/plans/vibehub-qa-fix.md, "Verified prices", Sep 2026).
+ * [read, write]; write null = the provider bills no separate cache write.
+ * Deliberately NOT a multiplier rule: Opus 5.5 reads at 0.05x and Fable at 0.025x,
+ * so "0.1x read / 1.25x write" is no longer true across a provider.
+ */
+const CACHE_RATES: Readonly<Record<string, readonly [number, number | null]>> = Object.freeze({
+  "claude-opus-5-5": [0.20, 5],
+  "claude-fable-5-1": [0.25, 12.5],
+  "claude-opus-5": [0.50, 6.25],
+  "claude-sonnet-5": [0.20, 2.5],
+  "claude-haiku-4-5-20251001": [0.10, 1.25],
+  "gpt-6-sol": [0.20, null],
+  "gpt-6-luna": [0.01, null],
+  "gpt-5.6-sol": [0.40, null], // developers.openai.com: cached input $0.40 at the $4/$20 promo rate
+  "gpt-5.6-terra": [0.20, null],
+});
 
 function price(
   provider: TokenPrice["provider"],
@@ -39,12 +66,15 @@ function price(
   aliases: readonly string[] = [],
   modelSourceUrl: string = TOKEN_PRICING_SOURCES[provider],
 ): TokenPrice {
+  const cache = CACHE_RATES[modelId];
   return Object.freeze({
     provider, modelId, inputUsdPerMillion, outputUsdPerMillion,
     aliases: Object.freeze([...aliases]),
     checkedAt: TOKEN_PRICING_CHECKED_AT,
     sourceUrl: TOKEN_PRICING_SOURCES[provider],
     modelSourceUrl,
+    ...(cache ? { cacheReadUsdPerMillion: cache[0] } : {}),
+    ...(cache && cache[1] !== null ? { cacheWriteUsdPerMillion: cache[1] } : {}),
   });
 }
 
@@ -116,6 +146,12 @@ export const TOKEN_PRICES: readonly TokenPrice[] = Object.freeze([
   price("anthropic", "claude-opus-4-20250514", 15, 75, ["claude-opus-4-0"], claudeDeprecations),
   price("anthropic", "claude-sonnet-4-20250514", 3, 15, ["claude-sonnet-4-0"], claudeDeprecations),
   price("anthropic", "claude-3-5-haiku-20241022", 0.80, 4, ["claude-3-5-haiku-latest"], claudeDeprecations),
+  // QA fix (R1), meta/plans/vibehub-qa-fix.md "Verified prices" (Sep 2026). APPENDED in
+  // this exact order - the web table (web/src/lib/tokenPricing.ts) appends the same three
+  // rows, and tokenPricingSync compares the two tables index by index.
+  price("anthropic", "claude-opus-5-5", 4, 20),
+  price("openai", "gpt-6-sol", 2, 10),
+  price("openai", "gpt-6-luna", 0.10, 0.50),
 ]);
 
 // A private Map avoids prototype-key lookups and exposes no mutable registry API.
@@ -143,8 +179,13 @@ export function getTokenPrice(model: unknown): TokenPrice | undefined {
 export interface PricedUsage {
   /** Model id as recorded (canonical or alias); null/"unknown" carry no price. */
   readonly model: string | null;
+  /** FRESH input: includes cache writes, never cache reads. */
   readonly tokensInput: number;
   readonly tokensOutput: number;
+  /** Cache reads, priced at the cache-read rate where one is verified. Default 0. */
+  readonly tokensCacheRead?: number;
+  /** The part of tokensInput written to the cache, priced at the cache-write rate. Default 0. */
+  readonly tokensCacheWrite?: number;
 }
 
 export interface CostFold {
@@ -182,20 +223,32 @@ export function usdFromUnits(units: bigint): number {
   return Number(units) / Number(USD_SCALE);
 }
 
-/** Exact cost of one row in 1e-12 USD, or null when the model is unpriced or a count is malformed. */
-export function costUnits(model: unknown, tokensInput: unknown, tokensOutput: unknown): bigint | null {
-  if (!isValidTokenCount(tokensInput) || !isValidTokenCount(tokensOutput)) return null;
+/**
+ * Exact cost of one row in 1e-12 USD, or null when the model is unpriced or a count is
+ * malformed. With no cache counters (the 3-argument call) the arithmetic is exactly the
+ * web's, which is what tokenPricingSync pins. Cache writes are a SUBSET of input: that
+ * part moves from the input rate to the cache-write rate (input rate when none is
+ * verified). Cache reads add at the cache-read rate, or nothing when none is verified -
+ * an unverified rate is never guessed.
+ */
+export function costUnits(model: unknown, tokensInput: unknown, tokensOutput: unknown, tokensCacheRead: unknown = 0, tokensCacheWrite: unknown = 0): bigint | null {
+  if (!isValidTokenCount(tokensInput) || !isValidTokenCount(tokensOutput) ||
+      !isValidTokenCount(tokensCacheRead) || !isValidTokenCount(tokensCacheWrite) || tokensCacheWrite > tokensInput) return null;
   const tariff = getTokenPrice(model);
   if (!tariff) return null;
   const inputRate = rateUnits(tariff.inputUsdPerMillion);
   const outputRate = rateUnits(tariff.outputUsdPerMillion);
   if (inputRate === null || outputRate === null) return null;
-  return BigInt(tokensInput) * inputRate + BigInt(tokensOutput) * outputRate;
+  const readRate = tariff.cacheReadUsdPerMillion === undefined ? 0n : rateUnits(tariff.cacheReadUsdPerMillion);
+  const writeRate = tariff.cacheWriteUsdPerMillion === undefined ? inputRate : rateUnits(tariff.cacheWriteUsdPerMillion);
+  if (readRate === null || writeRate === null) return null;
+  return BigInt(tokensInput - tokensCacheWrite) * inputRate + BigInt(tokensCacheWrite) * writeRate +
+    BigInt(tokensCacheRead) * readRate + BigInt(tokensOutput) * outputRate;
 }
 
 /** USD for one (model, tokens) bucket - a stats `byModel` row - or null when unpriced. */
-export function estimateUsd(model: unknown, tokensInput: unknown, tokensOutput: unknown): number | null {
-  const units = costUnits(model, tokensInput, tokensOutput);
+export function estimateUsd(model: unknown, tokensInput: unknown, tokensOutput: unknown, tokensCacheRead: unknown = 0, tokensCacheWrite: unknown = 0): number | null {
+  const units = costUnits(model, tokensInput, tokensOutput, tokensCacheRead, tokensCacheWrite);
   return units === null || units > MAX_COST_UNITS ? null : usdFromUnits(units);
 }
 
@@ -216,12 +269,14 @@ export function foldEstimatedUsd(rows: readonly PricedUsage[]): CostFold {
   const perModel = new Map<string, bigint>();
 
   for (const row of rows) {
-    if (!row || !isValidTokenCount(row.tokensInput) || !isValidTokenCount(row.tokensOutput)) return unavailable();
+    if (!row || !isValidTokenCount(row.tokensInput) || !isValidTokenCount(row.tokensOutput) ||
+        !isValidTokenCount(row.tokensCacheRead ?? 0) || !isValidTokenCount(row.tokensCacheWrite ?? 0) ||
+        (row.tokensCacheWrite ?? 0) > row.tokensInput) return unavailable();
     const tokens = row.tokensInput + row.tokensOutput;
     totalTokens += tokens;
     if (!isValidTokenCount(tokens) || !isValidTokenCount(totalTokens)) return unavailable();
 
-    const units = costUnits(row.model, row.tokensInput, row.tokensOutput);
+    const units = costUnits(row.model, row.tokensInput, row.tokensOutput, row.tokensCacheRead ?? 0, row.tokensCacheWrite ?? 0);
     if (units === null) {
       hasUnknownModel = true;
       continue;

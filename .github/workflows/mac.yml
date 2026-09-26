@@ -198,7 +198,7 @@ jobs:
           cat << 'EOF' > "$RUNNER_TEMP/release-notes.md"
           VibeHub for macOS 13+.
 
-          Connect in Browser — no device key.
+          Open it, click Connect. No device key.
 
           **Installer (recommended):** download VibeHub.pkg, open it, follow the prompts.
           VibeHub launches on its own once install finishes.

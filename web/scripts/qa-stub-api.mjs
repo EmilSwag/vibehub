@@ -49,6 +49,8 @@ const SCENARIOS = {
   "connected-stale": { connected: true, stale: "+0s" },
   "offline-null": { connected: false, stale: null },
   "offline-omitted": { connected: false, stale: "omit" },
+  // QA R4: presence still says offline, but a device heartbeated 20s ago (another token).
+  "offline-recent": { connected: false, stale: null, recent: true },
 };
 
 let scenario = "offline-stale";
@@ -72,7 +74,7 @@ function trackerStatus() {
   const connected = s.connected;
   const body = {
     connected,
-    lastSeenAt: connected ? new Date().toISOString() : AGO_2H,
+    lastSeenAt: connected ? new Date().toISOString() : s.recent ? new Date(Date.now() - 20_000).toISOString() : AGO_2H,
     activeTokens: 1,
     tools: connected ? ["claude-code"] : [],
     tokenLastUsedAt: AGO_2H,
@@ -126,6 +128,17 @@ const ROUTES = {
   "/api/v1/presence/friends": () => ({ presences: [] }),
   "/api/v1/projects": () => ({ projects: [] }),
   "/api/v1/health": () => ({ ok: true }),
+  // Home's feed crashes on an empty object, so the stub answers with an empty page.
+  "/api/v1/feed": () => ({ events: [], nextBefore: null }),
+  // A released, browser-pairing Mac build (1.1.0+), like prod.
+  "/api/v1/mac/latest": () => ({
+    version: "1.2.0",
+    tag: "mac-v1.2.0",
+    pkgUrl: "https://github.com/EmilSwag/vibehub/releases/download/mac-v1.2.0/VibeHub.pkg",
+    sha256: "0".repeat(64),
+    zipUrl: null,
+    publishedAt: "2026-09-25T00:00:00.000Z",
+  }),
 };
 
 const server = createServer((req, res) => {

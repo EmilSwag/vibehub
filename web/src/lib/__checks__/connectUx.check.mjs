@@ -109,9 +109,13 @@ function visibleCopy(text) {
 }
 
 check("sheet: fresh-heartbeat hook still owns success", sheet.includes("useTrackerPing(open, started)") && sheet.includes("shouldCelebrate(ping.stage, ping.liveAtOpen)"));
-check("sheet: existing-live is informational", sheet.includes('const showProgress = !ping.liveAtOpen && ping.stage !== "idle"'));
-check("sheet: opening/retrying revalidates via existing token helper", sheet.includes("ensureConnectToken(userId") && sheet.includes("}, [open, userId, retry])"));
-check("sheet: late token and clipboard responses are cancelled", sheet.includes("if (!cancelled)") && sheet.includes("if (stale()) return"));
+// QA R4: already live on open → a success screen with Done; setup is one tap away.
+check("sheet: existing-live opens on success, not setup", sheet.includes("const showSuccess = ping.liveAtOpen && !addOpen") && sheet.includes("You're connected") && sheet.includes("Add another device"));
+check("sheet: the live status line never shows for an already-live open", sheet.includes("const showProgress = !showSuccess && !ping.liveAtOpen"));
+// QA R4: the pairing command is tokenless, so opening the sheet must mint nothing —
+// every open used to leave a "never used" device behind.
+check("sheet: opening mints no device token", !/ensureConnectToken|createTrackerToken/.test(sheet.replace(/\/\/[^\n]*/g, "")));
+check("sheet: late clipboard responses are cancelled", sheet.includes("if (stale()) return"));
 check("sheet: onStarted state remains wired", sheet.includes("setStarted(true)") && sheet.includes("onStarted?.()"));
 check("sheet: failed copy cannot earn a copied checkmark", sheet.indexOf("await navigator.clipboard.writeText(value)") < sheet.indexOf("setAttemptCopy(what)"));
 check("sheet: dialog, Escape, Tab trap and return focus remain", sheet.includes('role="dialog"') && sheet.includes('aria-modal="true"') && sheet.includes('event.key === "Escape"') && sheet.includes('event.key !== "Tab"') && sheet.includes("event.shiftKey") && sheet.includes("opener.current?.focus()"));

@@ -2684,61 +2684,13 @@ function readJson(filePath) {
 
 // src/privacy.ts
 var COLLECTION_POLICY = "ai-session-metadata-v1";
-var NATIVE_TOOLS = ["claude-code", "codex", "quadcode"], ATTESTED_TOOLS = ["quadcode", "cursor", "windsurf"], TOKENLESS_TOOLS = ["quadcode", "cursor", "windsurf"], SUPPORTED_TOOLS = [...NATIVE_TOOLS, "cursor", "windsurf"], MAX_RECORD_AGE_MS = 1440 * 6e4, MAX_EVENT_AGE_MS = 5 * 6e4, MAX_FUTURE_SKEW_MS = 5e3, MAX_TOKEN_COUNT = 1e9, MAX_USAGE_ENTRIES = 30, MAX_TZ_OFFSET_MINUTES = 840, CLAUDE_MODELS = /* @__PURE__ */ new Set([
-  "claude-fable-5-1",
-  "claude-fable-5",
-  "claude-opus-5",
-  "claude-opus-4-8",
-  "claude-opus-4-7",
-  "claude-opus-4-6",
-  "claude-opus-4-5-20251101",
-  "claude-opus-4-5",
-  "claude-sonnet-5",
-  "claude-sonnet-4-6",
-  "claude-sonnet-4-5-20250929",
-  "claude-sonnet-4-5",
-  "claude-haiku-4-5-20251001",
-  "claude-haiku-4-5"
-]), CODEX_MODELS = /* @__PURE__ */ new Set([
-  "gpt-6-astra",
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-5.5",
-  "gpt-5.5-pro",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.4-nano",
-  "gpt-5.4-pro",
-  "gpt-5.2",
-  "gpt-5.2-pro",
-  "gpt-5.1",
-  "gpt-5",
-  "gpt-5-2025-08-07",
-  "gpt-5-mini",
-  "gpt-5-nano",
-  "gpt-5-pro",
-  "gpt-4.1",
-  "gpt-4.1-2025-04-14",
-  "gpt-4.1-mini",
-  "gpt-4.1-nano",
-  "gpt-4o",
-  "gpt-4o-2024-08-06",
-  "gpt-4o-2024-05-13",
-  "gpt-4o-mini",
-  "o1",
-  "o1-pro",
-  "o3-pro",
-  "o3",
-  "o4-mini",
-  "o3-mini",
-  "gpt-5-codex",
-  "gpt-5.1-codex",
-  "gpt-5.1-codex-mini",
-  "gpt-5.1-codex-max",
-  "gpt-5.2-codex",
-  "gpt-5.3-codex"
-]);
+var NATIVE_TOOLS = ["claude-code", "codex", "quadcode"], ATTESTED_TOOLS = ["quadcode", "cursor", "windsurf"], TOKENLESS_TOOLS = ["quadcode", "cursor", "windsurf"], SUPPORTED_TOOLS = [...NATIVE_TOOLS, "cursor", "windsurf"], MAX_RECORD_AGE_MS = 1440 * 6e4, MAX_EVENT_AGE_MS = 5 * 6e4, MAX_FUTURE_SKEW_MS = 5e3, MAX_TOKEN_COUNT = 1e9, MAX_USAGE_ENTRIES = 30, MAX_TZ_OFFSET_MINUTES = 840, MAX_MODEL_ID_LENGTH = 60, CLAUDE_MODEL = /^claude-[a-z]{3,12}(?:-\d{1,2}){1,3}(?:-\d{8})?$/, GPT_MODEL = /^gpt-\d{1,2}(?:\.\d{1,2})?o?(?:-(?:[a-z]{2,12}|\d{4}-\d{2}-\d{2}))*$/, EFFORT_SUFFIX = /-(?:minimal|low|medium|high|xhigh)(?:-|$)/, O_SERIES = /* @__PURE__ */ new Set(["o1", "o1-pro", "o3", "o3-pro", "o3-mini", "o4-mini"]);
+function claudeModel(value) {
+  return CLAUDE_MODEL.test(value);
+}
+function codexModel(value) {
+  return O_SERIES.has(value) || GPT_MODEL.test(value) && !EFFORT_SUFFIX.test(value);
+}
 function objectRecord(value) {
   return value !== null && typeof value == "object" && !Array.isArray(value) ? value : null;
 }
@@ -2753,7 +2705,7 @@ function isTokenlessTool(tool) {
   return typeof tool == "string" && tokenless.has(tool);
 }
 function safeModel(value, tool) {
-  return typeof value != "string" ? null : (tool === "claude-code" ? CLAUDE_MODELS.has(value) : tool === "codex" ? CODEX_MODELS.has(value) : CLAUDE_MODELS.has(value) || CODEX_MODELS.has(value)) ? value : null;
+  return typeof value != "string" || value.length > MAX_MODEL_ID_LENGTH ? null : (tool === "claude-code" ? claudeModel(value) : tool === "codex" ? codexModel(value) : claudeModel(value) || codexModel(value)) ? value : null;
 }
 function isCount(value, maximum = MAX_TOKEN_COUNT) {
   return typeof value == "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
@@ -2766,9 +2718,15 @@ function localTzOffsetMinutes(now = /* @__PURE__ */ new Date()) {
   return isTzOffsetMinutes(offset) ? offset : void 0;
 }
 function eventTime(value, now, maxAgeMs = MAX_EVENT_AGE_MS) {
+  return eventTimeWithin(value, now, Math.min(maxAgeMs, MAX_EVENT_AGE_MS));
+}
+function countTime(value, now) {
+  return eventTimeWithin(value, now, MAX_RECORD_AGE_MS);
+}
+function eventTimeWithin(value, now, maxAgeMs) {
   if (typeof value != "string" || value.length > 35 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
   let at = Date.parse(value);
-  return Number.isFinite(at) && at <= now + MAX_FUTURE_SKEW_MS && at >= now - Math.min(maxAgeMs, MAX_EVENT_AGE_MS) ? Math.min(at, now) : null;
+  return Number.isFinite(at) && at <= now + MAX_FUTURE_SKEW_MS && at >= now - maxAgeMs ? Math.min(at, now) : null;
 }
 function safeAlias(value) {
   return typeof value == "string" && value.length <= 64 && /^[A-Za-z0-9]/.test(value) && !/[^A-Za-z0-9_. -]/.test(value) && value.trim() === value && !value.includes("..") && !["__proto__", "prototype", "constructor"].includes(value) ? value : null;
@@ -2790,14 +2748,22 @@ function safeApiOrigin(value) {
 function safeDeviceToken(value) {
   return typeof value == "string" && value.length >= 1 && value.length <= 512 && !/[^A-Za-z0-9._~-]/.test(value);
 }
+function optionalCount(value) {
+  return value === void 0 || isCount(value);
+}
 function projectUsage(value) {
   let u = objectRecord(value);
-  return !u || !isSupportedTool(u.tool) || u.estimated === !0 || isTokenlessTool(u.tool) || !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta) ? null : {
+  if (!u || !isSupportedTool(u.tool) || u.estimated === !0 || isTokenlessTool(u.tool) || !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta) || !optionalCount(u.tokensCacheReadDelta) || !optionalCount(u.tokensCacheWriteDelta) || (u.tokensCacheWriteDelta ?? 0) > u.tokensInputDelta) return null;
+  let result = {
     tool: u.tool,
     model: safeModel(u.model, u.tool),
     tokensInputDelta: u.tokensInputDelta,
     tokensOutputDelta: u.tokensOutputDelta
   };
+  return u.tokensCacheReadDelta && (result.tokensCacheReadDelta = u.tokensCacheReadDelta), u.tokensCacheWriteDelta && (result.tokensCacheWriteDelta = u.tokensCacheWriteDelta), result;
+}
+function hasUsage(u) {
+  return u.tokensInputDelta > 0 || u.tokensOutputDelta > 0 || (u.tokensCacheReadDelta ?? 0) > 0;
 }
 function projectHeartbeat(value, now = Date.now()) {
   let p = objectRecord(value);
@@ -2817,11 +2783,11 @@ function projectHeartbeat(value, now = Date.now()) {
   for (let entry of p.usage) {
     let u = projectUsage(entry);
     if (!u) return null;
-    (u.tokensInputDelta || u.tokensOutputDelta) && usage.push(u);
+    hasUsage(u) && usage.push(u);
   }
-  let input = usage.reduce((sum, u) => sum + u.tokensInputDelta, 0), output = usage.reduce((sum, u) => sum + u.tokensOutputDelta, 0);
-  if (!isCount(input) || !isCount(output)) return null;
-  if (result.usage = usage, (!isTokenlessTool(result.tool) || usage.length) && (result.tokensInputDelta = input, result.tokensOutputDelta = output), p.tools !== void 0) {
+  let input = usage.reduce((sum, u) => sum + u.tokensInputDelta, 0), output = usage.reduce((sum, u) => sum + u.tokensOutputDelta, 0), cacheRead = usage.reduce((sum, u) => sum + (u.tokensCacheReadDelta ?? 0), 0), cacheWrite = usage.reduce((sum, u) => sum + (u.tokensCacheWriteDelta ?? 0), 0);
+  if (!isCount(input) || !isCount(output) || !isCount(cacheRead) || !isCount(cacheWrite)) return null;
+  if (result.usage = usage, (!isTokenlessTool(result.tool) || usage.length) && (result.tokensInputDelta = input, result.tokensOutputDelta = output, cacheRead && (result.tokensCacheReadDelta = cacheRead), cacheWrite && (result.tokensCacheWriteDelta = cacheWrite)), p.tools !== void 0) {
     if (!Array.isArray(p.tools) || p.tools.length > SUPPORTED_TOOLS.length) return null;
     result.tools = [];
     for (let entry of p.tools) {
@@ -3059,7 +3025,8 @@ var AttestedMetadataAdapter = class {
 var import_node_crypto5 = require("node:crypto");
 
 // src/adapters/jsonlTail.ts
-var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util2 = require("node:util"), MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 256, MAX_FILE_BYTES = 256 * 1024 * 1024, utf82 = new import_node_util2.TextDecoder("utf-8", { fatal: !0 }), samePath2 = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile2 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
+var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(require("node:os")), import_node_path = __toESM(require("node:path")), import_node_util2 = require("node:util");
+var MAX_LOG_FILES = 128, MAX_DIRECTORY_ENTRIES = 2048, MAX_CHUNK_BYTES = 8 * 1024 * 1024, MAX_BACKLOG_BYTES = 64 * 1024 * 1024, MAX_LINE_BYTES = 256 * 1024, MAX_RECORDS_PER_FILE = 4096, MAX_FILE_BYTES = 256 * 1024 * 1024, MAX_SUBAGENT_DEPTH = 5, MAX_SUBAGENT_DIRS_PER_POLL = 256, MAX_SUBAGENT_ENTRIES_PER_POLL = 2048, NAME = /^[A-Za-z0-9_-]+$/, LOG_NAME = /^[A-Za-z0-9_-]+\.jsonl$/, utf82 = new import_node_util2.TextDecoder("utf-8", { fatal: !0 }), samePath2 = (a, b) => process.platform === "win32" ? import_node_path.default.resolve(a).toLowerCase() === import_node_path.default.resolve(b).toLowerCase() : import_node_path.default.resolve(a) === import_node_path.default.resolve(b), sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino, regularFile2 = (s) => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.ino > 0n && s.size >= 0n && s.size <= BigInt(MAX_FILE_BYTES), JsonlTailer = class {
   constructor(source) {
     this.source = source;
     this.configRoot = import_node_path.default.join(this.home, source === "claude-code" ? ".claude" : ".codex"), this.root = import_node_path.default.join(this.configRoot, source === "claude-code" ? "projects" : "sessions"), this.overrideName = source === "claude-code" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
@@ -3071,12 +3038,35 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
   overrideName;
   states = /* @__PURE__ */ new Map();
   listed = /* @__PURE__ */ new Set();
+  /** The metadata `files()` saw, so an unchanged file is skipped without opening it. */
+  listedStats = /* @__PURE__ */ new Map();
   nextGeneration = 1;
+  /** Start of the latest `files()` call, and of the one before it (null = no state yet). */
+  lastPollAt = null;
+  previousPollAt = null;
   clear() {
-    this.states.clear(), this.listed.clear();
+    this.states.clear(), this.listed.clear(), this.listedStats.clear(), this.lastPollAt = null, this.previousPollAt = null;
   }
   generation(file) {
     return this.states.get(file)?.generation ?? 0;
+  }
+  /** True while this file's current generation was created since the previous poll (Codex zero baseline). */
+  bornFresh(file) {
+    return this.states.get(file)?.bornFresh === !0;
+  }
+  /**
+   * For a subagent transcript: its parent session file and project directory, so the
+   * adapter can attribute the work to the parent's project. null for any other file.
+   */
+  subagentParent(file) {
+    if (this.source !== "claude-code") return null;
+    let parts = import_node_path.default.relative(this.root, file).split(import_node_path.default.sep);
+    return parts.length < 4 || parts[2] !== "subagents" ? null : { sessionFile: import_node_path.default.join(this.root, parts[0], `${parts[1]}.jsonl`), projectDir: parts[0] };
+  }
+  /** The encoded project directory a Claude file lives under. */
+  projectDir(file) {
+    let parts = import_node_path.default.relative(this.root, file).split(import_node_path.default.sep);
+    return this.source === "claude-code" && parts.length >= 2 ? parts[0] : null;
   }
   rootsAllowed() {
     let override = process.env[this.overrideName];
@@ -3092,8 +3082,10 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
   }
   layout(parts, isDirectory) {
     if (parts.some((p) => !p || p.length > 200 || /[\x00-\x20\x7f\\/:]/.test(p) || p === "." || p === "..")) return !1;
-    if (this.source === "claude-code")
-      return isDirectory ? parts.length <= 1 && parts.every((p) => /^[A-Za-z0-9_-]+$/.test(p)) : parts.length === 2 && /^[A-Za-z0-9_-]+$/.test(parts[0]) && /^[A-Za-z0-9_-]+\.jsonl$/.test(parts[1]);
+    if (this.source === "claude-code") {
+      let dirs = isDirectory ? parts : parts.slice(0, -1);
+      return !dirs.every((p) => NAME.test(p)) || dirs.length > 2 && (dirs[2] !== "subagents" || dirs.length > 3 + MAX_SUBAGENT_DEPTH) ? !1 : isDirectory ? dirs.length <= 3 + MAX_SUBAGENT_DEPTH : LOG_NAME.test(parts[parts.length - 1]) && (dirs.length === 1 || dirs.length >= 3);
+    }
     let directories = [/^\d{4}$/, /^(?:0[1-9]|1[0-2])$/, /^(?:0[1-9]|[12]\d|3[01])$/], count = isDirectory ? parts.length : parts.length - 1;
     return count > 3 || !isDirectory && count !== 3 || !parts.slice(0, count).every((p, i) => directories[i].test(p)) ? !1 : isDirectory || /^rollout-[A-Za-z0-9_-]+\.jsonl$/.test(parts[3]);
   }
@@ -3113,29 +3105,31 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
       return null;
     }
   }
+  /**
+   * A file found by the walk inside a directory the walk has just verified: layout,
+   * plain regular file and no link. Cheaper than checkedPath (which re-verifies every
+   * ancestor) - readNewLines still runs the full check before any byte is read.
+   */
+  listedFile(file) {
+    let relative = import_node_path.default.relative(this.root, file);
+    if (relative.startsWith("..") || import_node_path.default.isAbsolute(relative) || !this.layout(relative.split(import_node_path.default.sep), !1)) return null;
+    try {
+      let s = import_node_fs2.default.lstatSync(file, { bigint: !0 });
+      return regularFile2(s) && samePath2(import_node_fs2.default.realpathSync(file), file) ? s : null;
+    } catch {
+      return null;
+    }
+  }
   /** Bounded directory metadata enumeration ONLY within the exact layouts above. */
   files(signal) {
-    this.listed.clear();
-    let remaining = MAX_DIRECTORY_ENTRIES, candidates = [], walk = (dir, depth) => {
-      if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
-      let handle;
+    let started = Date.now();
+    this.previousPollAt = this.lastPollAt, this.lastPollAt = started, this.listed.clear(), this.listedStats.clear();
+    let remaining = MAX_DIRECTORY_ENTRIES, sub = { dirs: MAX_SUBAGENT_DIRS_PER_POLL, entries: MAX_SUBAGENT_ENTRIES_PER_POLL }, recent = started - MAX_RECORD_AGE_MS, candidates = [], readEntries = (dir, take) => {
+      let handle, entries = [];
       try {
-        if (handle = import_node_fs2.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return;
-        let entries = [], entry;
-        for (; remaining-- > 0 && !signal?.aborted && (entry = handle.readSync()); ) entries.push(entry);
-        entries.sort((a, b) => b.name.localeCompare(a.name));
-        for (let e of entries) {
-          if (signal?.aborted) break;
-          let file = import_node_path.default.join(dir, e.name);
-          if (!e.isSymbolicLink()) {
-            if (e.isDirectory() && depth < (this.source === "claude-code" ? 1 : 3))
-              walk(file, depth + 1);
-            else if (e.isFile()) {
-              let s = this.checkedPath(file, !1);
-              s && candidates.push({ file, mtime: Number(s.mtimeMs) });
-            }
-          }
-        }
+        if (handle = import_node_fs2.default.opendirSync(dir, { bufferSize: 16 }), !this.checkedPath(dir, !0)) return [];
+        let entry;
+        for (; !signal?.aborted && take() && (entry = handle.readSync()); ) entries.push(entry);
       } catch {
       } finally {
         try {
@@ -3143,9 +3137,51 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
         } catch {
         }
       }
+      return entries.sort((a, b) => b.name.localeCompare(a.name));
+    }, addFile = (file, minMtime = -1 / 0) => {
+      let s = this.listedFile(file);
+      return !s || Number(s.mtimeMs) < minMtime ? null : (candidates.push({ file, stats: s }), Number(s.mtimeMs));
+    }, recentDir = (dir) => {
+      try {
+        return Number(import_node_fs2.default.lstatSync(dir).mtimeMs) >= recent;
+      } catch {
+        return !1;
+      }
+    }, walkSubagents = (dir, level) => {
+      if (!(signal?.aborted || sub.dirs-- <= 0 || !this.checkedPath(dir, !0)))
+        for (let e of readEntries(dir, () => sub.entries-- > 0)) {
+          if (signal?.aborted) break;
+          let child = import_node_path.default.join(dir, e.name);
+          e.isSymbolicLink() || (e.isFile() ? addFile(child, recent) : e.isDirectory() && level < MAX_SUBAGENT_DEPTH && recentDir(child) && walkSubagents(child, level + 1));
+        }
+    }, walk = (dir, depth) => {
+      if (signal?.aborted || remaining <= 0 || !this.checkedPath(dir, !0)) return;
+      let entries = readEntries(dir, () => remaining-- > 0), sessionMtime = /* @__PURE__ */ new Map(), sessionDirs = [];
+      for (let e of entries) {
+        if (signal?.aborted) break;
+        let file = import_node_path.default.join(dir, e.name);
+        if (!e.isSymbolicLink()) {
+          if (e.isDirectory() && depth < (this.source === "claude-code" ? 1 : 3))
+            walk(file, depth + 1);
+          else if (e.isDirectory() && this.source === "claude-code" && depth === 1 && NAME.test(e.name))
+            sessionDirs.push(e.name);
+          else if (e.isFile()) {
+            let mtime = addFile(file);
+            mtime !== null && e.name.endsWith(".jsonl") && sessionMtime.set(e.name.slice(0, -6), mtime);
+          }
+        }
+      }
+      for (let name of sessionDirs) {
+        if (signal?.aborted) break;
+        let sessionDir = import_node_path.default.join(dir, name);
+        if ((sessionMtime.get(name) ?? -1 / 0) < recent && !recentDir(sessionDir)) continue;
+        let subagents = import_node_path.default.join(sessionDir, "subagents");
+        (recentDir(subagents) || (sessionMtime.get(name) ?? -1 / 0) >= recent) && walkSubagents(subagents, 0);
+      }
     };
-    walk(this.root, 0);
-    for (let { file } of candidates.sort((a, b) => b.mtime - a.mtime).slice(0, MAX_LOG_FILES)) this.listed.add(file);
+    this.rootsAllowed() && walk(this.root, 0);
+    for (let { file, stats } of candidates.sort((a, b) => Number(b.stats.mtimeMs) - Number(a.stats.mtimeMs)).slice(0, MAX_LOG_FILES))
+      this.listed.add(file), this.listedStats.set(file, stats);
     for (let file of this.states.keys()) this.listed.has(file) || this.states.delete(file);
     return [...this.listed];
   }
@@ -3162,11 +3198,32 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
       size,
       mtime: s.mtimeNs,
       skipPartial,
-      generation: this.nextGeneration++
+      generation: this.nextGeneration++,
+      fromStart: !1,
+      bornFresh: !1
+    };
+  }
+  /** A cursor at byte 0 for a file that is new work since the previous poll (U1). */
+  fromStart(s, since) {
+    let born = Number(s.birthtimeMs);
+    return {
+      dev: s.dev,
+      ino: s.ino,
+      offset: 0,
+      size: 0,
+      mtime: s.mtimeNs,
+      skipPartial: !1,
+      generation: this.nextGeneration++,
+      fromStart: !0,
+      // birthtime is 0/unknown on some filesystems: then it is NOT fresh and a Codex
+      // file keeps the safe baseline rule rather than recounting its totals.
+      bornFresh: born > 0 && born >= since
     };
   }
   readNewLines(file, visit, signal) {
     if (signal?.aborted || !this.listed.has(file)) return;
+    let seen = this.listedStats.get(file), known2 = this.states.get(file);
+    if (seen && known2 && known2.dev === seen.dev && known2.ino === seen.ino && known2.offset === known2.size && BigInt(known2.size) === seen.size && known2.mtime === seen.mtimeNs) return;
     let fd;
     try {
       let before = this.checkedPath(file, !1);
@@ -3180,30 +3237,31 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
         this.states.delete(file);
         return;
       }
-      let size = Number(s.size), cursor = this.states.get(file);
-      if (!cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_CHUNK_BYTES) {
+      let size = Number(s.size), cursor = this.states.get(file), since = this.previousPollAt;
+      if (!cursor && since !== null && Number(s.mtimeMs) >= since && size <= MAX_BACKLOG_BYTES && (cursor = this.fromStart(s, since), this.states.set(file, cursor)), !cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size || size === cursor.size && s.mtimeNs !== cursor.mtime || size - cursor.offset > MAX_BACKLOG_BYTES) {
         this.states.set(file, this.prime(fd, s));
         return;
       }
       if (size <= cursor.offset) return;
-      let start = cursor.offset, buffer = Buffer.alloc(size - start), bytes = import_node_fs2.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checkedPath(file, !1);
+      let start = cursor.offset, buffer = Buffer.alloc(Math.min(size - start, MAX_CHUNK_BYTES)), bytes = import_node_fs2.default.readSync(fd, buffer, 0, buffer.length, start), current = this.checkedPath(file, !1);
       if (signal?.aborted || !current || !sameFile(s, current)) {
         this.states.delete(file);
         return;
       }
-      cursor.size = size, cursor.mtime = s.mtimeNs;
       let lineStart = 0, records = 0;
       for (; lineStart < bytes && !signal?.aborted; ) {
         let end = buffer.indexOf(10, lineStart);
         if (end < 0 || end >= bytes) break;
-        if (!cursor.skipPartial && end - lineStart <= MAX_LINE_BYTES && records++ < MAX_RECORDS_PER_FILE)
+        if (!cursor.skipPartial && end - lineStart <= MAX_LINE_BYTES) {
+          if (records++ >= MAX_RECORDS_PER_FILE) break;
           try {
             visit(JSON.parse(utf82.decode(buffer.subarray(lineStart, end))), cursor.generation);
           } catch {
           }
+        }
         cursor.skipPartial = !1, lineStart = end + 1;
       }
-      cursor.offset = start + lineStart, (cursor.skipPartial || bytes - lineStart > MAX_LINE_BYTES) && (cursor.offset = start + bytes, cursor.skipPartial = !0);
+      cursor.offset = start + lineStart, start + bytes >= size && (cursor.size = size, cursor.mtime = s.mtimeNs), records <= MAX_RECORDS_PER_FILE && (cursor.skipPartial || bytes - lineStart > MAX_LINE_BYTES) && (cursor.offset = start + bytes, cursor.skipPartial = !0);
     } catch {
       this.states.delete(file);
     } finally {
@@ -3219,19 +3277,28 @@ var import_node_fs2 = __toESM(require("node:fs")), import_node_os = __toESM(requ
 // src/adapters/usage.ts
 var UsageAccumulator = class {
   buckets = /* @__PURE__ */ new Map();
-  add(model, input, output, estimated = !1) {
-    if (estimated || !isCount(input) || !isCount(output) || !isCount(this.totalInput + input) || !isCount(this.totalOutput + output)) return !1;
+  add(model, input, output, estimated = !1, cache = {}) {
+    let cacheRead = cache.cacheRead ?? 0, cacheWrite = cache.cacheWrite ?? 0;
+    if (estimated || !isCount(input) || !isCount(output) || !isCount(cacheRead) || !isCount(cacheWrite) || cacheWrite > input || !isCount(this.totalInput + input) || !isCount(this.totalOutput + output) || !isCount(this.totalCacheRead + cacheRead)) return !1;
     let knownModel = safeModel(model), key = knownModel ?? "";
     if (!this.buckets.has(key) && this.buckets.size >= MAX_USAGE_ENTRIES) return !1;
     let previous = this.buckets.get(key);
     return this.buckets.set(key, {
       model: knownModel,
       tokensInputDelta: (previous?.tokensInputDelta ?? 0) + input,
-      tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + output
+      tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + output,
+      tokensCacheReadDelta: (previous?.tokensCacheReadDelta ?? 0) + cacheRead,
+      tokensCacheWriteDelta: (previous?.tokensCacheWriteDelta ?? 0) + cacheWrite
     }), !0;
   }
   toList() {
-    return [...this.buckets.values()].filter((u) => u.tokensInputDelta > 0 || u.tokensOutputDelta > 0).map((u) => ({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta }));
+    return [...this.buckets.values()].filter(hasUsage).map((u) => ({
+      model: u.model,
+      tokensInputDelta: u.tokensInputDelta,
+      tokensOutputDelta: u.tokensOutputDelta,
+      ...u.tokensCacheReadDelta ? { tokensCacheReadDelta: u.tokensCacheReadDelta } : {},
+      ...u.tokensCacheWriteDelta ? { tokensCacheWriteDelta: u.tokensCacheWriteDelta } : {}
+    }));
   }
   get totalInput() {
     return [...this.buckets.values()].reduce((n, u) => n + u.tokensInputDelta, 0);
@@ -3239,9 +3306,27 @@ var UsageAccumulator = class {
   get totalOutput() {
     return [...this.buckets.values()].reduce((n, u) => n + u.tokensOutputDelta, 0);
   }
+  get totalCacheRead() {
+    return [...this.buckets.values()].reduce((n, u) => n + u.tokensCacheReadDelta, 0);
+  }
 };
 
 // src/adapters/claudeCode.ts
+var MAX_RECEIPTS = 16384, MAX_PROJECT_HINTS = 512, REQUEST_ID = /^req_[A-Za-z0-9_-]{1,120}$/;
+function projectSlug(folder) {
+  return folder.replace(/[^A-Za-z0-9]/g, "-");
+}
+function launchFolder(cwd, projectDir) {
+  if (typeof cwd != "string" || !projectDir || cwd.length > 1024 || /[\x00-\x1f\x7f]/.test(cwd)) return null;
+  let prefix = cwd.replace(/[\\/]+$/, "");
+  for (let depth = 0; prefix && depth < 64; depth++) {
+    if (projectSlug(prefix) === projectDir) return folderFromCwd(prefix);
+    let cut = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("\\"));
+    if (cut <= 0) break;
+    prefix = prefix.slice(0, cut);
+  }
+  return null;
+}
 var ClaudeCodeAdapter = class {
   constructor(recentWindowMs) {
     this.recentWindowMs = recentWindowMs;
@@ -3251,38 +3336,44 @@ var ClaudeCodeAdapter = class {
   tailer = new JsonlTailer("claude-code");
   fileMeta = /* @__PURE__ */ new Map();
   receipts = /* @__PURE__ */ new Map();
+  projectHints = /* @__PURE__ */ new Map();
   clear() {
-    this.tailer.clear(), this.fileMeta.clear(), this.receipts.clear();
+    this.tailer.clear(), this.fileMeta.clear(), this.receipts.clear(), this.projectHints.clear();
+  }
+  rememberHint(projectDir, hint) {
+    if (projectDir)
+      for (this.projectHints.delete(projectDir), this.projectHints.set(projectDir, hint); this.projectHints.size > MAX_PROJECT_HINTS; ) this.projectHints.delete(this.projectHints.keys().next().value);
   }
   async poll(now = Date.now(), signal) {
     let files = this.tailer.files(signal), present = new Set(files);
     for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
-    for (let [id, receipt] of this.receipts) now - receipt.at > MAX_EVENT_AGE_MS && this.receipts.delete(id);
-    let out = [];
-    for (let file of files) {
+    let out = [], ordered = [...files].sort((a, b) => +(this.tailer.subagentParent(a) !== null) - +(this.tailer.subagentParent(b) !== null));
+    for (let file of ordered) {
       if (signal?.aborted) break;
-      let meta = this.fileMeta.get(file), usage = new UsageAccumulator();
+      let meta = this.fileMeta.get(file), parent = this.tailer.subagentParent(file), projectDir = this.tailer.projectDir(file), usage = new UsageAccumulator();
       if (this.tailer.readNewLines(file, (raw, generation) => {
         let line = objectRecord(raw);
         if (!line || line.type !== "assistant") return;
-        let message = objectRecord(line.message), counts = objectRecord(message?.usage), at = eventTime(line.timestamp, now, this.recentWindowMs);
+        let message = objectRecord(line.message), counts = objectRecord(message?.usage), at = countTime(line.timestamp, now);
         if (!message || message.role !== "assistant" || !counts || at === null || typeof message.id != "string" || message.id.length > 128 || !/^msg_[A-Za-z0-9_-]+$/.test(message.id) || /\s/.test(message.id) || message.model === "<synthetic>" || !isCount(counts.input_tokens) || !isCount(counts.output_tokens) || !isCount(counts.cache_read_input_tokens ?? 0) || !isCount(counts.cache_creation_input_tokens ?? 0)) return;
-        let input = counts.input_tokens + (counts.cache_read_input_tokens ?? 0) + (counts.cache_creation_input_tokens ?? 0), output = counts.output_tokens;
+        let cacheWrite = counts.cache_creation_input_tokens ?? 0, cacheRead = counts.cache_read_input_tokens ?? 0, input = counts.input_tokens + cacheWrite, output = counts.output_tokens;
         if (!isCount(input)) return;
-        let projectHint = folderFromCwd(line.cwd);
-        if (!projectHint || (meta?.generation === generation && meta.projectHint !== projectHint && (meta.invalidProject = !0), meta?.generation === generation && meta.invalidProject)) return;
-        let model = safeModel(message.model, "claude-code"), id = (0, import_node_crypto5.createHash)("sha256").update(message.id).digest("hex"), previous = this.receipts.get(id);
-        if (previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output)) return;
-        let inputDelta = input - (previous?.input ?? 0), outputDelta = output - (previous?.output ?? 0);
-        if (!(!(inputDelta || outputDelta) || !usage.add(model, inputDelta, outputDelta))) {
-          for (this.receipts.set(id, { input, output, model, at }); this.receipts.size > 2048; ) this.receipts.delete(this.receipts.keys().next().value);
-          (!meta || meta.generation !== generation) && (meta = { generation, projectHint, model: null, lastActivityAt: 0, invalidProject: !1 }), meta.projectHint = folderFromCwd(line.cwd), meta.model = model, meta.lastActivityAt = Math.max(meta.lastActivityAt, at);
+        let dir = parent?.projectDir ?? projectDir, known2 = (meta?.generation === generation ? meta.projectHint : null) ?? (parent ? this.fileMeta.get(parent.sessionFile)?.projectHint : null) ?? (dir ? this.projectHints.get(dir) : void 0) ?? null, projectHint = launchFolder(line.cwd, dir) ?? known2 ?? folderFromCwd(line.cwd);
+        if (!projectHint) return;
+        let model = safeModel(message.model, "claude-code"), requestId = typeof line.requestId == "string" && REQUEST_ID.test(line.requestId) ? line.requestId : "", id = (0, import_node_crypto5.createHash)("sha256").update(`${message.id}\0${requestId}`).digest("hex").slice(0, 32), previous = this.receipts.get(id);
+        if (previous && (this.receipts.delete(id), this.receipts.set(id, previous)), previous && (previous.model !== model || at < previous.at || input < previous.input || output < previous.output || cacheRead < previous.cacheRead || cacheWrite < previous.cacheWrite)) return;
+        let inputDelta = input - (previous?.input ?? 0), outputDelta = output - (previous?.output ?? 0), cacheReadDelta = cacheRead - (previous?.cacheRead ?? 0), cacheWriteDelta = cacheWrite - (previous?.cacheWrite ?? 0);
+        if (!(!(inputDelta || outputDelta || cacheReadDelta) || !usage.add(model, inputDelta, outputDelta, !1, { cacheRead: cacheReadDelta, cacheWrite: cacheWriteDelta }))) {
+          for (this.receipts.set(id, { input, output, cacheRead, cacheWrite, model, at }); this.receipts.size > MAX_RECEIPTS; ) this.receipts.delete(this.receipts.keys().next().value);
+          (!meta || meta.generation !== generation) && (meta = { generation, projectHint, model: null, lastActivityAt: 0 }), meta.projectHint = projectHint, parent || this.rememberHint(projectDir, projectHint), meta.model = model, meta.lastActivityAt = Math.max(meta.lastActivityAt, at);
         }
       }, signal), !meta || meta.generation !== this.tailer.generation(file)) {
         this.fileMeta.delete(file);
         continue;
       }
-      this.fileMeta.set(file, meta), !(meta.invalidProject || now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS)) && out.push({
+      this.fileMeta.set(file, meta);
+      let late = now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS), list = usage.toList();
+      late && !list.length || out.push({
         tool: this.name,
         cwd: null,
         projectHint: meta.projectHint,
@@ -3291,8 +3382,9 @@ var ClaudeCodeAdapter = class {
         observedAt: meta.lastActivityAt,
         tokensInputDelta: usage.totalInput,
         tokensOutputDelta: usage.totalOutput,
-        usage: usage.toList(),
-        confidence: "activity"
+        usage: list,
+        confidence: "activity",
+        ...late ? { late: !0 } : {}
       });
     }
     return signal?.aborted ? [] : out;
@@ -3302,7 +3394,6 @@ var ClaudeCodeAdapter = class {
 // src/adapters/codex.ts
 var emptyMeta = (generation) => ({
   generation,
-  invalidProject: !1,
   contextModel: null,
   contextProject: null,
   contextAt: 0,
@@ -3310,6 +3401,7 @@ var emptyMeta = (generation) => ({
   projectHint: null,
   input: null,
   output: null,
+  cached: 0,
   counterAt: 0,
   lastActivityAt: 0
 }), CodexAdapter = class {
@@ -3323,6 +3415,16 @@ var emptyMeta = (generation) => ({
   clear() {
     this.tailer.clear(), this.fileMeta.clear();
   }
+  /**
+   * L1 follow-up (U1): a rollout CREATED since the previous poll is read from byte 0 and
+   * its totals start at zero, so its first turn counts. Any other file keeps the rule
+   * that its first counter is a baseline - a file that merely re-entered the listing
+   * must never have its whole cumulative total booked again.
+   */
+  freshMeta(file, generation) {
+    let meta = emptyMeta(generation);
+    return this.tailer.bornFresh(file) && (meta.input = 0, meta.output = 0, meta.cached = 0), meta;
+  }
   async poll(now = Date.now(), signal) {
     let files = this.tailer.files(signal), present = new Set(files);
     for (let file of this.fileMeta.keys()) present.has(file) || this.fileMeta.delete(file);
@@ -3331,28 +3433,30 @@ var emptyMeta = (generation) => ({
       if (signal?.aborted) break;
       let meta = this.fileMeta.get(file), usage = new UsageAccumulator();
       if (this.tailer.readNewLines(file, (raw, generation) => {
-        let line = objectRecord(raw), payload = objectRecord(line?.payload), at = eventTime(line?.timestamp, now, this.recentWindowMs);
+        let line = objectRecord(raw), payload = objectRecord(line?.payload), at = countTime(line?.timestamp, now);
         if (!line || !payload || at === null) return;
         if (line.type === "turn_context") {
-          if ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.contextAt) return;
+          if ((!meta || meta.generation !== generation) && (meta = this.freshMeta(file, generation)), at < meta.contextAt) return;
           let project = folderFromCwd(payload.cwd);
-          (!project || meta.contextProject !== null && meta.contextProject !== project) && (meta.invalidProject = !0), meta.contextModel = safeModel(payload.model, "codex"), meta.contextProject = project, meta.contextAt = at;
+          meta.contextProject ??= project, meta.contextModel = safeModel(payload.model, "codex"), meta.contextAt = at;
           return;
         }
         if (line.type !== "event_msg" || payload.type !== "token_count") return;
         let info = objectRecord(payload.info), total = objectRecord(info?.total_token_usage);
-        if (!total || !isCount(total.input_tokens, 1e12) || !isCount(total.output_tokens, 1e12) || ((!meta || meta.generation !== generation) && (meta = emptyMeta(generation)), at < meta.counterAt)) return;
-        let input = total.input_tokens, output = total.output_tokens, baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output, inputDelta = baseline ? 0 : input - meta.input, outputDelta = baseline ? 0 : output - meta.output;
-        if (meta.input = input, meta.output = output, meta.counterAt = at, baseline || meta.invalidProject || !(inputDelta || outputDelta)) return;
-        let hasContext = meta.contextProject !== null && now - meta.contextAt <= MAX_EVENT_AGE_MS;
+        if (!total || !isCount(total.input_tokens, 1e12) || !isCount(total.output_tokens, 1e12) || ((!meta || meta.generation !== generation) && (meta = this.freshMeta(file, generation)), at < meta.counterAt)) return;
+        let input = total.input_tokens, output = total.output_tokens, cached = isCount(total.cached_input_tokens, 1e12) ? Math.min(total.cached_input_tokens, input) : 0, baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output || cached < meta.cached, cacheReadDelta = baseline ? 0 : cached - meta.cached, inputDelta = baseline ? 0 : Math.max(0, input - meta.input - cacheReadDelta), outputDelta = baseline ? 0 : output - meta.output;
+        if (meta.input = input, meta.output = output, meta.cached = cached, meta.counterAt = at, baseline || !(inputDelta || outputDelta || cacheReadDelta)) return;
+        let hasContext = meta.contextProject !== null && at - meta.contextAt <= MAX_RECORD_AGE_MS;
         if (!hasContext) return;
         let model = meta.contextModel;
-        usage.add(model, inputDelta, outputDelta) && (meta.model = model, meta.projectHint = hasContext ? meta.contextProject : null, meta.lastActivityAt = Math.max(meta.lastActivityAt, at));
+        usage.add(model, inputDelta, outputDelta, !1, { cacheRead: cacheReadDelta }) && (meta.model = model, meta.projectHint = hasContext ? meta.contextProject : null, meta.lastActivityAt = Math.max(meta.lastActivityAt, at));
       }, signal), !meta || meta.generation !== this.tailer.generation(file)) {
         this.fileMeta.delete(file);
         continue;
       }
-      this.fileMeta.set(file, meta), !(meta.invalidProject || !meta.lastActivityAt || now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS)) && out.push({
+      if (this.fileMeta.set(file, meta), !meta.lastActivityAt) continue;
+      let late = now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS), list = usage.toList();
+      late && !list.length || out.push({
         tool: this.name,
         cwd: null,
         projectHint: meta.projectHint,
@@ -3361,8 +3465,9 @@ var emptyMeta = (generation) => ({
         observedAt: meta.lastActivityAt,
         tokensInputDelta: usage.totalInput,
         tokensOutputDelta: usage.totalOutput,
-        usage: usage.toList(),
-        confidence: "activity"
+        usage: list,
+        confidence: "activity",
+        ...late ? { late: !0 } : {}
       });
     }
     return signal?.aborted ? [] : out;
@@ -3612,7 +3717,7 @@ var QuadcodeAdapter = class {
 var ADAPTER_POLL_TIMEOUT_MS = 45e3, busyAdapters = /* @__PURE__ */ new WeakSet(), newest = (list) => list.reduce(
   (best, observation) => !best || observation.lastActivityAt > best.lastActivityAt ? observation : best,
   null
-), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0, usageKey = (tool, model) => `${tool}\0${model ?? ""}`;
+), hasTokens = (o) => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0 || o.usage.some(hasUsage), usageKey = (tool, model) => `${tool}\0${model ?? ""}`;
 async function pollAdapter(adapter, timeoutMs = ADAPTER_POLL_TIMEOUT_MS, now = Date.now(), signal) {
   if (signal?.aborted || busyAdapters.has(adapter)) return [];
   let controller = new AbortController(), timer, finishCancelled, cancel = () => {
@@ -3641,10 +3746,13 @@ function projectObservation(o, now, windowMs) {
       model: entry?.model,
       tokensInputDelta: entry?.tokensInputDelta,
       tokensOutputDelta: entry?.tokensOutputDelta,
+      tokensCacheReadDelta: entry?.tokensCacheReadDelta,
+      tokensCacheWriteDelta: entry?.tokensCacheWriteDelta,
       estimated: entry?.estimated
     });
     if (!u) return null;
-    usage.push({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta });
+    let { tool: _tool, ...delta } = u;
+    usage.push(delta);
   }
   let input = usage.reduce((n, u) => n + u.tokensInputDelta, 0), output = usage.reduce((n, u) => n + u.tokensOutputDelta, 0);
   return !isCount(input) || !isCount(output) || input !== o.tokensInputDelta || output !== o.tokensOutputDelta ? null : {
@@ -3659,6 +3767,35 @@ function projectObservation(o, now, windowMs) {
     tokensOutputDelta: output,
     usage
   };
+}
+function projectLateUsage(o, now) {
+  if (!o || o.late !== !0 || !isSupportedTool(o.tool) || o.confidence !== "activity" || o.cwd !== null || !Number.isSafeInteger(o.lastActivityAt) || o.lastActivityAt < now - MAX_RECORD_AGE_MS || o.lastActivityAt > now + MAX_FUTURE_SKEW_MS || !Array.isArray(o.usage) || o.usage.length > MAX_USAGE_ENTRIES) return null;
+  let usage = [];
+  for (let entry of o.usage) {
+    let u = projectUsage({
+      tool: o.tool,
+      model: entry?.model,
+      tokensInputDelta: entry?.tokensInputDelta,
+      tokensOutputDelta: entry?.tokensOutputDelta,
+      tokensCacheReadDelta: entry?.tokensCacheReadDelta,
+      tokensCacheWriteDelta: entry?.tokensCacheWriteDelta,
+      estimated: entry?.estimated
+    });
+    if (!u) return null;
+    hasUsage(u) && usage.push(u);
+  }
+  return usage;
+}
+function mergeUsage(into, u) {
+  let key = usageKey(u.tool, u.model), previous = into.get(key);
+  if (!previous && into.size >= MAX_USAGE_ENTRIES) return !1;
+  let merged = {
+    tool: u.tool,
+    model: u.model,
+    tokensInputDelta: (previous?.tokensInputDelta ?? 0) + u.tokensInputDelta,
+    tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + u.tokensOutputDelta
+  }, cacheRead = (previous?.tokensCacheReadDelta ?? 0) + (u.tokensCacheReadDelta ?? 0), cacheWrite = (previous?.tokensCacheWriteDelta ?? 0) + (u.tokensCacheWriteDelta ?? 0);
+  return !isCount(merged.tokensInputDelta) || !isCount(merged.tokensOutputDelta) || !isCount(cacheRead) || !isCount(cacheWrite) ? !1 : (cacheRead && (merged.tokensCacheReadDelta = cacheRead), cacheWrite && (merged.tokensCacheWriteDelta = cacheWrite), into.set(key, merged), !0);
 }
 var Detector = class {
   constructor(activeWindowMs, adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS, attestedTools = []) {
@@ -3691,9 +3828,16 @@ var Detector = class {
   origin = /* @__PURE__ */ new WeakMap();
   cancellation = null;
   generation = 0;
+  /** Usage from `late` observations, drained by the loop (takeLateUsage). */
+  late = /* @__PURE__ */ new Map();
   activeWindowMs;
+  /** Hands over (and forgets) the usage booked from late observations. */
+  takeLateUsage() {
+    let out = [...this.late.values()];
+    return this.late.clear(), out;
+  }
   clear() {
-    this.generation += 1, this.cancellation?.abort();
+    this.generation += 1, this.late.clear(), this.cancellation?.abort();
     for (let adapter of this.adapters) adapter.clear?.();
   }
   async detect(now = Date.now(), current, allowed = () => !0, signal) {
@@ -3708,24 +3852,18 @@ var Detector = class {
       signal?.removeEventListener("abort", cancel);
     }
     if (controller.signal.aborted || generation !== this.generation) return null;
-    let all = results.flatMap((list, index) => {
+    let owned = results.flatMap((list, index) => {
       let adapter = adapters[index], mayEmit = this.origin.get(adapter) ?? ((tool) => tool === adapter.name);
       return list.filter((o) => mayEmit(o?.tool));
-    }).map((o) => projectObservation(o, now, this.activeWindowMs)).filter((o) => o !== null).filter(allowed);
+    });
+    for (let o of owned)
+      if (!(o?.late !== !0 || !allowed(o)))
+        for (let u of projectLateUsage(o, now) ?? []) mergeUsage(this.late, u);
+    let all = owned.filter((o) => o?.late !== !0).map((o) => projectObservation(o, now, this.activeWindowMs)).filter((o) => o !== null).filter(allowed);
     if (!all.length) return null;
     let usage = /* @__PURE__ */ new Map(), input = 0, output = 0;
-    for (let o of all) for (let u of o.usage) {
-      if (!(u.tokensInputDelta || u.tokensOutputDelta)) continue;
-      let key = usageKey(o.tool, u.model);
-      if (!usage.has(key) && usage.size >= MAX_USAGE_ENTRIES || !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta)) continue;
-      let previous = usage.get(key);
-      usage.set(key, {
-        tool: o.tool,
-        model: u.model,
-        tokensInputDelta: (previous?.tokensInputDelta ?? 0) + u.tokensInputDelta,
-        tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + u.tokensOutputDelta
-      }), input += u.tokensInputDelta, output += u.tokensOutputDelta;
-    }
+    for (let o of all) for (let u of o.usage)
+      !hasUsage(u) || !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta) || !mergeUsage(usage, { ...u, tool: o.tool }) || (input += u.tokensInputDelta, output += u.tokensOutputDelta);
     let seen = /* @__PURE__ */ new Map();
     for (let o of all)
       for (let model of /* @__PURE__ */ new Set([o.model, ...o.usage.map((u) => u.model)])) {
@@ -3839,7 +3977,7 @@ function clearStopRequest() {
 }
 
 // src/heartbeat.ts
-var STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3;
+var STOP_REQUEST_POLL_MS = 1e3, IN_FLIGHT_GRACE_MS = 3e3, CONNECTION_RETRY_DELAYS_MS = [1e3, 3e3], CONNECTED_GRACE_MS = 6e4;
 function createLoopState(config) {
   let valid = projectConfig(config), activeWindowMs = valid ? idleThresholdMs(valid) : 3e5, attestedTools = valid ? attestedToolsFor(valid) : [];
   return {
@@ -3847,6 +3985,7 @@ function createLoopState(config) {
     lastActivityAt: null,
     detector: new Detector(activeWindowMs, void 0, attestedTools),
     pendingUsage: /* @__PURE__ */ new Map(),
+    pendingSince: null,
     sourcesSeen: /* @__PURE__ */ new Map(),
     modelChallenger: null,
     activeWindowMs,
@@ -3855,13 +3994,28 @@ function createLoopState(config) {
     epoch: 0,
     binding: valid ? configFingerprint(valid) : null,
     requestAbort: null,
-    loadConfig: readConfig
+    loadConfig: readConfig,
+    lastConnectedAt: null,
+    retryDelaysMs: CONNECTION_RETRY_DELAYS_MS
   };
 }
 function clearCollectedState(state, config) {
-  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.sourcesSeen.clear(), state.modelChallenger = null, state.binding = config ? configFingerprint(config) : null;
+  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.detector.clear(), state.activeSession = null, state.lastActivityAt = null, state.pendingUsage.clear(), state.pendingSince = null, state.sourcesSeen.clear(), state.modelChallenger = null, state.lastConnectedAt = null, state.binding = config ? configFingerprint(config) : null;
   let nextTools = config ? attestedToolsFor(config) : [], consentChanged = nextTools.join("\0") !== state.attestedTools.join("\0");
   config && (idleThresholdMs(config) !== state.activeWindowMs || consentChanged) ? (state.activeWindowMs = idleThresholdMs(config), state.attestedTools = nextTools, state.detector = new Detector(state.activeWindowMs, void 0, nextTools)) : !config && state.attestedTools.length && (state.attestedTools = [], state.detector = new Detector(state.activeWindowMs));
+}
+function softReset(state) {
+  state.epoch += 1, state.requestAbort?.abort(), state.requestAbort = null, state.activeSession = null, state.lastActivityAt = null, state.sourcesSeen.clear(), state.modelChallenger = null;
+}
+function stashUsage(state, usage, now = Date.now()) {
+  state.pendingSince !== null && now - state.pendingSince > MAX_RECORD_AGE_MS && (state.pendingUsage.clear(), state.pendingSince = null);
+  for (let u of usage)
+    mergeUsage(state.pendingUsage, u) && state.pendingSince === null && (state.pendingSince = now);
+}
+function withPending(state, usage) {
+  let merged = /* @__PURE__ */ new Map(), rest = [];
+  for (let u of [...usage, ...state.pendingUsage.values()]) mergeUsage(merged, u) || rest.push(u);
+  return { send: [...merged.values()], rest };
 }
 function sameConfig(config, load) {
   try {
@@ -3870,6 +4024,30 @@ function sameConfig(config, load) {
   } catch {
     return !1;
   }
+}
+var PRE_SEND_CODES = /* @__PURE__ */ new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+function failedBeforeSend(error) {
+  let seen = /* @__PURE__ */ new Set();
+  for (let e = error; e && typeof e == "object" && !seen.has(e); e = e.cause) {
+    seen.add(e);
+    let code = String(e.code ?? ""), message = String(e.message ?? "");
+    if (PRE_SEND_CODES.has(code) || /before secure TLS connection was established/i.test(message)) return !0;
+  }
+  return !1;
+}
+function pause(ms, signal) {
+  return new Promise((resolve3) => {
+    if (signal?.aborted) {
+      resolve3(!1);
+      return;
+    }
+    let onAbort = () => {
+      clearTimeout(timer), resolve3(!1);
+    }, timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort), resolve3(!0);
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: !0 });
+  });
 }
 async function requestTracker(apiUrl, deviceToken, payload, signal, retiring = !1) {
   let origin = safeApiOrigin(apiUrl);
@@ -3897,19 +4075,30 @@ async function requestTracker(apiUrl, deviceToken, payload, signal, retiring = !
       await res.body?.cancel();
     } catch {
     }
-    return { ok: !controller.signal.aborted && res.ok, authRejected };
-  } catch {
-    return { ok: !1, authRejected: !1 };
+    let refused = res.status === 400 || res.status === 413 || res.status === 422;
+    return {
+      ok: !controller.signal.aborted && res.ok,
+      authRejected,
+      ...refused ? { refused } : {},
+      ...res.status >= 500 ? { transient: !0 } : {}
+    };
+  } catch (error) {
+    return signal?.aborted ? { ok: !1, authRejected: !1 } : { ok: !1, authRejected: !1, transient: !0, ...failedBeforeSend(error) ? { preSend: !0 } : {} };
   } finally {
     clearTimeout(timer), signal?.removeEventListener("abort", cancel);
   }
 }
 async function postHeartbeat(apiUrl, deviceToken, payload, signal) {
   let safe = projectHeartbeat(payload);
-  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: !1, authRejected: !1 };
+  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: !1, authRejected: !1, refused: !0 };
 }
-function verifyConnection(config, signal) {
-  return requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+async function verifyConnection(config, signal, retryDelaysMs = CONNECTION_RETRY_DELAYS_MS) {
+  let result = await requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+  for (let ms of retryDelaysMs) {
+    if (result.ok || !result.preSend || !await pause(ms, signal)) break;
+    result = await requestTracker(config.apiUrl, config.deviceToken, void 0, signal);
+  }
+  return result;
 }
 function retireConnection(config, signal) {
   return requestTracker(config.apiUrl, config.deviceToken, void 0, signal, !0);
@@ -3947,7 +4136,7 @@ function buildTools(state, config) {
 }
 function writeSnapshot(state, config, connected, rejected = !1, receipt) {
   let now = (/* @__PURE__ */ new Date()).toISOString(), session = connected ? state.activeSession : null;
-  writeStatus({
+  connected && (state.lastConnectedAt = Date.now()), writeStatus({
     configFingerprint: config ? configFingerprint(config) : void 0,
     connected,
     attestedReceiver: config ? attestedToolsFor(config).length > 0 : !1,
@@ -3977,15 +4166,22 @@ async function tick(config, state) {
   state.binding !== configFingerprint(safe) && clearCollectedState(state, safe), state.requestAbort?.abort();
   let controller = new AbortController();
   state.requestAbort = controller;
-  let epoch = ++state.epoch, allowed = () => state.stopping || controller.signal.aborted || state.epoch !== epoch ? !1 : sameConfig(safe, state.loadConfig) ? !0 : (clearCollectedState(state), writeSnapshot(state, void 0, !1), !1), failed = (result) => {
-    clearCollectedState(state, safe), writeSnapshot(state, safe, !1, result.authRejected);
+  let epoch = ++state.epoch, allowed = () => state.stopping || controller.signal.aborted || state.epoch !== epoch ? !1 : sameConfig(safe, state.loadConfig) ? !0 : (clearCollectedState(state), writeSnapshot(state, void 0, !1), !1), binding = state.binding, unsent = [], keepUnsent = () => {
+    unsent.length && !state.stopping && state.binding === binding && binding !== null && stashUsage(state, unsent), unsent = [];
+  }, failed = (result, carriedUsage = !1) => {
+    let blink = result.transient === !0 && !result.authRejected && state.lastConnectedAt !== null && Date.now() - state.lastConnectedAt < CONNECTED_GRACE_MS;
+    result.authRejected ? (unsent = [], clearCollectedState(state, safe)) : result.refused && carriedUsage ? (unsent = [], state.pendingUsage.clear(), state.pendingSince = null, console.warn("tracker: server refused a heartbeat; its usage was dropped"), softReset(state)) : (keepUnsent(), softReset(state)), blink ? console.warn("tracker: network blinked; retrying next tick") : writeSnapshot(state, safe, !1, result.authRejected);
   }, send = async (payload) => {
     if (!allowed()) return !1;
     let result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
-    return allowed() ? result.ok ? !0 : (failed(result), !1) : !1;
+    for (let ms of state.retryDelaysMs) {
+      if (result.ok || !result.preSend || !allowed() || !await pause(ms, controller.signal)) break;
+      result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    }
+    return allowed() ? result.ok ? !0 : (failed(result, payload.eventType === "heartbeat"), !1) : !1;
   };
   try {
-    let connection = await verifyConnection(safe, controller.signal);
+    let connection = await verifyConnection(safe, controller.signal, state.retryDelaysMs);
     if (!allowed()) return;
     if (!connection.ok) {
       failed(connection);
@@ -3997,11 +4193,11 @@ async function tick(config, state) {
       (o) => resolveProjectAlias(null, safe, o.projectHint) !== null,
       controller.signal
     );
-    if (!allowed()) return;
-    state.pendingUsage.clear(), state.sourcesSeen.clear(), state.modelChallenger = null;
+    if (unsent = [...detection?.usage ?? [], ...state.detector.takeLateUsage()], !allowed()) return;
+    state.sourcesSeen.clear(), state.modelChallenger = null;
     let now = (/* @__PURE__ */ new Date()).toISOString(), alias = detection ? resolveProjectAlias(null, safe, detection.projectHint) : null;
     if (!detection || !detection.active || alias === null || !isSupportedTool(detection.tool)) {
-      if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
+      if (keepUnsent(), state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
       state.activeSession = null, state.lastActivityAt = null, allowed() && writeSnapshot(state, safe, !0, !1, connection.connectionLastSeenAt);
       return;
     }
@@ -4026,6 +4222,12 @@ async function tick(config, state) {
       if (!await send(sessionEvent("session_start", session, now))) return;
       state.activeSession = session;
     }
+    let usage = [];
+    if (isTokenlessTool(detection.tool)) keepUnsent();
+    else {
+      let { send: outgoing, rest } = withPending(state, unsent);
+      state.pendingUsage.clear(), state.pendingSince = null, rest.length && stashUsage(state, rest), unsent = usage = outgoing;
+    }
     if (!await send({
       eventType: "heartbeat",
       projectAlias: alias,
@@ -4033,14 +4235,14 @@ async function tick(config, state) {
       model,
       tokensInputDelta: detection.tokensInputDelta,
       tokensOutputDelta: detection.tokensOutputDelta,
-      usage: detection.usage,
+      usage,
       tools: buildTools(state, safe),
       tzOffsetMinutes: localTzOffsetMinutes(),
       occurredAt: now
     })) return;
-    state.lastActivityAt = detection.lastActivityAt, allowed() && writeSnapshot(state, safe, !0, !1, connection.connectionLastSeenAt);
+    unsent = [], state.lastActivityAt = detection.lastActivityAt, allowed() && writeSnapshot(state, safe, !0, !1, connection.connectionLastSeenAt);
   } finally {
-    state.requestAbort === controller && (state.requestAbort = null);
+    keepUnsent(), state.requestAbort === controller && (state.requestAbort = null);
   }
 }
 function settleWithin(promise, ms) {
@@ -4075,7 +4277,7 @@ function runLoop(initialConfig, options = {}) {
     }
     if (refreshed.changed.length && (console.log(`tracker: config.json changed (${refreshed.changed.join(", ")}); applied without a restart`), clearCollectedState(state, refreshed.config), inFlight = null), config = refreshed.config, inFlight) {
       if (Date.now() - inFlight.startedAt <= watchdogMs) return;
-      console.warn(`tracker: tick #${inFlight.seq} exceeded watchdog ${watchdogMs} ms; cancelling it`), clearCollectedState(state, config), inFlight = null;
+      console.warn(`tracker: tick #${inFlight.seq} exceeded watchdog ${watchdogMs} ms; cancelling it`), softReset(state), inFlight = null;
     }
     let startedAt = Date.now(), mine = { seq: ++ticks, startedAt, done: Promise.resolve().then(() => runTick(config, state)).catch(() => {
       inFlight === mine && (console.error("tracker: heartbeat tick failed; collection paused"), clearCollectedState(state), writeSnapshot(state, void 0, !1));

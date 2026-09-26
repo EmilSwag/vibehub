@@ -55,7 +55,7 @@ const merged = groupStatsByModel([
 eq(
   "one row per model, most recently used first",
   merged.map((r) => r.label),
-  ["Claude Fable 5.1", "Claude Opus 5"]
+  ["Fable 5.1", "Opus 5"]
 );
 eq("tools merge, most hours first", merged[1].tools, ["codex", "claude-code"]);
 eq("hours and tokens sum across tools", [merged[1].activeSeconds, merged[1].tokens], [10_800, 2300]);
@@ -135,7 +135,7 @@ const sameName = groupStatsByModel([
   row("claude-code", "claude-sonnet-4-5-20250929", 50, 50, 300, "2026-09-03T00:00:00.000Z"),
 ]);
 eq("duplicate model names merge", sameName.map((r) => [r.label, r.activeSeconds, r.tokens]), [
-  ["Claude Sonnet 4.5", 900, 300],
+  ["Sonnet 4.5", 900, 300],
 ]);
 
 // ---- a tool with no model keeps a row of its own, named after the tool ----
@@ -155,7 +155,7 @@ eq("modelRowLabel mirrors the grouping key", [
   modelRowLabel("claude-code", "claude-opus-5"),
   modelRowLabel("cursor", null),
   modelRowLabel("quadcode", "<synthetic>"),
-], ["Claude Opus 5", "Cursor", "Quadcode AI"]);
+], ["Opus 5", "Cursor", "Quadcode AI"]);
 
 // ---- pre-round-7 server: no lastActiveAt anywhere → hours desc, dates unknown ----
 const undated = groupStatsByModel([
@@ -167,7 +167,7 @@ eq(
   undated.map((r) => [r.label, r.lastActiveAt]),
   [
     ["GPT-5 Codex", null],
-    ["Claude Opus 5", null],
+    ["Opus 5", null],
   ]
 );
 
@@ -176,7 +176,7 @@ const partial = groupStatsByModel([
   row("claude-code", "claude-opus-5", 0, 0, 99_999, null),
   row("codex", "gpt-5-codex", 0, 0, 60, "2026-09-05T00:00:00.000Z"),
 ]);
-eq("undated bucket sorts last", partial.map((r) => r.label), ["GPT-5 Codex", "Claude Opus 5"]);
+eq("undated bucket sorts last", partial.map((r) => r.label), ["GPT-5 Codex", "Opus 5"]);
 
 // ---- hours on record ----
 eq("formatHoursOnRecord", [formatHoursOnRecord(66_240), formatHoursOnRecord(3600), formatHoursOnRecord(3540), formatHoursOnRecord(420), formatHoursOnRecord(120), formatHoursOnRecord(0)], [
@@ -201,20 +201,20 @@ eq("input is not mutated", JSON.stringify(source), snapshot);
 // scrollIntoView never re-ran. Reproduced on prod at scrollY 836 with the row 85px
 // above the viewport; the second press moved nothing. A repeat request must be a new
 // value, or the row cannot tell the two presses apart.
-const first = requestSelection(NO_MODEL_SELECTION, "Claude Sonnet 5");
-const repeat = requestSelection(first, "Claude Sonnet 5");
+const first = requestSelection(NO_MODEL_SELECTION, "Sonnet 5");
+const repeat = requestSelection(first, "Sonnet 5");
 eq("a repeat pick of the same row is a new tick", [first.tick === repeat.tick, first.label === repeat.label], [false, true]);
 eq(
   "the picked row sees a different number on each press",
-  [selectionTickFor(first, "Claude Sonnet 5"), selectionTickFor(repeat, "Claude Sonnet 5")],
+  [selectionTickFor(first, "Sonnet 5"), selectionTickFor(repeat, "Sonnet 5")],
   [1, 2]
 );
 eq("an unpicked row sees null", selectionTickFor(repeat, "Grok 4"), null);
 eq("clearing is also a request, so a re-pick after it still lands", [
   requestSelection(repeat, null).label,
-  requestSelection(requestSelection(repeat, null), "Claude Sonnet 5").tick,
+  requestSelection(requestSelection(repeat, null), "Sonnet 5").tick,
 ], [null, 4]);
-eq("nothing is picked to start with", selectionTickFor(NO_MODEL_SELECTION, "Claude Sonnet 5"), null);
+eq("nothing is picked to start with", selectionTickFor(NO_MODEL_SELECTION, "Sonnet 5"), null);
 
 // B. Escape-to-collapse dropped keyboard focus on <body> when focus sat on a row past
 // the preview, because that row unmounts. Reproduced on prod: focus on row 6 of 8,

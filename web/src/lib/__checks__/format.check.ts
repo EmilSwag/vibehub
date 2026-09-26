@@ -18,6 +18,7 @@ import {
   toolFamily,
   toolLabel,
   updatedLabel,
+  projectLabel,
 } from "../format";
 
 let passed = 0;
@@ -37,15 +38,15 @@ function eq<T>(label: string, actual: T, expected: T): void {
 
 // ---- humanizeModel: every example from the shared contract ----
 const MODELS: [string | null | undefined, string | null][] = [
-  ["claude-fable-5-1", "Claude Fable 5.1"],
-  ["claude-opus-5", "Claude Opus 5"],
-  ["claude-opus-4-8", "Claude Opus 4.8"],
-  ["claude-sonnet-4-5-20250929", "Claude Sonnet 4.5"],
-  ["claude-sonnet-4.5", "Claude Sonnet 4.5"],
-  ["claude-haiku-4-5-20251001", "Claude Haiku 4.5"],
-  ["sonnet", "Claude Sonnet"],
-  ["opus", "Claude Opus"],
-  ["haiku", "Claude Haiku"],
+  ["claude-fable-5-1", "Fable 5.1"],
+  ["claude-opus-5", "Opus 5"],
+  ["claude-opus-4-8", "Opus 4.8"],
+  ["claude-sonnet-4-5-20250929", "Sonnet 4.5"],
+  ["claude-sonnet-4.5", "Sonnet 4.5"],
+  ["claude-haiku-4-5-20251001", "Haiku 4.5"],
+  ["sonnet", "Sonnet"],
+  ["opus", "Opus"],
+  ["haiku", "Haiku"],
   ["gpt-5-codex", "GPT-5 Codex"],
   ["gpt-4.1", "GPT-4.1"],
   ["gpt-4o-mini", "GPT-4o Mini"],
@@ -60,16 +61,16 @@ const MODELS: [string | null | undefined, string | null][] = [
   ["unknown", null],
   ["<synthetic>", null],
   // beyond the contract: shapes the tracker has actually seen or will see
-  ["claude-opus-4-1-20250805", "Claude Opus 4.1"],
-  ["claude-sonnet-4-20250514", "Claude Sonnet 4"],
-  ["claude-3-5-sonnet-20241022", "Claude Sonnet 3.5"],
-  ["claude-3-7-sonnet-latest", "Claude Sonnet 3.7"],
-  ["claude-sonnet-4-5-20250929[1m]", "Claude Sonnet 4.5"],
-  ["anthropic/claude-fable-5-1", "Claude Fable 5.1"],
-  ["us.anthropic.claude-sonnet-4-5-20250929-v1:0", "Claude Sonnet 4.5"],
-  ["claude-sonnet-4-5@20250929", "Claude Sonnet 4.5"],
+  ["claude-opus-4-1-20250805", "Opus 4.1"],
+  ["claude-sonnet-4-20250514", "Sonnet 4"],
+  ["claude-3-5-sonnet-20241022", "Sonnet 3.5"],
+  ["claude-3-7-sonnet-latest", "Sonnet 3.7"],
+  ["claude-sonnet-4-5-20250929[1m]", "Sonnet 4.5"],
+  ["anthropic/claude-fable-5-1", "Fable 5.1"],
+  ["us.anthropic.claude-sonnet-4-5-20250929-v1:0", "Sonnet 4.5"],
+  ["claude-sonnet-4-5@20250929", "Sonnet 4.5"],
   ["claude", "Claude"],
-  ["Claude-Fable-5-1", "Claude Fable 5.1"],
+  ["Claude-Fable-5-1", "Fable 5.1"],
   ["gpt-4o-2024-08-06", "GPT-4o"],
   ["gpt-5", "GPT-5"],
   ["gpt-3.5-turbo", "GPT-3.5 Turbo"],
@@ -85,16 +86,24 @@ const MODELS: [string | null | undefined, string | null][] = [
   ["  UNKNOWN  ", null],
   // round 6: every model the Quadcode adapter has actually seen in a chat log
   // (plan Amendment 1 — 7 distinct values across 341 LLM records).
-  ["claude-fable-5", "Claude Fable 5"],
+  ["claude-fable-5", "Fable 5"],
   ["gemini-3.5-flash", "Gemini 3.5 Flash"],
   ["grok-4.6", "Grok 4.6"],
   // round 9: human-cased names with spaces (Cursor reports these) — seen live as
   // "Claude Claude sonnet 5" in the connect modal before the fix.
-  ["Claude Sonnet 5", "Claude Sonnet 5"],
-  ["Claude Sonnet 4.5", "Claude Sonnet 4.5"],
+  ["Claude Sonnet 5", "Sonnet 5"],
+  ["Claude Sonnet 4.5", "Sonnet 4.5"],
   ["GPT 5 Codex", "GPT-5 Codex"],
   ["Gemini 2.5 Pro", "Gemini 2.5 Pro"],
   ["Grok 4", "Grok 4"],
+  // QA R1 (2026-09-26): models released after the tracker allowlist — never "null".
+  ["claude-opus-5-5", "Opus 5.5"],
+  ["claude-opus-5-5[1m]", "Opus 5.5"],
+  ["claude-fable-5-1", "Fable 5.1"],
+  ["claude-sonnet-5", "Sonnet 5"],
+  ["gpt-6-sol", "GPT-6 Sol"],
+  ["gpt-6-luna", "GPT-6 Luna"],
+  ["gpt-5.6-terra", "GPT-5.6 Terra"],
 ];
 for (const [raw, expected] of MODELS) eq(`humanizeModel(${JSON.stringify(raw)})`, humanizeModel(raw), expected);
 
@@ -163,7 +172,7 @@ eq("toolFamily(quadcode ai)", toolFamily("quadcode ai"), "quadcode");
 eq("toolFamily(code)", toolFamily("code"), "vscode");
 
 // ---- modelWithTool ----
-eq("modelWithTool(claude-fable-5-1, claude-code)", modelWithTool("claude-fable-5-1", "claude-code"), "Claude Fable 5.1 · Claude Code");
+eq("modelWithTool(claude-fable-5-1, claude-code)", modelWithTool("claude-fable-5-1", "claude-code"), "Fable 5.1 · Claude Code");
 eq("modelWithTool(gpt-5-codex, codex)", modelWithTool("gpt-5-codex", "codex"), "GPT-5 Codex · Codex CLI");
 eq("modelWithTool(null, cursor)", modelWithTool(null, "cursor"), "Cursor");
 eq("modelWithTool(unknown, quadcode)", modelWithTool("unknown", "quadcode"), "Quadcode AI");
@@ -190,10 +199,10 @@ const activity = { projectAlias: "vibehub", tool: "claude-code", model: "claude-
 eq("presenceParts(active)", presenceParts(activity, NOW), {
   project: "vibehub",
   tool: "Claude Code",
-  model: "Claude Fable 5.1",
+  model: "Fable 5.1",
   elapsed: "1h 42m",
 });
-eq("presenceLine(active)", presenceLine(activity, NOW), "vibehub · Claude Code · Claude Fable 5.1 · 1h 42m");
+eq("presenceLine(active)", presenceLine(activity, NOW), "vibehub · Claude Code · Fable 5.1 · 1h 42m");
 
 const noModel = { projectAlias: "neon-app", tool: "cursor", model: null, startedAt: ago(5 * 60_000) };
 eq("presenceParts(no model)", presenceParts(noModel, NOW), { project: "neon-app", tool: "Cursor", model: null, elapsed: "5m" });
@@ -280,6 +289,13 @@ eq("updatedLabel falls back past an unparseable push", updatedLabel("nope", days
 eq("updatedLabel no dates", updatedLabel(null, null, DAY_NOW), null);
 eq("updatedLabel undefined dates", updatedLabel(undefined, undefined, DAY_NOW), null);
 eq("updatedLabel empty strings", updatedLabel("", "", DAY_NOW), null);
+
+// ---- QA R5: a hidden project reads "Private project", never "unknown" ----
+for (const raw of [null, undefined, "", "  ", "unknown", "Unknown", "<private>", "private", "null"]) {
+  eq(`projectLabel(${JSON.stringify(raw)})`, projectLabel(raw), "Private project");
+}
+eq("projectLabel keeps a real alias verbatim", projectLabel("vibehub"), "vibehub");
+eq("presenceLine never prints unknown", presenceLine({ ...activity, projectAlias: "unknown" }, NOW).startsWith("Private project · "), true);
 
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);

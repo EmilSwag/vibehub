@@ -263,7 +263,7 @@ eq("an issued key is rendered for reading, never auto-executed",
 eq("Settings reuses the key Add device already minted, rather than minting a second",
   settings.includes("<MacInstall token={token} />"), true);
 eq("the sheet does not hand its cached key to the Mac panel",
-  sheet.includes("<MacInstall />") && !/MacInstall token=/.test(sheet), true);
+  /<MacInstall\b/.test(sheet) && !/<MacInstall[^>]*\btoken=/.test(sheet), true);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) throw new Error(`macInstall check failed: ${failures.join(", ")}`);

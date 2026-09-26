@@ -68,7 +68,7 @@ const base: TrackerMeInput = {
   user: ME,
   level: 7,
   presence: activeAt("emil", "vibehub", "claude-code", "claude-opus-5"),
-  today: { activeSeconds: 8_040, tokens: 125_000, sessionStartedAt: at(10 * H), estimatedUsd: 1.25, byModel: { "claude-opus-5": 1.25 } },
+  today: { activeSeconds: 8_040, tokens: 125_000, sessionStartedAt: at(10 * H), estimatedUsd: 1.25, byModel: { "claude-opus-5": 1.25 }, cachedTokens: 540_000 },
   lastSeenAt: at(11 * H),
   devices: [{ label: "MacBook Pro", lastSeenAt: at(11 * H) }],
   friends: [],
@@ -95,8 +95,10 @@ eq("today", full.today, {
   // Lane B (mac app): ≈$ for the Island pill, passed through from foldToday untouched.
   estimatedUsd: 1.25,
   byModel: { "claude-opus-5": 1.25 },
+  // QA fix R2: cache reads ride beside `tokens`, never inside it.
+  cachedTokens: 540_000,
 });
-eq("today keys", Object.keys(full.today), ["activeSeconds", "tokens", "sessionStartedAt", "estimatedUsd", "byModel"]);
+eq("today keys", Object.keys(full.today), ["activeSeconds", "tokens", "sessionStartedAt", "estimatedUsd", "byModel", "cachedTokens"]);
 eq("tracker.connected(active)", full.tracker.connected, true);
 eq("tracker.lastSeenAt is ISO", full.tracker.lastSeenAt, at(11 * H).toISOString());
 eq("tracker.devices", full.tracker.devices, [{ name: "MacBook Pro", lastSeenAt: at(11 * H).toISOString() }]);
@@ -165,14 +167,14 @@ eq(
     user: { id: "u_new", username: "newbie", displayName: null, avatarUrl: null },
     level: 1,
     presence: offline,
-    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} },
+    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {}, cachedTokens: 0 },
     lastSeenAt: null,
     devices: [],
   }),
   {
     user: { id: "u_new", username: "newbie", displayName: null, avatarUrl: null, level: 1 },
     presence: { status: "offline", activity: null, lastSeenAt: null },
-    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} },
+    today: { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {}, cachedTokens: 0 },
     tracker: { connected: false, lastSeenAt: null, devices: [] },
     friendsOnline: { count: 0, sample: [] },
   }
@@ -246,10 +248,11 @@ const session = (startedAt: Date, lastHeartbeatAt: Date, tokensInput = 0, tokens
 });
 const yesterday = new Date(DAY - 86_400_000);
 
-eq("foldToday(nothing)", foldToday([], [], today), { activeSeconds: 0, tokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} });
+eq("foldToday(nothing)", foldToday([], [], today), { activeSeconds: 0, tokens: 0, cachedTokens: 0, sessionStartedAt: null, estimatedUsd: 0, byModel: {} });
 eq("foldToday(closed work only)", foldToday([stat(today, 3_600, 10, 20)], [], today), {
   activeSeconds: 3_600,
   tokens: 30,
+  cachedTokens: 0,
   sessionStartedAt: null,
   estimatedUsd: 0.00055,
   byModel: { "claude-opus-5": 0.00055 },
@@ -257,7 +260,7 @@ eq("foldToday(closed work only)", foldToday([stat(today, 3_600, 10, 20)], [], to
 eq(
   "foldToday drops DailyStat rows from other days",
   foldToday([stat(yesterday, 9_999, 999, 999), stat(today, 60, 1, 1)], [], today),
-  { activeSeconds: 60, tokens: 2, sessionStartedAt: null, estimatedUsd: 0.00003, byModel: { "claude-opus-5": 0.00003 } }
+  { activeSeconds: 60, tokens: 2, cachedTokens: 0, sessionStartedAt: null, estimatedUsd: 0.00003, byModel: { "claude-opus-5": 0.00003 } }
 );
 // Open session elapsed is measured to lastHeartbeatAt, never to now — a tracker that
 // died mid-session must stop accruing.
@@ -285,10 +288,13 @@ eq("foldToday: byModel lists priced models only", partial.byModel, { "gpt-4.1": 
 // Yesterday's still-open session is excluded from today's ≈$ exactly as from its time.
 eq("foldToday: overnight session is not priced into today", foldToday([], [session(at(-2 * H), at(1 * H), 1_000_000, 0)], today).estimatedUsd, 0);
 
-// A session that began yesterday and is still open belongs to yesterday's bucket — the
-// same day foldIntoDailyStat will use when it closes.
+// QA fix ("today window"): a session that began yesterday and is still open counts its
+// seconds since midnight today - the same split foldIntoDailyStat books when it closes
+// (sessions.ts secondsByUtcDay). Its legacy tokens stay on yesterday (checked above).
 const overnight = foldToday([], [session(at(-2 * H), at(1 * H))], today);
-eq("foldToday ignores a session started yesterday", overnight.activeSeconds, 0);
+eq("foldToday counts today's part of a session started yesterday", overnight.activeSeconds, H / 1000);
+eq("...and nothing of one that ended before midnight",
+  foldToday([], [session(at(-3 * H), at(-1 * H))], today).activeSeconds, 0);
 eq("foldToday still reports it as the open session", overnight.sessionStartedAt?.toISOString() ?? null, at(-2 * H).toISOString());
 
 // Freshest heartbeat wins when several sessions are open.
@@ -330,7 +336,7 @@ eq("payload today.tokens is null for a Quadcode-only day", quadcodePayload.today
 eq("payload today.estimatedUsd is null for a Quadcode-only day", quadcodePayload.today.estimatedUsd, null);
 eq("payload today.byModel stays empty for a Quadcode-only day", quadcodePayload.today.byModel, {});
 eq("payload today keys are unchanged by the nullable tokens", Object.keys(quadcodePayload.today),
-  ["activeSeconds", "tokens", "sessionStartedAt", "estimatedUsd", "byModel"]);
+  ["activeSeconds", "tokens", "sessionStartedAt", "estimatedUsd", "byModel", "cachedTokens"]);
 
 // A genuine measured zero must survive: a measuring tool that really used nothing
 // reports 0, and that 0 must NOT be rewritten to null by the rule above.
@@ -433,6 +439,25 @@ const closedMixed = foldToday(
 );
 eq("a closed mixed day counts only the measured row", closedMixed.tokens, 1_000_000);
 eq("...and prices only what it could price", closedMixed.byModel, { "gpt-4.1": 2 });
+// ---- QA fix R2: cache counters (meta/plans/vibehub-qa-fix.md) ----
+// Opus 5.5: $4 in / $20 out / $0.20 cache read / $5 cache write per million. 1M fresh
+// input of which 400k were cache writes, 100k output, 10M cache reads:
+//   600k x 4 + 400k x 5 + 10M x 0.20 + 100k x 20 = 2.4 + 2.0 + 2.0 + 2.0 = $8.40
+const cacheDay = foldToday([{ ...stat(today, 600, 1_000_000, 100_000, "claude-opus-5-5"),
+  tokensCacheRead: 10_000_000n, tokensCacheWrite: 400_000 }], [], today);
+eq("cache reads are NOT tokens", cacheDay.tokens, 1_100_000);
+eq("cache reads are reported beside them (BigInt column read)", cacheDay.cachedTokens, 10_000_000);
+eq("cache reads/writes are priced at their own rates", cacheDay.estimatedUsd, 8.4);
+eq("byModel keys stay the raw model id", Object.keys(cacheDay.byModel), ["claude-opus-5-5"]);
+// No verified cache rate: reads add nothing, writes stay ordinary input - never a guess.
+const unratedCache = foldToday([{ ...stat(today, 0, 1_000_000, 0, "claude-opus-4-8"),
+  tokensCacheRead: 50_000_000, tokensCacheWrite: 1_000_000 }], [], today);
+eq("an unverified cache rate is not guessed", unratedCache.estimatedUsd, 5);
+eq("a tokenless day has no cached count either",
+  foldToday([], [session(at(10 * H), at(11 * H), 0, 0, null, "quadcode")], today).cachedTokens, null);
+eq("cache writes above input make the fold unavailable",
+  foldToday([{ ...stat(today, 0, 10, 0), tokensCacheWrite: 11 }], [], today).estimatedUsd, null);
+
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

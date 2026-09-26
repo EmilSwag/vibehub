@@ -151,6 +151,9 @@ export const MAX_USAGE_ENTRIES = 30;
 // request-schema surface into the fixtures-only harness that pins them.
 export { TOKENLESS_TOOLS, isTokenlessTool, TOKENLESS_USAGE_MESSAGE } from "./tools";
 
+const cacheCountSchema = z.number().int().nonnegative().optional();
+const CACHE_WRITE_MESSAGE = "cache writes are part of input and cannot exceed it";
+
 export const usageEntrySchema = z.object({
   tool: z.string().min(1).max(60),
   model: modelSchema,
@@ -165,9 +168,17 @@ export const usageEntrySchema = z.object({
   estimated: z.boolean().optional(),
   tokensInputDelta: z.number().int().nonnegative(),
   tokensOutputDelta: z.number().int().nonnegative(),
+  // QA fix R2 (meta/plans/vibehub-qa-fix.md): `tokensInputDelta` is FRESH input. Cache
+  // reads ride here, never in it; cache writes are a SUBSET of it, sent for pricing.
+  // Optional both ways: an older tracker omits them, an older server strips them.
+  tokensCacheReadDelta: cacheCountSchema,
+  tokensCacheWriteDelta: cacheCountSchema,
 }).refine((entry) => !isTokenlessTool(entry.tool), {
   message: TOKENLESS_USAGE_MESSAGE,
   path: ["tool"],
+}).refine((entry) => (entry.tokensCacheWriteDelta ?? 0) <= entry.tokensInputDelta, {
+  message: CACHE_WRITE_MESSAGE,
+  path: ["tokensCacheWriteDelta"],
 });
 export type UsageEntryInput = z.infer<typeof usageEntrySchema>;
 
@@ -181,6 +192,8 @@ export const heartbeatSchema = z.object({
   model: modelSchema,
   tokensInputDelta: z.number().int().nonnegative().optional(),
   tokensOutputDelta: z.number().int().nonnegative().optional(),
+  tokensCacheReadDelta: cacheCountSchema,
+  tokensCacheWriteDelta: cacheCountSchema,
   occurredAt: z.string().datetime(),
   repoAlias: z.string().min(1).max(200).optional(),
   usage: z.array(usageEntrySchema).max(MAX_USAGE_ENTRIES).optional(),
@@ -207,8 +220,12 @@ export const heartbeatSchema = z.object({
   // shipped tracker, current or legacy, can produce the shape this refuses. Absent and
   // explicit-zero deltas stay legal (see `claimsTokens`), so a legacy body that always
   // spells the fields keeps its presence, its session and its time.
-  if (!refusesTokenClaim(body.tool, body.tokensInputDelta, body.tokensOutputDelta)) return;
-  for (const path of ["tokensInputDelta", "tokensOutputDelta"] as const) {
+  if ((body.tokensCacheWriteDelta ?? 0) > (body.tokensInputDelta ?? 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tokensCacheWriteDelta"], message: CACHE_WRITE_MESSAGE });
+  }
+  if (!refusesTokenClaim(body.tool, body.tokensInputDelta, body.tokensOutputDelta) &&
+      !refusesTokenClaim(body.tool, body.tokensCacheReadDelta, body.tokensCacheWriteDelta)) return;
+  for (const path of ["tokensInputDelta", "tokensOutputDelta", "tokensCacheReadDelta", "tokensCacheWriteDelta"] as const) {
     if ((body[path] ?? 0) > 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message: TOKENLESS_USAGE_MESSAGE });
   }
 });

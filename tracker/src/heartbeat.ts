@@ -1,8 +1,8 @@
 import { attestedToolsFor, configFingerprint, heartbeatIntervalMs, idleThresholdMs, projectConfig, readConfig } from "./config";
-import { Detector } from "./detector";
-import type { SeenSource } from "./detector";
+import { Detector, mergeUsage } from "./detector";
+import type { DetectionUsage, SeenSource } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
-import { eventTime, isSupportedTool, localTzOffsetMinutes, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
+import { eventTime, isSupportedTool, isTokenlessTool, localTzOffsetMinutes, MAX_RECORD_AGE_MS, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
 import type { SendResult } from "./queue";
 import { markAuthRejected, writeOfflineStatus, writeStatus } from "./statusFile";
 import { clearStopRequest, isStopRequested } from "./stopRequest";
@@ -20,13 +20,32 @@ interface ActiveSession {
 export const MODEL_SWITCH_POLLS = 2;
 const STOP_REQUEST_POLL_MS = 1000;
 const IN_FLIGHT_GRACE_MS = 3000;
+/**
+ * A VPN/proxy that can't reach upstream drops a TLS handshake now and then (measured on a
+ * live Mac: 1 in 5-10 fresh connections, failing in ~5 s). A request that never reached the
+ * server gets two more tries before anything is reported. Only those: they fail fast and
+ * can't double count, so a tick stays well inside the watchdog.
+ */
+export const CONNECTION_RETRY_DELAYS_MS: readonly number[] = [1000, 3000];
+/**
+ * One failed tick right after a good one is a blink, not a disconnect: the last connected
+ * snapshot is kept. Two ticks (30 s each) is the limit, safely under the app's 90 s staleness.
+ */
+export const CONNECTED_GRACE_MS = 60_000;
 
 export interface LoopState {
   activeSession: ActiveSession | null;
   lastActivityAt: number | null;
   detector: Detector;
-  /** Compatibility field: never buffers hidden, offline or cross-tick usage. */
+  /**
+   * QA fix (R3): measured usage that has been READ but not yet delivered - a heartbeat
+   * that failed, a tick the watchdog cancelled, or tokens read late with no live
+   * activity to ride on. It goes out with the next heartbeat instead of being lost.
+   * Bounded (MAX_USAGE_ENTRIES keys, MAX_RECORD_AGE_MS old) and bound to the config it
+   * was read under: any config/account change or auth rejection drops it.
+   */
   pendingUsage: Map<string, HeartbeatUsage>;
+  pendingSince: number | null;
   sourcesSeen: Map<string, SeenSource>;
   modelChallenger: { model: string; polls: number } | null;
   activeWindowMs: number;
@@ -37,6 +56,10 @@ export interface LoopState {
   binding: string | null;
   requestAbort: AbortController | null;
   loadConfig: () => TrackerConfig | null;
+  /** When a connected snapshot was last written; a transient failure inside the grace keeps it. */
+  lastConnectedAt: number | null;
+  /** Retry spacing for dropped requests; injectable so tests don't sleep. */
+  retryDelaysMs: readonly number[];
 }
 
 export function createLoopState(config?: TrackerConfig): LoopState {
@@ -45,10 +68,11 @@ export function createLoopState(config?: TrackerConfig): LoopState {
   const attestedTools = valid ? attestedToolsFor(valid) : [];
   return { activeSession: null, lastActivityAt: null,
     detector: new Detector(activeWindowMs, undefined, attestedTools),
-    pendingUsage: new Map(), sourcesSeen: new Map(), modelChallenger: null,
+    pendingUsage: new Map(), pendingSince: null, sourcesSeen: new Map(), modelChallenger: null,
     activeWindowMs, attestedTools, stopping: false, epoch: 0,
     binding: valid ? configFingerprint(valid) : null,
-    requestAbort: null, loadConfig: readConfig };
+    requestAbort: null, loadConfig: readConfig,
+    lastConnectedAt: null, retryDelaysMs: CONNECTION_RETRY_DELAYS_MS };
 }
 
 /** Discard evidence on consent/config/account changes, cancellation or failed verification. */
@@ -60,8 +84,11 @@ export function clearCollectedState(state: LoopState, config?: TrackerConfig): v
   state.activeSession = null;
   state.lastActivityAt = null;
   state.pendingUsage.clear();
+  state.pendingSince = null;
   state.sourcesSeen.clear();
   state.modelChallenger = null;
+  // A connected snapshot from the old config/account proves nothing about the new one.
+  state.lastConnectedAt = null;
   state.binding = config ? configFingerprint(config) : null;
   // Withdrawing consent must take the receiver away, not merely stop using it, so a
   // detector built under the old setting is replaced rather than reused.
@@ -77,11 +104,75 @@ export function clearCollectedState(state: LoopState, config?: TrackerConfig): v
   }
 }
 
+/**
+ * QA fix (R3): a TRANSIENT failure (network, 5xx, a stuck tick) ends the session view
+ * but keeps what was read - the log cursors and the undelivered usage - so the next
+ * successful tick delivers it. Before this every hiccup re-primed every log at EOF and
+ * the tokens written meanwhile were never counted. Credentials, consent and config
+ * changes still go through clearCollectedState, which forgets everything.
+ */
+export function softReset(state: LoopState): void {
+  state.epoch += 1;
+  state.requestAbort?.abort();
+  state.requestAbort = null;
+  state.activeSession = null;
+  state.lastActivityAt = null;
+  state.sourcesSeen.clear();
+  state.modelChallenger = null;
+}
+
+/** Keeps undelivered usage for the next heartbeat, within the bounds on LoopState. */
+export function stashUsage(state: LoopState, usage: readonly DetectionUsage[], now = Date.now()): void {
+  if (state.pendingSince !== null && now - state.pendingSince > MAX_RECORD_AGE_MS) {
+    state.pendingUsage.clear();
+    state.pendingSince = null;
+  }
+  for (const u of usage) {
+    if (mergeUsage(state.pendingUsage as Map<string, DetectionUsage>, u) && state.pendingSince === null) state.pendingSince = now;
+  }
+}
+
+/** Pending usage plus this tick's, as one bounded list; what does not fit stays pending. */
+function withPending(state: LoopState, usage: readonly DetectionUsage[]): { send: DetectionUsage[]; rest: DetectionUsage[] } {
+  const merged = new Map<string, DetectionUsage>();
+  const rest: DetectionUsage[] = [];
+  for (const u of [...usage, ...state.pendingUsage.values()]) if (!mergeUsage(merged, u)) rest.push(u);
+  return { send: [...merged.values()], rest };
+}
+
 function sameConfig(config: TrackerConfig, load: () => TrackerConfig | null): boolean {
   try {
     const current = projectConfig(load());
     return current !== null && configFingerprint(current) === configFingerprint(config);
   } catch { return false; }
+}
+
+const PRE_SEND_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+
+/**
+ * True only when fetch failed before the request could reach the server: DNS, TCP connect
+ * or the TLS handshake. Such a request can be re-sent without any risk of double counting;
+ * anything else (a reset mid-response, a timeout after sending) might already be counted.
+ */
+export function failedBeforeSend(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  for (let e = error; e && typeof e === "object" && !seen.has(e); e = (e as { cause?: unknown }).cause) {
+    seen.add(e);
+    const code = String((e as { code?: unknown }).code ?? "");
+    const message = String((e as { message?: unknown }).message ?? "");
+    if (PRE_SEND_CODES.has(code) || /before secure TLS connection was established/i.test(message)) return true;
+  }
+  return false;
+}
+
+/** Sleeps `ms`; false when the signal aborted first. */
+function pause(ms: number, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(false); return; }
+    const onAbort = (): void => { clearTimeout(timer); resolve(false); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(true); }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** Only the already-configured origin and existing tracker routes; no redirects. */
@@ -112,8 +203,14 @@ async function requestTracker(
         ...(valid && !retiring && at !== null ? { connectionLastSeenAt: new Date(at).toISOString() } : {}) };
     }
     try { await res.body?.cancel(); } catch {}
-    return { ok: !controller.signal.aborted && res.ok, authRejected };
-  } catch { return { ok: false, authRejected: false }; }
+    const refused = res.status === 400 || res.status === 413 || res.status === 422;
+    return { ok: !controller.signal.aborted && res.ok, authRejected, ...(refused ? { refused } : {}),
+      ...(res.status >= 500 ? { transient: true } : {}) };
+  } catch (error) {
+    // The caller cancelling is not a network problem; our own 15 s timeout is.
+    if (signal?.aborted) return { ok: false, authRejected: false };
+    return { ok: false, authRejected: false, transient: true, ...(failedBeforeSend(error) ? { preSend: true } : {}) };
+  }
   finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
 }
 
@@ -122,12 +219,20 @@ export async function postHeartbeat(
   apiUrl: string, deviceToken: string, payload: HeartbeatPayload, signal?: AbortSignal
 ): Promise<SendResult> {
   const safe = projectHeartbeat(payload);
-  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: false, authRejected: false };
+  // A body our own boundary refuses is refused on every retry, same as a server 400.
+  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: false, authRejected: false, refused: true };
 }
 
 /** Connection-v1 transport receipt, NOT login verification or a fake ACTIVE event. */
-export function verifyConnection(config: TrackerConfig, signal?: AbortSignal): Promise<SendResult> {
-  return requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+export async function verifyConnection(
+  config: TrackerConfig, signal?: AbortSignal, retryDelaysMs: readonly number[] = CONNECTION_RETRY_DELAYS_MS
+): Promise<SendResult> {
+  let result = await requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+  for (const ms of retryDelaysMs) {
+    if (result.ok || !result.preSend || !await pause(ms, signal)) break;
+    result = await requestTracker(config.apiUrl, config.deviceToken, undefined, signal);
+  }
+  return result;
 }
 
 /** Best-effort bodyless clean stop; a failed receipt expires under the server lease. */
@@ -170,6 +275,7 @@ function buildTools(state: LoopState, config: TrackerConfig): HeartbeatTool[] {
 function writeSnapshot(state: LoopState, config: TrackerConfig | undefined, connected: boolean, rejected = false, receipt?: string): void {
   const now = new Date().toISOString();
   const session = connected ? state.activeSession : null;
+  if (connected) state.lastConnectedAt = Date.now();
   writeStatus({ configFingerprint: config ? configFingerprint(config) : undefined, connected,
     attestedReceiver: config ? attestedToolsFor(config).length > 0 : false,
     lastConnectionCheckAt: now, lastConnectionSeenAt: connected ? receipt : undefined,
@@ -201,32 +307,67 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     writeSnapshot(state, undefined, false);
     return false;
   };
-  const failed = (result: SendResult): void => {
-    clearCollectedState(state, safe);
-    writeSnapshot(state, safe, false, result.authRejected);
+  const binding = state.binding;
+  // Usage read this tick and not yet delivered. Whatever way the tick ends short of a
+  // delivered heartbeat, it is stashed rather than dropped - unless the config it was
+  // read under is gone (then it belongs to nobody and is forgotten).
+  let unsent: DetectionUsage[] = [];
+  const keepUnsent = (): void => {
+    if (unsent.length && !state.stopping && state.binding === binding && binding !== null) stashUsage(state, unsent);
+    unsent = [];
+  };
+  const failed = (result: SendResult, carriedUsage = false): void => {
+    // The network blinked right after a good tick: keep the last connected snapshot instead
+    // of flashing "offline". Usage handling below is unchanged, so nothing is lost either way.
+    const blink = result.transient === true && !result.authRejected && state.lastConnectedAt !== null &&
+      Date.now() - state.lastConnectedAt < CONNECTED_GRACE_MS;
+    if (result.authRejected) {
+      unsent = [];
+      clearCollectedState(state, safe);
+    } else if (result.refused && carriedUsage) {
+      // A refused body is refused again on every retry: stashing its usage would jam
+      // the tracker offline for good. Drop that usage; the log cursors stay put.
+      unsent = [];
+      state.pendingUsage.clear();
+      state.pendingSince = null;
+      console.warn("tracker: server refused a heartbeat; its usage was dropped");
+      softReset(state);
+    } else {
+      keepUnsent();
+      softReset(state);
+    }
+    if (blink) console.warn("tracker: network blinked; retrying next tick");
+    else writeSnapshot(state, safe, false, result.authRejected);
   };
   const send = async (payload: HeartbeatPayload): Promise<boolean> => {
     if (!allowed()) return false;
-    const result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    let result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    // Only a request that provably never reached the server is re-sent: no double counting.
+    for (const ms of state.retryDelaysMs) {
+      if (result.ok || !result.preSend || !allowed() || !await pause(ms, controller.signal)) break;
+      result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
+    }
     if (!allowed()) return false;
-    if (!result.ok) { failed(result); return false; }
+    if (!result.ok) { failed(result, payload.eventType === "heartbeat"); return false; }
     return true;
   };
   try {
     // No source reads with invalid/revoked credentials or unavailable verification.
-    const connection = await verifyConnection(safe, controller.signal);
+    const connection = await verifyConnection(safe, controller.signal, state.retryDelaysMs);
     if (!allowed()) return;
     if (!connection.ok) { failed(connection); return; }
     const current = state.activeSession ? { tool: state.activeSession.tool, cwd: null, projectHint: state.activeSession.projectHint } : undefined;
     const detection = await state.detector.detect(Date.now(), current,
       (o) => resolveProjectAlias(null, safe, o.projectHint) !== null, controller.signal);
+    unsent = [...(detection?.usage ?? []), ...state.detector.takeLateUsage()];
     if (!allowed()) return;
-    state.pendingUsage.clear();
     state.sourcesSeen.clear();
     state.modelChallenger = null;
     const now = new Date().toISOString();
     const alias = detection ? resolveProjectAlias(null, safe, detection.projectHint) : null;
     if (!detection || !detection.active || alias === null || !isSupportedTool(detection.tool)) {
+      // No live activity to ride on: anything read (late usage) waits for the next beat.
+      keepUnsent();
       if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
       state.activeSession = null;
       state.lastActivityAt = null;
@@ -245,13 +386,30 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
       if (!await send(sessionEvent("session_start", session, now))) return;
       state.activeSession = session;
     }
+    // Pending usage rides along. Not on a tokenless primary, though: the server refuses
+    // counts on its legacy sums for one, so they wait for a measured primary instead.
+    let usage: DetectionUsage[] = [];
+    if (isTokenlessTool(detection.tool)) keepUnsent();
+    else {
+      const { send: outgoing, rest } = withPending(state, unsent);
+      state.pendingUsage.clear();
+      state.pendingSince = null;
+      if (rest.length) stashUsage(state, rest);
+      // From here `unsent` is everything in flight: a failed or abandoned send stashes it.
+      unsent = usage = outgoing;
+    }
     if (!await send({ eventType: "heartbeat", projectAlias: alias, tool: detection.tool, model,
       tokensInputDelta: detection.tokensInputDelta, tokensOutputDelta: detection.tokensOutputDelta,
-      usage: detection.usage, tools: buildTools(state, safe), tzOffsetMinutes: localTzOffsetMinutes(),
+      usage, tools: buildTools(state, safe), tzOffsetMinutes: localTzOffsetMinutes(),
       occurredAt: now })) return;
+    unsent = [];
     state.lastActivityAt = detection.lastActivityAt;
     if (allowed()) writeSnapshot(state, safe, true, false, connection.connectionLastSeenAt);
-  } finally { if (state.requestAbort === controller) state.requestAbort = null; }
+  } finally {
+    // A tick that ended early (cancelled, config re-checked, stopped) keeps what it read.
+    keepUnsent();
+    if (state.requestAbort === controller) state.requestAbort = null;
+  }
 }
 
 function settleWithin(promise: Promise<unknown>, ms: number): Promise<void> {
@@ -332,7 +490,8 @@ export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = 
       const stuckFor = Date.now() - inFlight.startedAt;
       if (stuckFor <= watchdogMs) return;
       console.warn(`tracker: tick #${inFlight.seq} exceeded watchdog ${watchdogMs} ms; cancelling it`);
-      clearCollectedState(state, config);
+      // Transient by definition: keep the log cursors and undelivered usage (QA fix R3).
+      softReset(state);
       inFlight = null;
     }
     const startedAt = Date.now();

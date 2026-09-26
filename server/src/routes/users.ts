@@ -11,14 +11,17 @@ import { asyncHandler, HttpError } from "../lib/http-error";
 import { fromPayloadValue } from "../lib/json-field";
 import { computeLevel, computeLevels } from "../lib/level";
 import { detectIcon, detectLabel } from "../lib/links";
-import { normalizeModel, presenceFor, utcDay } from "../lib/sessions";
+import { localDay, localDayWindow, openSessionToday } from "../lib/local-day";
+import { normalizeModel, presenceFor } from "../lib/sessions";
 import {
   createTrackerTokenSchema,
+  isTokenlessTool,
   patchMeSchema,
   putLinksSchema,
   rolesToCsv,
   suggestedUsersQuerySchema,
 } from "../lib/schemas";
+import { estimateUsd } from "../lib/token-pricing";
 import { toMeUser, toPublicLink, toPublicUser } from "../lib/serializers";
 import { latestTrackerLastSeenAt, trackerConnections } from "../lib/trackerConnection";
 import { requireAuth } from "../middleware/auth";
@@ -372,6 +375,8 @@ interface TrackerSource {
   lastSeenAt: Date;
   tokensToday: number;
   tokens7d: number;
+  /** QA fix R2: cache reads today - secondary, never part of tokensToday. */
+  cachedTokensToday: number;
   activeSecondsToday: number;
 }
 
@@ -381,13 +386,23 @@ router.get(
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const now = new Date();
-    const today = utcDay(now);
-    // Aligned to UTC days so DailyStat rows (per UTC day), Sessions and events all
-    // cover the same window: today plus the six days before it.
+    // The freshest session is both "last seen" and the user's current zone: "today" is
+    // their LOCAL day (lib/local-day.ts, null tz = UTC) - the same day /tracker/me reads.
+    const latestHeartbeat = await prisma.session.findFirst({
+      where: { userId },
+      orderBy: { lastHeartbeatAt: "desc" },
+      select: { lastHeartbeatAt: true, tzOffsetMinutes: true },
+    });
+    const tz = latestHeartbeat?.tzOffsetMinutes ?? null;
+    const today = localDay(now, tz);
+    // Aligned to local days so DailyStat rows (keyed by local date), Sessions and events
+    // all cover the same window: today plus the six days before it. `since7d` is the
+    // DailyStat key; `since7dAt` the real instant that local day began.
     const since7d = new Date(today.getTime() - (SOURCE_WINDOW_DAYS - 1) * 86_400_000);
+    const since7dAt = new Date(localDayWindow(since7d, tz).start);
     const since30d = new Date(now.getTime() - TOOLS_WINDOW_MS);
 
-    const [tokens, sessions, latestHeartbeat, dailyStats, events, presence, staleToken] = await Promise.all([
+    const [tokens, sessions, dailyStats, events, presence, staleToken] = await Promise.all([
       prisma.trackerToken.findMany({
         where: { userId, revokedAt: null },
         select: { id: true, label: true, lastUsedAt: true, createdAt: true },
@@ -399,14 +414,9 @@ router.get(
         where: { userId, lastHeartbeatAt: { gte: since30d } },
         orderBy: { lastHeartbeatAt: "desc" },
       }),
-      prisma.session.findFirst({
-        where: { userId },
-        orderBy: { lastHeartbeatAt: "desc" },
-        select: { lastHeartbeatAt: true },
-      }),
       prisma.dailyStat.findMany({ where: { userId, date: { gte: since7d } } }),
       prisma.activityEvent.findMany({
-        where: { userId, type: { in: ["HEARTBEAT", "SESSION_START"] }, occurredAt: { gte: since7d } },
+        where: { userId, type: { in: ["HEARTBEAT", "SESSION_START"] }, occurredAt: { gte: since7dAt } },
         orderBy: { occurredAt: "desc" },
         take: SOURCE_EVENT_LIMIT,
         select: { occurredAt: true, payload: true },
@@ -429,11 +439,22 @@ router.get(
     );
 
     const sources = new Map<string, TrackerSource>();
+    // Today's exact input/output/cache-write split per source, kept off the wire: it prices
+    // `estimatedUsd` below, so the web shows the same ≈$ as the Mac app (/tracker/me)
+    // instead of guessing an input/output split from the fresh total.
+    const splits = new Map<TrackerSource, { input: number; output: number; cacheWrite: number }>();
+    const addToday = (source: TrackerSource, input: number, output: number, cacheWrite: number): void => {
+      const split = splits.get(source) ?? { input: 0, output: 0, cacheWrite: 0 };
+      split.input += input;
+      split.output += output;
+      split.cacheWrite += cacheWrite;
+      splits.set(source, split);
+    };
     const seen = (tool: string, model: string | null, at: Date): TrackerSource => {
       const key = `${tool}\0${model ?? ""}`;
       const existing = sources.get(key);
       if (!existing) {
-        const created: TrackerSource = { tool, model, lastSeenAt: at, tokensToday: 0, tokens7d: 0, activeSecondsToday: 0 };
+        const created: TrackerSource = { tool, model, lastSeenAt: at, tokensToday: 0, tokens7d: 0, cachedTokensToday: 0, activeSecondsToday: 0 };
         sources.set(key, created);
         return created;
       }
@@ -449,23 +470,28 @@ router.get(
       source.tokens7d += tokensTotal;
       if (row.date.getTime() === today.getTime()) {
         source.tokensToday += tokensTotal;
+        source.cachedTokensToday += Number(row.tokensCacheRead);
         source.activeSecondsToday += row.activeSeconds;
+        addToday(source, row.tokensInput, row.tokensOutput, row.tokensCacheWrite);
       }
     }
 
     // (2) Sessions: any recent one pins lastSeenAt; only OPEN ones still hold tokens
-    // and elapsed time that haven't reached DailyStat yet (bucketed by start day, the
-    // same day foldIntoDailyStat will use when it closes).
+    // and elapsed time that haven't reached DailyStat yet.
     for (const session of sessions) {
-      if (session.lastHeartbeatAt < since7d) continue;
+      if (session.lastHeartbeatAt < since7dAt) continue;
       const source = seen(session.tool, normalizeModel(session.model), session.lastHeartbeatAt);
       if (session.status === "ENDED") continue;
       const tokensTotal = session.tokensInput + session.tokensOutput;
-      const elapsed = Math.max(0, Math.round((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 1000));
       source.tokens7d += tokensTotal;
-      if (utcDay(session.startedAt).getTime() === today.getTime()) {
+      // "today window": today's part of an open session, by the same rule /tracker/me
+      // uses (lib/local-day.ts openSessionToday); its legacy tokens stay on its start day.
+      const part = openSessionToday(session, today);
+      source.activeSecondsToday += part.seconds;
+      if (part.startedToday) {
         source.tokensToday += tokensTotal;
-        source.activeSecondsToday += elapsed;
+        source.cachedTokensToday += Number(session.tokensCacheRead);
+        addToday(source, session.tokensInput, session.tokensOutput, session.tokensCacheWrite);
       }
     }
 
@@ -498,7 +524,16 @@ router.get(
         tools: presence.tools,
         lastSeenAt: presence.lastSeenAt,
       },
-      sources: [...sources.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()),
+      sources: [...sources.values()]
+        .sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime())
+        .map((source) => {
+          const split = splits.get(source) ?? { input: 0, output: 0, cacheWrite: 0 };
+          // null = no verified price (or a tool that reports no tokens): the web shows "≈ $—".
+          const estimatedUsd = isTokenlessTool(source.tool) && source.tokensToday <= 0
+            ? null
+            : estimateUsd(source.model, split.input, split.output, source.cachedTokensToday, split.cacheWrite);
+          return { ...source, estimatedUsd };
+        }),
       devices: tokens.map((t) => ({
         id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt,
         ...trackerConnections.snapshot(userId, t.id),

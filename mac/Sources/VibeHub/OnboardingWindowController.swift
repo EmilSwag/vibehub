@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Owns the standalone, centred first-run window (`OnboardingWizard`) — a real
-/// ~460x520 `NSWindow`, not embedded in the 320pt menu-bar popover, so first run gets
+/// 420x400 `NSWindow`, not embedded in the 320pt menu-bar popover, so first run gets
 /// room to breathe. Shown once at launch while `AppSettings.hasCompletedOnboarding` is
 /// false; finishing the wizard, or just closing the window, both mark onboarding done.
 ///
@@ -16,13 +16,16 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private let store: StatusStore
     private let tracker: TrackerManager
     private var window: NSWindow?
+    /// After "You're live": pulse the island (notch Macs) and point at the menu bar.
+    private let onLive: () -> Void
 
-    private static let size = CGSize(width: 460, height: 520)
+    private static let size = CGSize(width: 420, height: 400)
 
-    init(settings: AppSettings, store: StatusStore, tracker: TrackerManager) {
+    init(settings: AppSettings, store: StatusStore, tracker: TrackerManager, onLive: @escaping () -> Void = {}) {
         self.settings = settings
         self.store = store
         self.tracker = tracker
+        self.onLive = onLive
         super.init()
     }
 
@@ -57,14 +60,15 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             store: store,
             settings: settings,
             tracker: tracker,
-            onFinished: { [weak self] in self?.finish() }
+            onFinished: { [weak self] live in self?.finish(live: live) }
         ))
         return window
     }
 
-    private func finish() {
+    private func finish(live: Bool) {
         settings.hasCompletedOnboarding = true
         window?.close()
+        if live { onLive() }
     }
 
     /// Closing the window any other way (the traffic-light button) is still "don't

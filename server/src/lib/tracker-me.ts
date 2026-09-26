@@ -1,4 +1,5 @@
 import type { PresenceSnapshot, PresenceStatus } from "./sessions";
+import { openSessionToday } from "./local-day";
 import { foldEstimatedUsd, type PricedUsage } from "./token-pricing";
 import { isTokenlessTool } from "./tools";
 
@@ -81,6 +82,11 @@ export interface TrackerMePayload {
     estimatedUsd: number | null;
     /** The same amount split per model id, priced models only — `{}` when nothing is priced. */
     byModel: Record<string, number>;
+    /**
+     * QA fix R2: cache reads today — re-used context, a SECONDARY number shown beside
+     * `tokens` and never added to it. `null` exactly when `tokens` is null.
+     */
+    cachedTokens: number | null;
   };
   tracker: {
     connected: boolean;
@@ -119,7 +125,7 @@ export interface TrackerMeInput {
   user: { id: string; username: string; displayName: string | null; avatarUrl: string | null };
   level: number;
   presence: PresenceSnapshot;
-  today: { activeSeconds: number; tokens: number | null; sessionStartedAt: Date | null; estimatedUsd: number | null; byModel: Record<string, number> };
+  today: TodayFold;
   /**
    * Latest actual AI heartbeat or accepted connection receipt, never token use.
    * `/tracker/verify` and this route's middleware update `TrackerToken.lastUsedAt`;
@@ -155,6 +161,7 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
       sessionStartedAt: iso(input.today.sessionStartedAt),
       estimatedUsd: input.today.estimatedUsd,
       byModel: input.today.byModel,
+      cachedTokens: input.today.cachedTokens,
     },
     tracker: {
       connected: input.presence.status !== "offline",
@@ -179,10 +186,11 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
 
 /**
  * Today's active seconds + tokens, folded the same way `GET /users/me/tracker` does it
- * (routes/users.ts): closed work lives in DailyStat rows dated today, and sessions that
- * are still open carry time/tokens that haven't been folded yet. Open sessions are
- * bucketed by their *start* day — the same day `foldIntoDailyStat` will use when they
- * close — so a session that began yesterday and is still running does not land on today.
+ * (routes/users.ts): closed work lives in DailyStat rows keyed `today`, and sessions that
+ * are still open carry time/tokens that haven't been folded yet. `today` is the user's
+ * LOCAL day key (lib/local-day.ts, null tz = UTC); an open session contributes its
+ * seconds inside that day and, if it started that day, its legacy tokens — the same
+ * split `foldIntoDailyStat` books when it closes.
  *
  * Elapsed is measured to `lastHeartbeatAt`, never to `now`: a tracker that died mid
  * session must not keep accruing time.
@@ -192,13 +200,27 @@ export function buildTrackerMePayload(input: TrackerMeInput): TrackerMePayload {
  * `"unknown"` bucket literal and open sessions a `null` model for presence-only tools,
  * and neither has a price, so both simply make the estimate partial (or null).
  */
+export interface TodayFold {
+  activeSeconds: number;
+  tokens: number | null;
+  cachedTokens: number | null;
+  sessionStartedAt: Date | null;
+  estimatedUsd: number | null;
+  byModel: Record<string, number>;
+}
+
+/** Cache counters as Prisma hands them back (BigInt reads) or as fixtures spell them. */
+type CacheCount = number | bigint | null | undefined;
+const cacheCount = (value: CacheCount): number => (typeof value === "bigint" ? Number(value) : value ?? 0);
+
 export function foldToday(
-  dailyStats: { date: Date; model: string; tool?: string | null; tokensInput: number; tokensOutput: number; activeSeconds: number }[],
-  openSessions: { startedAt: Date; lastHeartbeatAt: Date; tool?: string | null; model: string | null; tokensInput: number; tokensOutput: number }[],
+  dailyStats: { date: Date; model: string; tool?: string | null; tokensInput: number; tokensOutput: number; tokensCacheRead?: CacheCount; tokensCacheWrite?: CacheCount; activeSeconds: number }[],
+  openSessions: { startedAt: Date; lastHeartbeatAt: Date; tzOffsetMinutes?: number | null; tool?: string | null; model: string | null; tokensInput: number; tokensOutput: number; tokensCacheRead?: CacheCount; tokensCacheWrite?: CacheCount }[],
   today: Date
-): { activeSeconds: number; tokens: number | null; sessionStartedAt: Date | null; estimatedUsd: number | null; byModel: Record<string, number> } {
+): TodayFold {
   let activeSeconds = 0;
   let tokens = 0;
+  let cachedTokens = 0;
   // A measured source is one that actually reports counts: a DailyStat row or an open
   // session whose tool is not tokenless. Its presence is what separates a real 0 from an
   // unknown. The test is the tool in both cases, never the shape of the row - a closed
@@ -223,14 +245,21 @@ export function foldToday(
     }
     hasMeasuredSource = true;
     tokens += row.tokensInput + row.tokensOutput;
-    priced.push({ model: row.model, tokensInput: row.tokensInput, tokensOutput: row.tokensOutput });
+    cachedTokens += cacheCount(row.tokensCacheRead);
+    priced.push({ model: row.model, tokensInput: row.tokensInput, tokensOutput: row.tokensOutput,
+      tokensCacheRead: cacheCount(row.tokensCacheRead), tokensCacheWrite: cacheCount(row.tokensCacheWrite) });
   }
 
   // Newest first, so the freshest open session is the one the menu bar ticks from.
   const sorted = [...openSessions].sort((a, b) => b.lastHeartbeatAt.getTime() - a.lastHeartbeatAt.getTime());
   for (const session of sorted) {
-    if (utcMidnight(session.startedAt).getTime() !== today.getTime()) continue;
-    activeSeconds += Math.max(0, Math.round((session.lastHeartbeatAt.getTime() - session.startedAt.getTime()) / 1000));
+    // "today window": `today` is the user's LOCAL day key (lib/local-day.ts). An open
+    // session counts the part of it inside that day - its own zone draws the edges,
+    // exactly where closeSession will split it - not all-or-nothing by its start day.
+    const part = openSessionToday(session, today);
+    if (!part.overlaps) continue;
+    const startedToday = part.startedToday;
+    activeSeconds += part.seconds;
     if (isTokenlessTool(session.tool)) {
       // A tokenless tool measured nothing, so it contributes no tokens AND no price.
       // It is pushed as an unpriceable row rather than skipped: that makes the fold
@@ -243,8 +272,13 @@ export function foldToday(
       continue;
     }
     hasMeasuredSource = true;
+    // Tokens a legacy tracker put on the Session cannot be split by time; they belong
+    // to the day it started, exactly where closeSession will fold them.
+    if (!startedToday) continue;
     tokens += session.tokensInput + session.tokensOutput;
-    priced.push({ model: session.model, tokensInput: session.tokensInput, tokensOutput: session.tokensOutput });
+    cachedTokens += cacheCount(session.tokensCacheRead);
+    priced.push({ model: session.model, tokensInput: session.tokensInput, tokensOutput: session.tokensOutput,
+      tokensCacheRead: cacheCount(session.tokensCacheRead), tokensCacheWrite: cacheCount(session.tokensCacheWrite) });
   }
 
   const cost = foldEstimatedUsd(priced);
@@ -252,11 +286,14 @@ export function foldToday(
   // so the count is unknown. A day with ANY measured source keeps its real number -
   // including a genuine 0 from a measuring tool that simply used nothing - and an
   // empty day stays 0, because there is nothing to be unknown about.
-  const measured = hasMeasuredSource || !hasTokenlessSource ? tokens : null;
-  return { activeSeconds, tokens: measured, sessionStartedAt: sorted[0]?.startedAt ?? null, estimatedUsd: cost.estimatedUsd, byModel: cost.byModel };
+  const measured = hasMeasuredSource || !hasTokenlessSource;
+  return {
+    activeSeconds,
+    tokens: measured ? tokens : null,
+    cachedTokens: measured ? cachedTokens : null,
+    sessionStartedAt: sorted[0]?.startedAt ?? null,
+    estimatedUsd: cost.estimatedUsd,
+    byModel: cost.byModel,
+  };
 }
 
-/** Local mirror of `utcDay()` so this module stays free of the db-importing sessions.ts. */
-function utcMidnight(value: Date): Date {
-  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
-}

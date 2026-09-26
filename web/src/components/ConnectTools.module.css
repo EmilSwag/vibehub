@@ -376,3 +376,12 @@
 .cmdCopy {
   width: 100%;
 }
+
+/* The not-connected card's data story sits one click away (QA R6). */
+details.privacy summary {
+  cursor: pointer;
+  width: fit-content;
+}
+details.privacy p {
+  margin: 6px 0 0;
+}

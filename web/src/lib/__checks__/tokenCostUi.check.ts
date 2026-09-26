@@ -59,8 +59,12 @@ ok("Profile still renders RecentModels", tags(profile, "RecentModels").length ==
 ok("Profile still renders LevelBadge", tags(profile, "LevelBadge").length === 1);
 ok("no unaccompanied inline ProfilePage token counter", calls(profile, "formatTokens").length === 0);
 
-const statsCalls = calls(stats, "estimateTokenCost");
-ok("Stats estimate uses the SAME response's model rows and total", statsCalls.length === 1 && statsCalls[0].arguments.map((a) => a.getText()).join("|") === "stats?.byModel|stats?.totalTokens");
+// QA follow-up: server ≈$ first (preferServerCost), from the SAME response's rows,
+// total and totalEstimatedUsd; tokenless rows are never priced.
+const statsCalls = calls(stats, "preferServerCost");
+ok("Stats estimate uses the SAME response's model rows, total and server ≈$", statsCalls.length === 1 &&
+  statsCalls[0].arguments.map((a) => a.getText()).join("|") === "stats?.byModel.filter((row) => !isTokenlessTool(row.tool))|stats?.totalTokens|stats?.totalEstimatedUsd");
+ok("Stats never prices on the client alone", calls(stats, "estimateTokenCost").length === 0);
 const tokenTile = tags(stats, "StatTile").find((t) => attr(t, "label") === "Tokens · fuel");
 ok("token count is retained in the quiet tile", !!tokenTile && tokenTile.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText() === "quiet") && !!attr(tokenTile, "value")?.includes("formatTokens(stats.totalTokens)"));
 ok("Stats token value is guarded against invalid counts", !!tokenTile && !!attr(tokenTile, "value")?.includes("isValidTokenCount(stats.totalTokens)"));
@@ -95,7 +99,7 @@ ok("existing collapsed tool details remain hidden from AT", tags(recent, "div").
 ok("invalid recent token labels are guarded", recent.text.includes("isValidTokenCount(tokens) ?"));
 ok("each model/tool numeric count has a dedicated nowrap span", tags(fn(recent, "Row"), "span").filter((t) => attr(t, "className") === "styles.tokenNumber").length === 2);
 ok("model skeleton has a distinct cost footprint", fn(recent, "RecentModelsSkeleton").getText().includes("styles.tokenPair"));
-const groupedCostCalls = calls(fn(grouping, "groupStatsByModelWithCosts"), "estimateTokenCost");
+const groupedCostCalls = calls(fn(grouping, "groupStatsByModelWithCosts"), "preferServerCost");
 const groupedTokenlessCalls = calls(fn(grouping, "groupStatsByModelWithCosts"), "tokenlessCost");
 ok("folded group uses original records, not representative model", groupedCostCalls.length === 2 && groupedCostCalls[0].arguments.map((a) => a.getText()).join("|") === "measured|group.tokens");
 // "measured" is those original records minus the tools that report no counts. The
@@ -109,8 +113,12 @@ ok("a tokenless row and a tokenless bucket are unpriced, never a zero",
   groupedTokenlessCalls.length === 2 && groupedTokenlessCalls.map((c) => c.arguments[0].getText()).join("|") === "group.tokens|bucket.tokens");
 ok("folded tool uses its own original records and count", groupedCostCalls.length === 2 && groupedCostCalls[1].arguments.map((a) => a.getText()).join("|") === "tools.get(bucket.tool)|bucket.tokens");
 
-const levelCalls = calls(level, "estimateTokenCost");
-ok("LevelBadge never fabricates a cost from a bare lifetime total", levelCalls.length === 1 && levelCalls[0].arguments.map((a) => a.getText()).join("|") === "undefined|breakdown?.totalTokens");
+// Lifetime rows only (never another surface's range): server total first, else exact
+// pricing of the profile's own lifetime per-model rows. No rows → no ≈$.
+const levelCalls = calls(level, "preferServerCost");
+ok("LevelBadge prices only its own lifetime rows and total", levelCalls.length === 1 &&
+  levelCalls[0].arguments.map((a) => a.getText()).join("|") === "breakdown?.byModel?.filter((row) => !isTokenlessTool(row.tool))|breakdown?.totalTokens|breakdown?.totalEstimatedUsd");
+ok("LevelBadge never prices on the client alone", calls(level, "estimateTokenCost").length === 0);
 ok("level token display retains its count and cost", tags(level, "TokenCost").length === 1 && level.text.includes("formatTokens(breakdown.totalTokens)") && level.text.includes("label === \"Tokens\""));
 ok("invalid lifetime counter is guarded", level.text.includes("isValidTokenCount(breakdown.totalTokens)"));
 

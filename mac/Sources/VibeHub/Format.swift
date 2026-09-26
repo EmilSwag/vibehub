@@ -81,21 +81,88 @@ enum Format {
             .joined(separator: " ")
     }
 
-    /// The server already normalises "unknown"/"<synthetic>"/"" to null, so this only
-    /// prettifies. Kept tolerant anyway — an older server may still send a sentinel.
+    /// Display name for a raw model id (lane contract, `vibehub-qa-fix.md`):
+    /// `claude-opus-5-5` → "Opus 5.5", `claude-haiku-4-5-20251001` → "Haiku 4.5",
+    /// `claude-3-5-sonnet-20241022` → "Sonnet 3.5", `gpt-6-sol` → "GPT-6 Sol",
+    /// `gpt-5.6-terra` → "GPT-5.6 Terra". Anything else is shown as-is. Sentinels
+    /// ("", "unknown", "null", "<synthetic>") return nil — never the word "null".
     static func modelLabel(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, trimmed.lowercased() != "unknown", trimmed != "<synthetic>" else { return nil }
+        let lower = trimmed.lowercased()
+        guard !trimmed.isEmpty, !["unknown", "null", "none", "<synthetic>"].contains(lower) else { return nil }
+        // "[1m]"-style context suffixes and "-latest" carry no identity.
+        var id = lower
+        if let bracket = id.firstIndex(of: "[") { id = String(id[..<bracket]) }
+        if id.hasSuffix("-latest") { id = String(id.dropLast("-latest".count)) }
+        if id.hasPrefix("claude-") {
+            return claudeLabel(String(id.dropFirst("claude-".count))) ?? trimmed
+        }
+        if id.hasPrefix("gpt-") {
+            return gptLabel(String(id.dropFirst("gpt-".count))) ?? trimmed
+        }
         return trimmed
     }
 
-    /// "vibehub · Claude Code · Claude Opus 5" — segments that are nil simply vanish, so
+    /// Words are the family ("opus"), 1–2 digit numbers the version; an 8-digit (or
+    /// dated `yyyy-mm-dd`) tail is a snapshot date and dropped.
+    private static func claudeLabel(_ rest: String) -> String? {
+        var words: [String] = []
+        var numbers: [String] = []
+        for part in rest.split(whereSeparator: { $0 == "-" || $0 == "@" || $0 == "_" }) {
+            let piece = String(part)
+            if piece.allSatisfy(\.isNumber) {
+                if piece.count <= 2 { numbers.append(piece) } // 8-digit snapshot dates skipped
+            } else if piece.allSatisfy(\.isLetter) {
+                words.append(piece)
+            } else {
+                return nil
+            }
+        }
+        guard let family = words.first, !numbers.isEmpty else { return nil }
+        let name = ([family] + words.dropFirst()).map(capitalized).joined(separator: " ")
+        return "\(name) \(numbers.joined(separator: "."))"
+    }
+
+    /// First part is the version ("6", "5.6", "4o"), the rest are words; ISO dates dropped.
+    private static func gptLabel(_ rest: String) -> String? {
+        var parts = rest.split(separator: "-").map(String.init)
+        guard let version = parts.first, version.first?.isNumber == true else { return nil }
+        parts.removeFirst()
+        // gpt-4o-2024-08-06 → drop the trailing yyyy-mm-dd.
+        while let last = parts.last, last.allSatisfy(\.isNumber) { parts.removeLast() }
+        let words = parts.map(capitalized)
+        return (["GPT-\(version)"] + words).joined(separator: " ")
+    }
+
+    private static func capitalized(_ word: String) -> String {
+        word.prefix(1).uppercased() + String(word.dropFirst())
+    }
+
+    /// Null / "unknown" / "hidden" project → the neutral label (privacy default, R5).
+    static let privateProject = "Private project"
+
+    static func isPrivateProject(_ raw: String?) -> Bool {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return true }
+        return ["unknown", "null", "hidden"].contains(raw.lowercased())
+    }
+
+    static func projectLabel(_ raw: String?) -> String {
+        isPrivateProject(raw) ? privateProject : raw!.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// "neon-app · Claude Code · Opus 5.5" — segments that are nil simply vanish, so
     /// a presence-only tool never renders a dangling separator.
     static func activityLine(_ activity: TrackerMe.Activity) -> String {
-        [activity.project, toolLabel(activity.tool), modelLabel(activity.model)]
+        [projectLabel(activity.project), toolLabel(activity.tool), modelLabel(activity.model)]
             .compactMap { $0 }
             .joined(separator: " · ")
+    }
+
+    /// Secondary line under fresh tokens: "+540M cached". Nil when absent or zero.
+    static func cachedLine(_ value: Int?) -> String? {
+        guard let value, value > 0 else { return nil }
+        return "+\(compactCount(value)) cached"
     }
 
     static func statusLabel(_ status: PresenceStatus) -> String {

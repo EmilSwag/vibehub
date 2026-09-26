@@ -4,9 +4,13 @@ import { CodexAdapter } from "./adapters/codex";
 import { MAX_LOG_FILES } from "./adapters/jsonlTail";
 import { QuadcodeAdapter } from "./adapters/quadcode";
 import type { Adapter, Observation } from "./adapters/types";
-import { isAttestedTool, isCount, isSupportedTool, MAX_EVENT_AGE_MS, MAX_FUTURE_SKEW_MS, MAX_USAGE_ENTRIES, projectUsage, safeAlias, safeModel } from "./privacy";
+import { hasUsage, isAttestedTool, isCount, isSupportedTool, MAX_EVENT_AGE_MS, MAX_RECORD_AGE_MS, MAX_FUTURE_SKEW_MS, MAX_USAGE_ENTRIES, projectUsage, safeAlias, safeModel } from "./privacy";
 
-export interface DetectionUsage { tool: string; model: string | null; tokensInputDelta: number; tokensOutputDelta: number; estimated?: boolean }
+export interface DetectionUsage {
+  tool: string; model: string | null; tokensInputDelta: number; tokensOutputDelta: number;
+  /** Cache reads (never part of tokensInputDelta) and cache writes (a subset of it). */
+  tokensCacheReadDelta?: number; tokensCacheWriteDelta?: number; estimated?: boolean;
+}
 export interface SeenSource { tool: string; model: string | null; lastSeenAt: number; cwd?: string | null; projectHint?: string | null }
 export interface CurrentSession { tool: string; cwd: string | null; projectHint: string | null }
 export interface Detection {
@@ -26,7 +30,7 @@ export const ADAPTER_POLL_TIMEOUT_MS = 45_000;
 const busyAdapters = new WeakSet<Adapter>();
 const newest = (list: Observation[]): Observation | null => list.reduce<Observation | null>(
   (best, observation) => !best || observation.lastActivityAt > best.lastActivityAt ? observation : best, null);
-const hasTokens = (o: Observation): boolean => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0;
+const hasTokens = (o: Observation): boolean => o.tokensInputDelta > 0 || o.tokensOutputDelta > 0 || o.usage.some(hasUsage);
 const usageKey = (tool: string, model: string | null): string => `${tool}\u0000${model ?? ""}`;
 
 /** Bounded, cancellable and non-overlapping. A late source cannot feed a later tick. */
@@ -69,9 +73,11 @@ function projectObservation(o: Observation, now: number, windowMs: number): Obse
   const usage = [];
   for (const entry of o.usage) {
     const u = projectUsage({ tool: o.tool, model: entry?.model, tokensInputDelta: entry?.tokensInputDelta,
-      tokensOutputDelta: entry?.tokensOutputDelta, estimated: entry?.estimated });
+      tokensOutputDelta: entry?.tokensOutputDelta, tokensCacheReadDelta: entry?.tokensCacheReadDelta,
+      tokensCacheWriteDelta: entry?.tokensCacheWriteDelta, estimated: entry?.estimated });
     if (!u) return null;
-    usage.push({ model: u.model, tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta });
+    const { tool: _tool, ...delta } = u;
+    usage.push(delta);
   }
   const input = usage.reduce((n, u) => n + u.tokensInputDelta, 0);
   const output = usage.reduce((n, u) => n + u.tokensOutputDelta, 0);
@@ -79,6 +85,43 @@ function projectObservation(o: Observation, now: number, windowMs: number): Obse
   return { tool: o.tool, model: safeModel(o.model, o.tool), cwd: null, projectHint: safeAlias(o.projectHint),
     confidence: "activity", lastActivityAt: Math.min(now, o.lastActivityAt), observedAt: Math.min(now, o.lastActivityAt),
     tokensInputDelta: input, tokensOutputDelta: output, usage };
+}
+
+/**
+ * QA fix (R3): the usage of a `late` observation - tokens read this poll from records
+ * whose activity is no longer fresh. Same per-entry projection as a live one; nothing
+ * about it (tool, model, project) ever reaches presence or selection.
+ */
+function projectLateUsage(o: Observation, now: number): DetectionUsage[] | null {
+  if (!o || o.late !== true || !isSupportedTool(o.tool) || o.confidence !== "activity" || o.cwd !== null ||
+      !Number.isSafeInteger(o.lastActivityAt) || o.lastActivityAt < now - MAX_RECORD_AGE_MS ||
+      o.lastActivityAt > now + MAX_FUTURE_SKEW_MS || !Array.isArray(o.usage) || o.usage.length > MAX_USAGE_ENTRIES) return null;
+  const usage: DetectionUsage[] = [];
+  for (const entry of o.usage) {
+    const u = projectUsage({ tool: o.tool, model: entry?.model, tokensInputDelta: entry?.tokensInputDelta,
+      tokensOutputDelta: entry?.tokensOutputDelta, tokensCacheReadDelta: entry?.tokensCacheReadDelta,
+      tokensCacheWriteDelta: entry?.tokensCacheWriteDelta, estimated: entry?.estimated });
+    if (!u) return null;
+    if (hasUsage(u)) usage.push(u);
+  }
+  return usage;
+}
+
+/** Adds `u` into `into` keyed by (tool, model); false when a bound would be exceeded. */
+export function mergeUsage(into: Map<string, DetectionUsage>, u: DetectionUsage): boolean {
+  const key = usageKey(u.tool, u.model);
+  const previous = into.get(key);
+  if (!previous && into.size >= MAX_USAGE_ENTRIES) return false;
+  const merged: DetectionUsage = { tool: u.tool, model: u.model,
+    tokensInputDelta: (previous?.tokensInputDelta ?? 0) + u.tokensInputDelta,
+    tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + u.tokensOutputDelta };
+  const cacheRead = (previous?.tokensCacheReadDelta ?? 0) + (u.tokensCacheReadDelta ?? 0);
+  const cacheWrite = (previous?.tokensCacheWriteDelta ?? 0) + (u.tokensCacheWriteDelta ?? 0);
+  if (!isCount(merged.tokensInputDelta) || !isCount(merged.tokensOutputDelta) || !isCount(cacheRead) || !isCount(cacheWrite)) return false;
+  if (cacheRead) merged.tokensCacheReadDelta = cacheRead;
+  if (cacheWrite) merged.tokensCacheWriteDelta = cacheWrite;
+  into.set(key, merged);
+  return true;
 }
 
 /** Only fresh, supported AI usage evidence. There is no editor/process fallback. */
@@ -98,6 +141,8 @@ export class Detector {
   private readonly origin = new WeakMap<Adapter, (tool: unknown) => boolean>();
   private cancellation: AbortController | null = null;
   private generation = 0;
+  /** Usage from `late` observations, drained by the loop (takeLateUsage). */
+  private late = new Map<string, DetectionUsage>();
   private activeWindowMs: number;
 
   constructor(activeWindowMs: number, private adapterTimeoutMs = ADAPTER_POLL_TIMEOUT_MS, attestedTools: readonly string[] = []) {
@@ -117,8 +162,16 @@ export class Detector {
     }
   }
 
+  /** Hands over (and forgets) the usage booked from late observations. */
+  takeLateUsage(): DetectionUsage[] {
+    const out = [...this.late.values()];
+    this.late.clear();
+    return out;
+  }
+
   clear(): void {
     this.generation += 1;
+    this.late.clear();
     this.cancellation?.abort();
     for (const adapter of this.adapters) adapter.clear?.();
   }
@@ -147,22 +200,21 @@ export class Detector {
       const mayEmit = this.origin.get(adapter) ?? ((tool: unknown) => tool === adapter.name);
       return list.filter((o) => mayEmit(o?.tool));
     });
+    // Late observations carry tokens only. Hidden projects are filtered the same way.
+    for (const o of owned) {
+      if (o?.late !== true || !allowed(o)) continue;
+      for (const u of projectLateUsage(o, now) ?? []) mergeUsage(this.late, u);
+    }
     // Hidden sources are removed BEFORE tokens, source lists or selection are built.
-    const all = owned.map((o) => projectObservation(o, now, this.activeWindowMs))
+    const all = owned.filter((o) => o?.late !== true).map((o) => projectObservation(o, now, this.activeWindowMs))
       .filter((o): o is Observation => o !== null).filter(allowed);
     if (!all.length) return null;
     const usage = new Map<string, DetectionUsage>();
     let input = 0;
     let output = 0;
     for (const o of all) for (const u of o.usage) {
-      if (!(u.tokensInputDelta || u.tokensOutputDelta)) continue;
-      const key = usageKey(o.tool, u.model);
-      if ((!usage.has(key) && usage.size >= MAX_USAGE_ENTRIES) ||
-          !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta)) continue;
-      const previous = usage.get(key);
-      usage.set(key, { tool: o.tool, model: u.model,
-        tokensInputDelta: (previous?.tokensInputDelta ?? 0) + u.tokensInputDelta,
-        tokensOutputDelta: (previous?.tokensOutputDelta ?? 0) + u.tokensOutputDelta });
+      if (!hasUsage(u) || !isCount(input + u.tokensInputDelta) || !isCount(output + u.tokensOutputDelta) ||
+          !mergeUsage(usage, { ...u, tool: o.tool })) continue;
       input += u.tokensInputDelta; output += u.tokensOutputDelta;
     }
     const seen = new Map<string, SeenSource>();

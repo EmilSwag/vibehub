@@ -93,6 +93,10 @@ export function PairPage() {
   };
 
   const osLabel = info?.os === "mac" ? "Mac" : info?.os === "windows" ? "PC" : "device";
+  // A brand-new user can land here mid-onboarding (ProtectedRoute lets /pair through),
+  // so "done" means back to setup for them, home for everyone else.
+  const midSetup = !user?.onboardedAt;
+  const exitPath = midSetup ? "/onboarding" : "/";
 
   return (
     <div className={styles.container}>
@@ -100,15 +104,16 @@ export function PairPage() {
         {approved ? (
           <div className={styles.successBox}>
             <div className={styles.successIcon}><Icon name="check" size={24} /></div>
-            <h1 className={styles.title}>Connected</h1>
+            <h1 className={styles.title}>Connected ✓</h1>
             <p className={styles.subtitle}>
-              {info?.deviceName || "Your device"} is on @{user?.username}. Head back to your {osLabel}.
+              {info?.deviceName || "Your device"} is live on @{user?.username}.
+              {midSetup ? "" : " You can close this tab."}
             </p>
             <Button
               className={styles.approveBtn}
-              onClick={() => navigate("/")}
+              onClick={() => navigate(exitPath)}
             >
-              Done
+              {midSetup ? "Continue setup" : "Done"}
             </Button>
           </div>
         ) : loading ? (
@@ -119,7 +124,7 @@ export function PairPage() {
         ) : !info?.valid ? (
           <div className={styles.header}>
             <h1 className={styles.title}>Pair a device</h1>
-            <p className={styles.subtitle}>Enter the code the VibeHub app shows you.</p>
+            <p className={styles.subtitle}>Type the code VibeHub shows.</p>
             {error && <p className={styles.error} role="alert">{error}</p>}
             <form onSubmit={handleManualSubmit} className={styles.inputGroup}>
               <Input
@@ -140,7 +145,6 @@ export function PairPage() {
           <>
             <div className={styles.header}>
               <h1 className={styles.title}>Connect this {osLabel}?</h1>
-              <p className={styles.subtitle}>It will show your AI coding sessions here.</p>
             </div>
 
             <div className={styles.deviceBox}>
@@ -151,9 +155,7 @@ export function PairPage() {
               <span className={styles.codeBadge}>{info.userCode}</span>
             </div>
 
-            <p className={styles.summary}>
-              Reads local AI session logs only. Prompts, code and files never leave the device.
-            </p>
+            <p className={styles.summary}>Sends usage counts only. Code and prompts stay here.</p>
 
             {error && (
               <p className={styles.error} role="alert">{error}</p>
@@ -170,7 +172,7 @@ export function PairPage() {
               <Button
                 variant="secondary"
                 className={styles.cancelBtn}
-                onClick={() => navigate("/")}
+                onClick={() => navigate(exitPath)}
                 disabled={approving}
               >
                 Cancel

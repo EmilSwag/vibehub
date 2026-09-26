@@ -23,6 +23,8 @@ export interface TodayTotals {
    * fresh account still shows a plain zero.
    */
   tokensReported: boolean;
+  /** QA R2: cache reads today, shown as a secondary "cached" figure. 0 when unknown. */
+  cachedTokens: number;
 }
 
 /** Everything the tracker has reported for today, summed across tools and models. */
@@ -33,8 +35,9 @@ export function sumToday(sources: TrackerSource[]): TodayTotals {
       activeSeconds: acc.activeSeconds + s.activeSecondsToday,
       estimated: acc.estimated || (s.tokensToday > 0 && isLegacyEstimateTool(s.tool)),
       tokensReported: acc.tokensReported || !isTokenlessTool(s.tool),
+      cachedTokens: acc.cachedTokens + (Number.isFinite(s.cachedTokensToday) ? Math.max(0, s.cachedTokensToday!) : 0),
     }),
-    { tokens: 0, activeSeconds: 0, estimated: false, tokensReported: false }
+    { tokens: 0, activeSeconds: 0, estimated: false, tokensReported: false, cachedTokens: 0 }
   );
   return sources.length === 0 ? { ...totals, tokensReported: true } : totals;
 }

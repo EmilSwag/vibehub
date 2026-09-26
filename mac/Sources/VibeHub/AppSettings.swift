@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import ServiceManagement
@@ -19,7 +20,8 @@ enum IslandMode: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// User-facing preferences. The token is deliberately NOT here — it lives in `Keychain`.
+/// User-facing preferences. The token is deliberately NOT here — it lives in the tracker's
+/// `~/.vibehub/config.json`, held in memory by `TokenStore`.
 ///
 /// Two distinct server URLs, matching `web/public/tracker/connect.sh`'s own
 /// `WEB_URL`/`API_URL` split (two different Railway deployments, two different
@@ -40,6 +42,8 @@ final class AppSettings: ObservableObject {
         static let baseURL = "BaseURL"
         static let webURL = "WebURL"
         static let islandMode = "IslandMode"
+        static let islandModeExplicit = "IslandModeExplicit"
+        static let hasShownMenuBarHint = "HasShownMenuBarHint"
         static let hasCompletedOnboarding = "HasCompletedOnboarding"
         static let userDisabledTracking = "UserDisabledTracking"
         static let lastRunBundleVersion = "LastRunBundleVersion"
@@ -59,6 +63,24 @@ final class AppSettings: ObservableObject {
 
     @Published var islandMode: IslandMode {
         didSet { defaults.set(islandMode.rawValue, forKey: Key.islandMode) }
+    }
+
+    /// True only once the *user* picked an island mode (Settings). Until then the mode
+    /// is a default this app may change: on a notch Mac the island is on, and an old
+    /// build's implicit `IslandMode=off` is migrated back to on (L3, `vibehub-qa-fix.md`).
+    @Published private(set) var islandModeIsExplicit: Bool {
+        didSet { defaults.set(islandModeIsExplicit, forKey: Key.islandModeExplicit) }
+    }
+
+    /// The one writer for a user's own island choice.
+    func chooseIslandMode(_ mode: IslandMode) {
+        islandModeIsExplicit = true
+        islandMode = mode
+    }
+
+    /// One-time "VibeHub lives up here" pointer after first connect.
+    @Published var hasShownMenuBarHint: Bool {
+        didSet { defaults.set(hasShownMenuBarHint, forKey: Key.hasShownMenuBarHint) }
     }
 
     /// Gates the first-run wizard (`OnboardingWizard`). Set once, on Finish or a final
@@ -115,19 +137,42 @@ final class AppSettings: ObservableObject {
     /// fixture run can never rewrite the real `com.vibehub.menubar` preferences.
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    /// `hasNotch` is injectable for the QA harness; the app asks the attached screens.
+    init(defaults: UserDefaults = .standard, hasNotch: Bool? = nil) {
         self.defaults = defaults
         // `object(forKey:)` first: `bool(forKey:)` can't tell "false" from "never set",
         // and the bar text should be on out of the box.
         showTimeInBar = defaults.object(forKey: Key.showTimeInBar) as? Bool ?? true
         baseURL = (defaults.string(forKey: Key.baseURL).flatMap(URL.init(string:))) ?? Self.defaultBaseURL
         webUrl = (defaults.string(forKey: Key.webURL).flatMap(URL.init(string:))) ?? Self.defaultWebURL
-        launchAtLogin = SMAppService.mainApp.status == .enabled
-        islandMode = defaults.string(forKey: Key.islandMode).flatMap(IslandMode.init(rawValue:)) ?? .auto
+        // `SMAppService.status` is an XPC round trip — not on the launch path's main
+        // thread. Starts false and settles a moment later; nothing at launch reads it.
+        launchAtLogin = false
+        let storedIsland = defaults.string(forKey: Key.islandMode).flatMap(IslandMode.init(rawValue:))
+        let explicit = defaults.bool(forKey: Key.islandModeExplicit)
+        islandModeIsExplicit = explicit
+        // Notch Mac + no explicit choice → on. A stored `off` without the flag came from
+        // an old default or the old onboarding switch, not from Settings: migrate it.
+        if !explicit, hasNotch ?? Self.hasNotchedScreen, storedIsland == nil || storedIsland == .off {
+            islandMode = .auto
+        } else {
+            islandMode = storedIsland ?? .auto
+        }
+        hasShownMenuBarHint = defaults.bool(forKey: Key.hasShownMenuBarHint)
         hasCompletedOnboarding = defaults.bool(forKey: Key.hasCompletedOnboarding)
         // Defaults to false: a machine that has never been told "off" has not opted out.
         userDisabledTracking = defaults.bool(forKey: Key.userDisabledTracking)
         lastRunBundleVersion = defaults.string(forKey: Key.lastRunBundleVersion)
+    }
+
+    /// Any attached display with a camera housing (`auxiliaryTopLeftArea`, macOS 12+).
+    static var hasNotchedScreen: Bool {
+        NSScreen.screens.contains { $0.auxiliaryTopLeftArea != nil && $0.auxiliaryTopRightArea != nil }
+    }
+
+    /// Off-main refresh of `launchAtLogin` (see init).
+    func refreshLaunchAtLogin() async {
+        launchAtLogin = await Task.detached(priority: .utility) { SMAppService.mainApp.status == .enabled }.value
     }
 
     /// Called once per launch, after `TrackerManager.reconcileOnLaunch` has had the
@@ -152,18 +197,24 @@ final class AppSettings: ObservableObject {
     /// `SMAppService` throws when the app isn't in a location macOS will launch from
     /// (still in ~/Downloads, or run straight from `.build/`). Surface it rather than
     /// silently leaving the toggle in a lying state.
-    func setLaunchAtLogin(_ enabled: Bool) -> String? {
-        do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
+    ///
+    /// `register`/`unregister`/`status` are XPC round trips to the service-management
+    /// daemon — run off-main, result applied here.
+    func setLaunchAtLogin(_ enabled: Bool) async -> String? {
+        let result: (enabled: Bool, failed: Bool) = await Task.detached(priority: .userInitiated) {
+            var failed = false
+            do {
+                if enabled {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                failed = true
             }
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-            return nil
-        } catch {
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-            return "Move VibeHub to /Applications first."
-        }
+            return (SMAppService.mainApp.status == .enabled, failed)
+        }.value
+        launchAtLogin = result.enabled
+        return result.failed ? "Move VibeHub to /Applications first." : nil
     }
 }

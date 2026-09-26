@@ -38,6 +38,12 @@ export interface TrackerSource {
   tokensToday: number;
   tokens7d: number;
   activeSecondsToday: number;
+  /** QA R2: cache reads today — secondary, NEVER inside `tokensToday` (fresh input +
+   * output). Optional: a server older than the QA fix omits it. */
+  cachedTokensToday?: number;
+  /** Server's exact ≈$ for today (real input/output/cache split). null = no verified
+   * price; absent = older server (the web then falls back to its own estimate). */
+  estimatedUsd?: number | null;
 }
 
 /** A non-revoked tracker token, i.e. one machine the tracker is installed on. */
@@ -46,6 +52,10 @@ export interface TrackerDevice {
   label: string;
   lastUsedAt: string | null;
   createdAt: string;
+  /** Live heartbeat evidence for this device (server `trackerConnections.snapshot`).
+   * Optional: older servers omit it. Unlike `lastUsedAt`, only a heartbeat moves it. */
+  connected?: boolean;
+  lastSeenAt?: string | null;
 }
 
 /**
@@ -110,6 +120,10 @@ export interface LevelBreakdown {
   projects: number;
   friends: number;
   commits: number;
+  /** Profile route only: lifetime tokens per (model, tool), so ≈$ can be priced exactly. */
+  byModel?: { model: string; tool: string; tokensInput: number; tokensOutput: number; estimatedUsd?: number | null }[];
+  /** Server ≈$ for the lifetime total, when a server sends one (preferred). */
+  totalEstimatedUsd?: number | null;
 }
 
 export interface ExternalLink {
@@ -327,6 +341,11 @@ export interface StatByModel {
   tokensInput: number;
   tokensOutput: number;
   activeSeconds: number;
+  /** QA R2: cache reads in range, beside the token counts and never inside them. */
+  cachedTokens?: number;
+  /** Server ≈$ for this bucket (incl. cache pricing the web cannot see); null = no
+   * verified price. Absent on older servers. Read via lib/tokenCost `preferServerCost`. */
+  estimatedUsd?: number | null;
   /**
    * Round 7: newest moment this (tool, model) pair was seen inside the range —
    * ISO, day-granular for closed rollups. Optional because a server older than
@@ -384,6 +403,10 @@ export interface UserStats {
    * empty range sends 0. Render it as "not reported", never as a count.
    */
   totalTokens: number | null;
+  /** QA R2: cache reads in range — secondary. Optional: older servers omit it. */
+  totalCachedTokens?: number | null;
+  /** Server ≈$ for the range (priced buckets only); null = nothing priceable. */
+  totalEstimatedUsd?: number | null;
   totalActiveSeconds: number;
   streak: { currentStreak: number; longestStreak: number };
   githubCommits: GithubCommitDay[];

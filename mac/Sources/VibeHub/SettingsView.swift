@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var isVerifying = false
     @State private var savedNote: String?
     @State private var launchError: String?
+    @State private var showTrouble = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -32,45 +33,56 @@ struct SettingsView: View {
             }
 
             section("Account") {
-                HStack(spacing: 6) {
-                    SecureField(store.token == nil ? "Paste your device token" : "Paste a new token", text: $token)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12, design: .monospaced))
-                        .onSubmit(saveToken)
-                    Button(isVerifying ? "Checking\u{2026}" : "Save", action: saveToken)
-                        .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                if let savedNote {
-                    Text(savedNote).font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                if store.token != nil {
-                    // N1(b): Sign out is the whole operation — stop the daemon, release
-                    // this device's connection receipt, drop the tracker's own config,
-                    // remove the LaunchAgent and the login item, then clear the Keychain.
-                    // The machine forgets the account, not just the app.
-                    HStack(spacing: 14) {
-                        // Moved here from the popover's main list: a power-user action
-                        // does not need a permanent row in the everyday menu.
-                        Button("Copy Token") {
-                            guard let current = store.token else { return }
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(current, forType: .string)
-                            savedNote = "Token copied."
+                if store.token == nil {
+                    // Signed out: the same one-button connect as first run.
+                    OnboardingView(store: store, settings: settings, tracker: tracker)
+                } else {
+                    if let me = store.snapshot {
+                        Text("Connected as @\(me.user.username)").font(.system(size: 12))
+                    }
+                    // N1(b): Sign out is the whole operation — stop the tracker, release
+                    // this device's connection, remove the login item, forget the token.
+                    Button(tracker.isBusy ? "Signing out\u{2026}" : "Sign Out of This Mac") {
+                        Task {
+                            await tracker.signOut()
+                            token = ""
+                            savedNote = "Signed out on this Mac."
+                            store.wake()
                         }
-                        .help("Copies this Mac\u{2019}s device token.")
-                        Button(tracker.isBusy ? "Signing out\u{2026}" : "Sign Out of This Mac") {
-                            Task {
-                                await tracker.signOut()
-                                token = ""
-                                savedNote = "Signed out on this Mac."
-                                store.wake()
-                            }
-                        }
-                        .disabled(tracker.isBusy)
                     }
                     .buttonStyle(.link)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .disabled(tracker.isBusy)
+
+                    // Power-user bits (replace/copy the device code) stay one click away.
+                    if showTrouble {
+                        HStack(spacing: 6) {
+                            SecureField("Paste a new code", text: $token)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                                .onSubmit(saveToken)
+                            Button(isVerifying ? "Checking\u{2026}" : "Save", action: saveToken)
+                                .disabled(isVerifying || token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        Button("Copy this Mac\u{2019}s code") {
+                            guard let current = store.token else { return }
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(current, forType: .string)
+                            savedNote = "Copied."
+                        }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Button("Trouble?") { showTrouble = true }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let savedNote {
+                    Text(savedNote).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
 
@@ -92,8 +104,8 @@ struct SettingsView: View {
                     disabled: tracker.isBusy || store.token == nil
                 )
                 Text(store.token == nil
-                     ? "Connect an account first."
-                     : "Keeps tracking after a restart. Off stays off, even after updates.")
+                     ? "Connect first."
+                     : "Keeps counting after a restart. Off stays off.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -110,7 +122,11 @@ struct SettingsView: View {
                 HStack {
                     Text("Island").font(.system(size: 12))
                     Spacer()
-                    Picker("Island", selection: $settings.islandMode) {
+                    // Any pick here is the user's own choice — defaults never override it.
+                    Picker("Island", selection: Binding(
+                        get: { settings.islandMode },
+                        set: { settings.chooseIslandMode($0) }
+                    )) {
                         ForEach(IslandMode.allCases) { mode in
                             Text(mode.label).tag(mode)
                         }
