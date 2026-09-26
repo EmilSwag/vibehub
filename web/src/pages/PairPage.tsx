@@ -93,6 +93,10 @@ export function PairPage() {
   };
 
   const osLabel = info?.os === "mac" ? "Mac" : info?.os === "windows" ? "PC" : "device";
+  // A brand-new user can land here mid-onboarding (ProtectedRoute lets /pair through),
+  // so "done" means back to setup for them, home for everyone else.
+  const midSetup = !user?.onboardedAt;
+  const exitPath = midSetup ? "/onboarding" : "/";
 
   return (
     <div className={styles.container}>
@@ -102,13 +106,14 @@ export function PairPage() {
             <div className={styles.successIcon}><Icon name="check" size={24} /></div>
             <h1 className={styles.title}>Connected ✓</h1>
             <p className={styles.subtitle}>
-              {info?.deviceName || "Your device"} is live on @{user?.username}. You can close this tab.
+              {info?.deviceName || "Your device"} is live on @{user?.username}.
+              {midSetup ? "" : " You can close this tab."}
             </p>
             <Button
               className={styles.approveBtn}
-              onClick={() => navigate("/")}
+              onClick={() => navigate(exitPath)}
             >
-              Done
+              {midSetup ? "Continue setup" : "Done"}
             </Button>
           </div>
         ) : loading ? (
@@ -167,7 +172,7 @@ export function PairPage() {
               <Button
                 variant="secondary"
                 className={styles.cancelBtn}
-                onClick={() => navigate("/")}
+                onClick={() => navigate(exitPath)}
                 disabled={approving}
               >
                 Cancel

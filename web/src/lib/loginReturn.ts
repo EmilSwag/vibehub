@@ -34,10 +34,53 @@ export function rememberLoginReturn(path: string): void {
   if (!isSafeLocalPath(path)) return;
   try {
     session()?.setItem(KEY, path);
+    // A fresh destination beats whatever this page load already resolved (e.g. sign
+    // out, open a /pair link, sign in again without a reload).
+    cached = undefined;
   } catch {
     // Private mode: the flag is lost, and login falls back to "/" — same graceful
     // degradation as captureConnectDeepLink.
   }
+}
+
+/** Where ProtectedRoute sends a request. Pure, so loginReturn.check.ts pins it.
+ *  - Signed out: /login, remembering the page so sign-in lands back on it. That is
+ *    what keeps a /pair?code=… link from the Mac app or `vibehub-tracker pair` alive
+ *    through the GitHub round trip.
+ *  - Not onboarded yet: /onboarding, except /pair, which renders bare, so a brand-new
+ *    user can approve their first device before finishing setup.
+ *  - Onboarded: /onboarding goes home; everything else renders. */
+export type RouteDecision =
+  | { to: "login"; remember: string | null }
+  | { to: "onboarding" }
+  | { to: "home" }
+  | { to: "render"; bare: boolean };
+
+export function isPairPath(pathname: string): boolean {
+  return pathname === "/pair" || pathname.startsWith("/pair/");
+}
+
+export function protectedRouteDecision(input: {
+  signedIn: boolean;
+  onboarded: boolean;
+  pathname: string;
+  search: string;
+  bare: boolean;
+}): RouteDecision {
+  const { signedIn, onboarded, pathname, search, bare } = input;
+  if (!signedIn) {
+    const target = `${pathname}${search}`;
+    const worthKeeping = pathname !== "/" && pathname !== "/login" && isSafeLocalPath(target);
+    return { to: "login", remember: worthKeeping ? target : null };
+  }
+  const onOnboarding = pathname.startsWith("/onboarding");
+  if (!onboarded) {
+    if (onOnboarding) return { to: "render", bare };
+    if (isPairPath(pathname)) return { to: "render", bare: true };
+    return { to: "onboarding" };
+  }
+  if (onOnboarding) return { to: "home" };
+  return { to: "render", bare };
 }
 
 // Resolved once per page load, then cached here — not in sessionStorage, which is
