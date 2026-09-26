@@ -96,6 +96,27 @@ eq("a row that overflows the cost cap is unavailable", foldEstimatedUsd([row("o1
 const wire = foldEstimatedUsd([row("gpt-5", 8_000, 0)]);
 eq("JSON-safe fields", JSON.parse(JSON.stringify({ estimatedUsd: wire.estimatedUsd, byModel: wire.byModel })), { estimatedUsd: 0.01, byModel: { "gpt-5": 0.01 } });
 
+// ---- QA fix: new models (R1) and cache rates (R2), meta/plans/vibehub-qa-fix.md ----
+// Appended in the web's order, so tokenPricingSync can compare index by index.
+eq("new rows are appended last, in order", TOKEN_PRICES.slice(-3).map((p) => p.modelId), ["claude-opus-5-5", "gpt-6-sol", "gpt-6-luna"]);
+eq("claude-opus-5-5 base rates", [getTokenPrice("claude-opus-5-5")?.inputUsdPerMillion, getTokenPrice("claude-opus-5-5")?.outputUsdPerMillion], [4, 20]);
+eq("gpt-6-sol base rates", [getTokenPrice("gpt-6-sol")?.inputUsdPerMillion, getTokenPrice("gpt-6-sol")?.outputUsdPerMillion], [2, 10]);
+eq("gpt-6-luna base rates", [getTokenPrice("gpt-6-luna")?.inputUsdPerMillion, getTokenPrice("gpt-6-luna")?.outputUsdPerMillion], [0.1, 0.5]);
+// 3-argument calls are the web's arithmetic, unchanged.
+eq("no cache args = the old arithmetic", costUnits("claude-opus-5-5", 1_000_000, 0), costUnits("claude-opus-5-5", 1_000_000, 0, 0, 0));
+// Opus 5.5: 1M cache reads at $0.20; 1M input of which all are cache writes at $5.
+eq("opus 5.5 cache read rate", estimateUsd("claude-opus-5-5", 0, 0, 1_000_000), 0.2);
+eq("opus 5.5 cache write rate", estimateUsd("claude-opus-5-5", 1_000_000, 0, 0, 1_000_000), 5);
+eq("fable 5.1 cache read rate (0.025x, not 0.1x)", estimateUsd("claude-fable-5-1", 0, 0, 1_000_000), 0.25);
+eq("haiku alias inherits its cache rate", estimateUsd("claude-haiku-4-5", 0, 0, 1_000_000), 0.1);
+eq("openai: no cache-write rate means ordinary input", estimateUsd("gpt-6-sol", 1_000_000, 0, 0, 1_000_000), 2);
+eq("gpt-6-sol cache read rate", estimateUsd("gpt-6-sol", 0, 0, 1_000_000), 0.2);
+eq("no verified cache rate: reads are not guessed", estimateUsd("claude-opus-4-8", 0, 0, 1_000_000), 0);
+eq("cache writes cannot exceed input", costUnits("claude-opus-5-5", 10, 0, 0, 11), null);
+eq("malformed cache read", costUnits("claude-opus-5-5", 10, 0, -1), null);
+eq("fold prices cache counters", foldEstimatedUsd([{ model: "claude-opus-5-5", tokensInput: 0, tokensOutput: 0, tokensCacheRead: 5_000_000 }]).estimatedUsd, 1);
+eq("fold rejects a malformed cache row", foldEstimatedUsd([{ model: "claude-opus-5-5", tokensInput: 1, tokensOutput: 0, tokensCacheWrite: 2 }]).estimatedUsd, null);
+
 // ---- summary ----
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

@@ -2,7 +2,8 @@ import type { User } from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../db";
 import { asyncHandler, HttpError } from "../lib/http-error";
-import { LEGACY_UNKNOWN_MODEL, normalizeModel, utcDay } from "../lib/sessions";
+import { localDayWindow } from "../lib/local-day";
+import { LEGACY_UNKNOWN_MODEL, normalizeModel, userToday } from "../lib/sessions";
 import { isTokenlessTool } from "../lib/schemas";
 import { foldByTool, topToolOf } from "../lib/stats-tools";
 import { estimateUsd, foldEstimatedUsd } from "../lib/token-pricing";
@@ -26,6 +27,8 @@ interface ModelBucket {
   tool: string;
   tokensInput: number;
   tokensOutput: number;
+  /** QA fix R2: cache reads in range - secondary, never part of the token totals. */
+  cachedTokens: number;
   activeSeconds: number;
   /**
    * Round 7: newest moment this (tool, model) pair was seen inside the range — the max
@@ -63,26 +66,34 @@ export async function computeStats(user: User, rangeDays: number | null) {
   const now = new Date();
   // null (range=all) → no lower bound at all: each filter drops its date clause rather
   // than reaching back to the epoch, so "all" is one query shape, not a 100-year range.
-  const since = rangeDays === null ? null : utcDay(new Date(now.getTime() - (rangeDays - 1) * 86_400_000));
+  // A range of N days ends on the user's LOCAL today (lib/local-day.ts, null tz = UTC):
+  // DailyStat rows are keyed by local date, so `since` is a key; `sinceAt` is the real
+  // instant that local day began, for Session timestamps.
+  const { today, tzOffsetMinutes } = await userToday(user.id, now);
+  const since = rangeDays === null ? null : new Date(today.getTime() - (rangeDays - 1) * 86_400_000);
+  const sinceAt = since ? new Date(localDayWindow(since, tzOffsetMinutes).start) : null;
   const sinceDate = since ? { date: { gte: since } } : {};
 
   const [dailyStats, openSessions, streak, commitDays] = await Promise.all([
     prisma.dailyStat.findMany({ where: { userId: user.id, ...sinceDate } }),
     prisma.session.findMany({
-      where: { userId: user.id, status: { not: "ENDED" }, ...(since ? { startedAt: { gte: since } } : {}) },
+      where: { userId: user.id, status: { not: "ENDED" }, ...(sinceAt ? { startedAt: { gte: sinceAt } } : {}) },
     }),
     prisma.userStreak.findUnique({ where: { userId: user.id } }),
     prisma.githubCommitDay.findMany({ where: { userId: user.id, ...sinceDate }, orderBy: { date: "asc" } }),
   ]);
 
   const buckets = new Map<string, ModelBucket>();
+  // Cache writes are a subset of tokensInput, needed only to price it: kept off the wire.
+  const cacheWrites = new Map<ModelBucket, number>();
   const add = (
     model: string,
     tool: string,
     tokensInput: number,
     tokensOutput: number,
     activeSeconds: number,
-    seenAt: Date
+    seenAt: Date,
+    cache: { read: bigint | number; write: number }
   ) => {
     const key = `${model}\u0000${tool}`;
     const bucket = buckets.get(key) ?? {
@@ -90,12 +101,15 @@ export async function computeStats(user: User, rangeDays: number | null) {
       tool,
       tokensInput: 0,
       tokensOutput: 0,
+      cachedTokens: 0,
       activeSeconds: 0,
       lastActiveAt: null,
       estimatedUsd: null,
     };
     bucket.tokensInput += tokensInput;
     bucket.tokensOutput += tokensOutput;
+    bucket.cachedTokens += Number(cache.read);
+    cacheWrites.set(bucket, (cacheWrites.get(bucket) ?? 0) + cache.write);
     bucket.activeSeconds += activeSeconds;
     // ISO strings from the same (UTC, millisecond) format compare correctly as strings.
     const seen = seenAt.toISOString();
@@ -116,7 +130,8 @@ export async function computeStats(user: User, rangeDays: number | null) {
       row.tokensInput,
       row.tokensOutput,
       row.activeSeconds,
-      row.date
+      row.date,
+      { read: row.tokensCacheRead, write: row.tokensCacheWrite }
     );
   }
   for (const session of openSessions) {
@@ -129,7 +144,8 @@ export async function computeStats(user: User, rangeDays: number | null) {
       session.tokensInput,
       session.tokensOutput,
       elapsed,
-      session.lastHeartbeatAt
+      session.lastHeartbeatAt,
+      { read: session.tokensCacheRead, write: session.tokensCacheWrite }
     );
   }
 
@@ -145,7 +161,7 @@ export async function computeStats(user: User, rangeDays: number | null) {
   for (const bucket of byModel) {
     bucket.estimatedUsd = isTokenlessTool(bucket.tool)
       ? null
-      : estimateUsd(bucket.model, bucket.tokensInput, bucket.tokensOutput);
+      : estimateUsd(bucket.model, bucket.tokensInput, bucket.tokensOutput, bucket.cachedTokens, cacheWrites.get(bucket) ?? 0);
   }
 
   // Measured buckets are the only ones that can state a number. A range whose only work
@@ -174,7 +190,11 @@ export async function computeStats(user: User, rangeDays: number | null) {
     // estimateTokenCost, so the two never disagree on the same stats). Tokenless buckets
     // are excluded from the fold: they are unpriceable, not free, and a range made only
     // of them is unknown rather than $0.00.
-    totalEstimatedUsd: measured.length === 0 && hasTokenless ? null : foldEstimatedUsd(measured).estimatedUsd,
+    totalEstimatedUsd: measured.length === 0 && hasTokenless ? null : foldEstimatedUsd(measured.map((bucket) => ({
+      ...bucket, tokensCacheRead: bucket.cachedTokens, tokensCacheWrite: cacheWrites.get(bucket) ?? 0,
+    }))).estimatedUsd,
+    // QA fix R2: cache reads in range, beside totalTokens and never inside it.
+    totalCachedTokens: measured.length === 0 && hasTokenless ? null : measured.reduce((sum, b) => sum + b.cachedTokens, 0),
     streak: {
       currentStreak: streak?.currentStreak ?? 0,
       longestStreak: streak?.longestStreak ?? 0,

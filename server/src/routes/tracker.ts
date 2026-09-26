@@ -8,6 +8,7 @@ import { toJsonArrayValue, toPayloadValue } from "../lib/json-field";
 import { computeLevel } from "../lib/level";
 import { heartbeatSchema } from "../lib/schemas";
 import { isTokenlessTool } from "../lib/tools";
+import { localDay } from "../lib/local-day";
 import { closeSession, foldUsageIntoDailyStat, normalizeModel, presenceFor, utcDay, type UsageEntry } from "../lib/sessions";
 import { buildTrackerMePayload, foldToday } from "../lib/tracker-me";
 import { latestTrackerLastSeenAt, trackerConnections } from "../lib/trackerConnection";
@@ -81,14 +82,22 @@ router.get(
   asyncHandler(async (req, res) => {
     const userId = req.trackerUserId!;
     const now = new Date();
-    const today = utcDay(now);
+    // Heartbeat-derived "last seen", across every session ever — NOT
+    // `TrackerToken.lastUsedAt`, which this route's own middleware just bumped. The same
+    // row carries the user's current zone, so "today" is their LOCAL day (lib/local-day.ts).
+    const latestHeartbeat = await prisma.session.findFirst({
+      where: { userId },
+      orderBy: { lastHeartbeatAt: "desc" },
+      select: { lastHeartbeatAt: true, tzOffsetMinutes: true },
+    });
+    const today = localDay(now, latestHeartbeat?.tzOffsetMinutes);
 
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: { id: true, username: true, displayName: true, avatarUrl: true },
     });
 
-    const [level, presence, dailyStats, openSessions, latestHeartbeat, devices, friendIds] = await Promise.all([
+    const [level, presence, dailyStats, openSessions, devices, friendIds] = await Promise.all([
       computeLevel(userId),
       presenceFor(userId, user.username),
       // `model` on both: foldToday prices each row at lib/token-pricing.ts rates for
@@ -99,18 +108,11 @@ router.get(
         // into a DailyStat row like any other, so without it foldToday reads a tokenless
         // row as a measurement of zero and today's count flips from null to 0 the moment
         // a hook session ends.
-        select: { date: true, model: true, tool: true, tokensInput: true, tokensOutput: true, activeSeconds: true },
+        select: { date: true, model: true, tool: true, tokensInput: true, tokensOutput: true, tokensCacheRead: true, tokensCacheWrite: true, activeSeconds: true },
       }),
       prisma.session.findMany({
         where: { userId, status: { not: "ENDED" } },
-        select: { startedAt: true, lastHeartbeatAt: true, tool: true, model: true, tokensInput: true, tokensOutput: true },
-      }),
-      // Heartbeat-derived "last seen", across every session ever — NOT
-      // `TrackerToken.lastUsedAt`, which this route's own middleware just bumped.
-      prisma.session.findFirst({
-        where: { userId },
-        orderBy: { lastHeartbeatAt: "desc" },
-        select: { lastHeartbeatAt: true },
+        select: { startedAt: true, lastHeartbeatAt: true, tool: true, model: true, tokensInput: true, tokensOutput: true, tokensCacheRead: true, tokensCacheWrite: true, tzOffsetMinutes: true },
       }),
       prisma.trackerToken.findMany({
         where: { userId, revokedAt: null },
@@ -242,6 +244,8 @@ router.post(
           model: normalizeModel(entry.model),
           tokensInputDelta: entry.tokensInputDelta,
           tokensOutputDelta: entry.tokensOutputDelta,
+          tokensCacheReadDelta: entry.tokensCacheReadDelta ?? 0,
+          tokensCacheWriteDelta: entry.tokensCacheWriteDelta ?? 0,
         }))
       : null;
     // Fix F-E, second of the four chokepoint guards (lib/tools.ts `refusesTokenClaim`):
@@ -251,6 +255,8 @@ router.post(
     const legacyTokens = !isTokenlessTool(tool);
     const tokensInputDelta = usage || !legacyTokens ? 0 : body.tokensInputDelta ?? 0;
     const tokensOutputDelta = usage || !legacyTokens ? 0 : body.tokensOutputDelta ?? 0;
+    const tokensCacheReadDelta = usage || !legacyTokens ? 0 : body.tokensCacheReadDelta ?? 0;
+    const tokensCacheWriteDelta = usage || !legacyTokens ? 0 : body.tokensCacheWriteDelta ?? 0;
 
     // Round 6 multi-tool presence (§4.3): every tool the tracker can see open right
     // now rides along on the live session so presence can show the whole stack. This
@@ -306,6 +312,8 @@ router.post(
           lastHeartbeatAt: now,
           tokensInput: { increment: tokensInputDelta },
           tokensOutput: { increment: tokensOutputDelta },
+          tokensCacheRead: { increment: BigInt(tokensCacheReadDelta) },
+          tokensCacheWrite: { increment: tokensCacheWriteDelta },
           ...(coTools ? { coTools: toJsonArrayValue(coTools) as never } : {}),
           ...tzOffset,
         },
@@ -323,13 +331,18 @@ router.post(
           lastHeartbeatAt: now,
           tokensInput: tokensInputDelta,
           tokensOutput: tokensOutputDelta,
+          tokensCacheRead: BigInt(tokensCacheReadDelta),
+          tokensCacheWrite: tokensCacheWriteDelta,
           ...(coTools ? { coTools: toJsonArrayValue(coTools) as never } : {}),
           tzOffsetMinutes: body.tzOffsetMinutes ?? null,
         },
       });
     }
 
-    if (usage) await foldUsageIntoDailyStat(userId, utcDay(occurredAt), usage);
+    // Booked on the host's LOCAL day (the session's zone, just written from this beat
+    // when it carried one; null = UTC), so a late-night beat lands on "today" as the user
+    // sees it - the same key /tracker/me and /users/me/tracker read.
+    if (usage) await foldUsageIntoDailyStat(userId, localDay(occurredAt, session.tzOffsetMinutes), usage);
 
     // The event log mirrors what was credited, not what was claimed: the top-level
     // deltas here are what went onto the Session (0 for v2 bodies) and `usage` is what
@@ -340,6 +353,8 @@ router.post(
       model,
       tokensInputDelta,
       tokensOutputDelta,
+      ...(tokensCacheReadDelta ? { tokensCacheReadDelta } : {}),
+      ...(tokensCacheWriteDelta ? { tokensCacheWriteDelta } : {}),
       ...(usage ? { usage } : {}),
       ...(coTools ? { tools: coTools } : {}),
     });

@@ -2,6 +2,7 @@ import type { Session } from "@prisma/client";
 import { prisma } from "../db";
 import { env } from "../env";
 import { fromJsonArrayValue } from "./json-field";
+import { localDay, secondsByLocalDay } from "./local-day";
 import { isTokenlessTool } from "./tools";
 import { latestTrackerLastSeenAt, trackerConnections, trackerTimestamp } from "./trackerConnection";
 
@@ -50,8 +51,13 @@ export function normalizeModel(raw: string | null | undefined): string | null {
 export interface UsageEntry {
   tool: string;
   model: string | null;
+  /** FRESH input (includes cache writes, never cache reads). */
   tokensInputDelta: number;
   tokensOutputDelta: number;
+  /** Cache reads: never part of "tokens". Absent from older trackers = 0. */
+  tokensCacheReadDelta?: number;
+  /** Cache writes: a SUBSET of tokensInputDelta, stored only for pricing. */
+  tokensCacheWriteDelta?: number;
 }
 
 export interface PresenceActivity {
@@ -142,6 +148,26 @@ export function utcDay(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
+/**
+ * The user's current zone for "today": the offset on their most recently heartbeating
+ * Session (null = an older tracker sent none = UTC, the pre-fix behaviour). One query,
+ * shared by /tracker/me, /users/me/tracker and stats so every "today" is the same day.
+ */
+export async function userTzOffsetMinutes(userId: string): Promise<number | null> {
+  const latest = await prisma.session.findFirst({
+    where: { userId },
+    orderBy: { lastHeartbeatAt: "desc" },
+    select: { tzOffsetMinutes: true },
+  });
+  return latest?.tzOffsetMinutes ?? null;
+}
+
+/** The DailyStat key of the user's local "today" (see lib/local-day.ts). */
+export async function userToday(userId: string, now: Date = new Date()): Promise<{ today: Date; tzOffsetMinutes: number | null }> {
+  const tzOffsetMinutes = await userTzOffsetMinutes(userId);
+  return { today: localDay(now, tzOffsetMinutes), tzOffsetMinutes };
+}
+
 /** Incremental streak update per §2.11 — called whenever a DailyStat row is written. */
 export async function touchStreak(userId: string, day: Date): Promise<void> {
   const existing = await prisma.userStreak.findUnique({ where: { userId } });
@@ -168,46 +194,53 @@ export async function touchStreak(userId: string, day: Date): Promise<void> {
   });
 }
 
-/** Folds a finished session into its DailyStat bucket (§2.10) and bumps the streak. */
+/**
+ * Folds a finished session into its DailyStat bucket(s) (§2.10) and bumps the streak.
+ * Seconds are split at the host's LOCAL midnights (lib/local-day.ts; null tz = UTC) and
+ * keyed by local date; tokens a legacy tracker put on the Session cannot be split and
+ * stay on the local day the session started.
+ */
 async function foldIntoDailyStat(session: Session, endedAt: Date): Promise<void> {
-  const day = utcDay(session.startedAt);
-  const activeSeconds = Math.max(
-    0,
-    Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000)
-  );
   // DailyStat.model is part of a composite unique key, which can't be null (Postgres
   // treats NULLs as distinct, breaking the upsert), so the aggregate uses an
   // "unknown" bucket for sessions with no model. Presence still reports null.
   // normalizeModel() here too: rows opened by a pre-normalization server may still
   // carry a sentinel, and those must land in the same bucket as null.
   const statModel = normalizeModel(session.model) ?? LEGACY_UNKNOWN_MODEL;
+  const parts = secondsByLocalDay(session.startedAt, endedAt, session.tzOffsetMinutes);
 
-  await prisma.dailyStat.upsert({
-    where: {
-      userId_date_model_tool: {
+  for (const [index, { day, seconds }] of parts.entries()) {
+    const tokens = index === 0
+      ? { tokensInput: session.tokensInput, tokensOutput: session.tokensOutput,
+          tokensCacheRead: session.tokensCacheRead, tokensCacheWrite: session.tokensCacheWrite }
+      : { tokensInput: 0, tokensOutput: 0, tokensCacheRead: 0n, tokensCacheWrite: 0 };
+    await prisma.dailyStat.upsert({
+      where: {
+        userId_date_model_tool: {
+          userId: session.userId,
+          date: day,
+          model: statModel,
+          tool: session.tool,
+        },
+      },
+      create: {
         userId: session.userId,
         date: day,
         model: statModel,
         tool: session.tool,
+        ...tokens,
+        activeSeconds: seconds,
       },
-    },
-    create: {
-      userId: session.userId,
-      date: day,
-      model: statModel,
-      tool: session.tool,
-      tokensInput: session.tokensInput,
-      tokensOutput: session.tokensOutput,
-      activeSeconds,
-    },
-    update: {
-      tokensInput: { increment: session.tokensInput },
-      tokensOutput: { increment: session.tokensOutput },
-      activeSeconds: { increment: activeSeconds },
-    },
-  });
-
-  await touchStreak(session.userId, day);
+      update: {
+        tokensInput: { increment: tokens.tokensInput },
+        tokensOutput: { increment: tokens.tokensOutput },
+        tokensCacheRead: { increment: tokens.tokensCacheRead },
+        tokensCacheWrite: { increment: tokens.tokensCacheWrite },
+        activeSeconds: { increment: seconds },
+      },
+    });
+    await touchStreak(session.userId, day);
+  }
 }
 
 /**
@@ -226,15 +259,17 @@ export async function foldUsageIntoDailyStat(
   day: Date,
   usage: readonly UsageEntry[]
 ): Promise<void> {
-  const merged = new Map<string, { model: string; tool: string; tokensInput: number; tokensOutput: number }>();
+  const merged = new Map<string, { model: string; tool: string; tokensInput: number; tokensOutput: number; tokensCacheRead: number; tokensCacheWrite: number }>();
   for (const entry of usage) {
-    if (entry.tokensInputDelta <= 0 && entry.tokensOutputDelta <= 0) continue;
+    if (entry.tokensInputDelta <= 0 && entry.tokensOutputDelta <= 0 && (entry.tokensCacheReadDelta ?? 0) <= 0) continue;
     const tool = entry.tool.trim() || "unknown"; // same fallback as routes/tracker.ts's presence tool
     const model = normalizeModel(entry.model) ?? LEGACY_UNKNOWN_MODEL;
     const key = `${model}\0${tool}`;
-    const bucket = merged.get(key) ?? { model, tool, tokensInput: 0, tokensOutput: 0 };
+    const bucket = merged.get(key) ?? { model, tool, tokensInput: 0, tokensOutput: 0, tokensCacheRead: 0, tokensCacheWrite: 0 };
     bucket.tokensInput += entry.tokensInputDelta;
     bucket.tokensOutput += entry.tokensOutputDelta;
+    bucket.tokensCacheRead += entry.tokensCacheReadDelta ?? 0;
+    bucket.tokensCacheWrite += entry.tokensCacheWriteDelta ?? 0;
     merged.set(key, bucket);
   }
   if (merged.size === 0) return;
@@ -249,11 +284,15 @@ export async function foldUsageIntoDailyStat(
         tool: bucket.tool,
         tokensInput: bucket.tokensInput,
         tokensOutput: bucket.tokensOutput,
+        tokensCacheRead: BigInt(bucket.tokensCacheRead),
+        tokensCacheWrite: bucket.tokensCacheWrite,
         activeSeconds: 0,
       },
       update: {
         tokensInput: { increment: bucket.tokensInput },
         tokensOutput: { increment: bucket.tokensOutput },
+        tokensCacheRead: { increment: BigInt(bucket.tokensCacheRead) },
+        tokensCacheWrite: { increment: bucket.tokensCacheWrite },
       },
     });
   }

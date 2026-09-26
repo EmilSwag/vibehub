@@ -201,6 +201,10 @@ model Session {
   endedAt          DateTime?
   tokensInput      Int           @default(0)
   tokensOutput     Int           @default(0)
+  // QA fix R2: cache reads (re-used context, never part of "tokens"; BigInt, a heavy
+  // day passes 2^31) and cache writes (a SUBSET of tokensInput, for pricing only).
+  tokensCacheRead  BigInt        @default(0)
+  tokensCacheWrite Int           @default(0)
   // Round 6 multi-tool presence: the latest `tools[]` the tracker reported with this
   // session's heartbeat — every tool it could see open at that moment, primary first,
   // as [{tool, model, projectAlias}]. Presence only: hours and tokens still accrue to
@@ -248,6 +252,10 @@ model DailyStat {
   tool          String
   tokensInput   Int      @default(0)
   tokensOutput  Int      @default(0)
+  // QA fix R2: cache reads (re-used context, never part of "tokens"; BigInt, a heavy
+  // day passes 2^31) and cache writes (a SUBSET of tokensInput, for pricing only).
+  tokensCacheRead  BigInt   @default(0)
+  tokensCacheWrite Int      @default(0)
   activeSeconds Int      @default(0)
 
   @@unique([userId, date, model, tool])

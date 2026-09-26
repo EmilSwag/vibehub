@@ -159,6 +159,10 @@ model Session {
   endedAt         DateTime?
   tokensInput     Int      @default(0)
   tokensOutput    Int      @default(0)
+  // QA fix R2: cache reads (re-used context, never part of "tokens"; BigInt, a heavy
+  // day passes 2^31) and cache writes (a SUBSET of tokensInput, for pricing only).
+  tokensCacheRead BigInt   @default(0)
+  tokensCacheWrite Int      @default(0)
   coTools         String?  // round 6: latest tools[] seen open, primary first; JSON-encoded — SQLite has no native Json type (mirror of `Json?` in schema.prisma, same divergence as ActivityEvent.payload)
   tzOffsetMinutes Int?     // mirror of schema.prisma — tracker host's local offset (minutes to add to UTC); null = unknown, ignored by Night Owl
 
@@ -192,6 +196,10 @@ model DailyStat {
   tool          String
   tokensInput   Int      @default(0)
   tokensOutput  Int      @default(0)
+  // QA fix R2: cache reads (re-used context, never part of "tokens"; BigInt, a heavy
+  // day passes 2^31) and cache writes (a SUBSET of tokensInput, for pricing only).
+  tokensCacheRead  BigInt   @default(0)
+  tokensCacheWrite Int      @default(0)
   activeSeconds Int      @default(0)
 
   @@unique([userId, date, model, tool])

@@ -17,3 +17,18 @@ const SqliteClient =
     : PrismaClient;
 
 export const prisma: PrismaClient = new SqliteClient();
+
+// QA fix R2: `tokensCacheRead` is a BigInt column (a heavy day of cache reads passes
+// 2^31), and JSON.stringify throws on a bigint. Any row that reaches res.json() or a
+// WebSocket frame unselected would turn into a 500, so serialize it as a number: every
+// value this column can hold in practice is far below 2^53.
+declare global {
+  interface BigInt { toJSON(): number }
+}
+if (typeof (BigInt.prototype as { toJSON?: unknown }).toJSON !== "function") {
+  Object.defineProperty(BigInt.prototype, "toJSON", {
+    value: function toJSON(this: bigint) { return Number(this); },
+    configurable: true,
+    writable: true,
+  });
+}
