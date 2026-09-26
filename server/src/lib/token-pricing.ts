@@ -12,7 +12,7 @@
 // Pure and Prisma-free on purpose: `__checks__/tokenPricing.check.ts` pins it without
 // a database, and the web's sync check imports it directly.
 
-export const TOKEN_PRICING_CHECKED_AT = "2026-09-16";
+export const TOKEN_PRICING_CHECKED_AT = "2026-09-26";
 
 export const TOKEN_PRICING_SOURCES = Object.freeze({
   openai: "https://developers.openai.com/api/docs/pricing",

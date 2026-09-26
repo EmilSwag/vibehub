@@ -38,7 +38,7 @@ const verified: [string, number, number][] = [
   ["claude-opus-5-5", 4, 20], ["gpt-6-sol", 2, 10], ["gpt-6-luna", 0.10, 0.50],
 ];
 eq("all and only researched tariff entries", TOKEN_PRICES.length, verified.length);
-eq("source snapshot date", TOKEN_PRICING_CHECKED_AT, "2026-09-16");
+eq("source snapshot date", TOKEN_PRICING_CHECKED_AT, "2026-09-26");
 ok("allowlist is immutable", Object.isFrozen(TOKEN_PRICES));
 
 for (const [model, input, output] of verified) {

@@ -36,7 +36,7 @@ const row = (model: string | null, tokensInput: number, tokensOutput: number) =>
 // ---- allowlist hygiene ----
 ok("allowlist is immutable", Object.isFrozen(TOKEN_PRICES));
 ok("allowlist is non-empty", TOKEN_PRICES.length > 40);
-eq("source snapshot date", TOKEN_PRICING_CHECKED_AT, "2026-09-16");
+eq("source snapshot date", TOKEN_PRICING_CHECKED_AT, "2026-09-26");
 for (const unknown of [null, undefined, "", "unknown", "<synthetic>", "codex", "claude-code", "GPT-5", "gpt-5 ", "claude-opus-5[1m]", "__proto__", "constructor", 5, {}]) {
   eq(`unlisted ${JSON.stringify(unknown)} is not priced`, getTokenPrice(unknown), undefined);
   eq(`unlisted ${JSON.stringify(unknown)} has no units`, costUnits(unknown, 100, 50), null);

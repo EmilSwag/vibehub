@@ -86,7 +86,7 @@ const grouped = groupStatsByModelWithCosts(rows([
 eq("model row = sum of its buckets' server ≈$", grouped[0].cost.usd, 40);
 eq("tool buckets keep their own server ≈$", grouped[0].byTool.map((b) => b.cost.usd).sort(), [10, 30]);
 
-// ---- tracker panel (no server figure on /users/me/tracker): exact only ----
+// ---- tracker panel, older server (sources without estimatedUsd): exact client only ----
 const source = (over: Partial<TrackerSource>): TrackerSource => ({
   tool: "claude-code", model: "claude-opus-5-5", lastSeenAt: "2026-09-26T00:00:00.000Z",
   tokensToday: 2_000_000, tokens7d: 2_000_000, activeSecondsToday: 60, ...over,
@@ -102,6 +102,23 @@ eq("a day of only unknown models has no ≈$", estimateTodayCost([source({ model
 eq("an unknown model beside a known one makes today partial, not guessed",
   estimateTodayCost([source({}), source({ model: "claude-opus-9" })], 4_000_000).status, "partial");
 eq("a tokenless-only day is unmeasured, not free", estimateTodayCost([source({ tool: "cursor", tokensToday: 0 })], 0).reason, "tokenless-tool");
+
+// ---- tracker panel, current server: its exact ≈$ per source wins ----
+// Live E2E 2026-09-26: 3 Opus 5.5 turns = in 1,500 + cache write 15,000 + out 4,000 fresh,
+// 350,000 cache reads → the server prices $0.231 (same as /tracker/me in the Mac app).
+const e2e = source({ tokensToday: 20_500, cachedTokensToday: 350_000, estimatedUsd: 0.231 });
+const { estimatedUsd: _drop, ...e2eOld } = e2e;
+console.log(`info old client split for the E2E source: ${estimateSourceCost(e2eOld).usd}`);
+eq("source: the server's exact ≈$ wins over the client split", estimateSourceCost(e2e).usd, 0.231);
+eq("today: server figures are summed", estimateTodayCost([e2e, source({ model: "claude-sonnet-5", estimatedUsd: 0.5 })], 2_020_500).usd, 0.731);
+eq("today: a null server figure (no verified price) is partial, never guessed",
+  [estimateTodayCost([e2e, source({ model: "claude-opus-9", estimatedUsd: null })], 2_020_500).usd,
+   estimateTodayCost([e2e, source({ model: "claude-opus-9", estimatedUsd: null })], 2_020_500).status], [0.231, "partial"]);
+eq("a source the server could not price has no ≈$", estimateSourceCost(source({ model: "claude-opus-9", estimatedUsd: null })).usd, null);
+eq("one source from an older server → the whole day uses the client estimate",
+  estimateTodayCost([e2e, source({})], 2_020_500).usd, estimateTodayCost([e2eOld, source({})], 2_020_500).usd);
+eq("cache-read-only source (no fresh tokens) → client prices the cache reads",
+  estimateSourceCost(source({ tokensToday: 0, cachedTokensToday: 1_000_000, estimatedUsd: 0.2 })).usd, 0.2);
 
 // R1 / R5 end to end: never "null", never "unknown".
 eq("R1: the new Opus reads as a name", humanizeModel("claude-opus-5-5"), "Opus 5.5");

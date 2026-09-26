@@ -41,6 +41,9 @@ export interface TrackerSource {
   /** QA R2: cache reads today — secondary, NEVER inside `tokensToday` (fresh input +
    * output). Optional: a server older than the QA fix omits it. */
   cachedTokensToday?: number;
+  /** Server's exact ≈$ for today (real input/output/cache split). null = no verified
+   * price; absent = older server (the web then falls back to its own estimate). */
+  estimatedUsd?: number | null;
 }
 
 /** A non-revoked tracker token, i.e. one machine the tracker is installed on. */

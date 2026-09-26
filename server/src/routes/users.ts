@@ -15,11 +15,13 @@ import { localDay, localDayWindow, openSessionToday } from "../lib/local-day";
 import { normalizeModel, presenceFor } from "../lib/sessions";
 import {
   createTrackerTokenSchema,
+  isTokenlessTool,
   patchMeSchema,
   putLinksSchema,
   rolesToCsv,
   suggestedUsersQuerySchema,
 } from "../lib/schemas";
+import { estimateUsd } from "../lib/token-pricing";
 import { toMeUser, toPublicLink, toPublicUser } from "../lib/serializers";
 import { latestTrackerLastSeenAt, trackerConnections } from "../lib/trackerConnection";
 import { requireAuth } from "../middleware/auth";
@@ -437,6 +439,17 @@ router.get(
     );
 
     const sources = new Map<string, TrackerSource>();
+    // Today's exact input/output/cache-write split per source, kept off the wire: it prices
+    // `estimatedUsd` below, so the web shows the same ≈$ as the Mac app (/tracker/me)
+    // instead of guessing an input/output split from the fresh total.
+    const splits = new Map<TrackerSource, { input: number; output: number; cacheWrite: number }>();
+    const addToday = (source: TrackerSource, input: number, output: number, cacheWrite: number): void => {
+      const split = splits.get(source) ?? { input: 0, output: 0, cacheWrite: 0 };
+      split.input += input;
+      split.output += output;
+      split.cacheWrite += cacheWrite;
+      splits.set(source, split);
+    };
     const seen = (tool: string, model: string | null, at: Date): TrackerSource => {
       const key = `${tool}\0${model ?? ""}`;
       const existing = sources.get(key);
@@ -459,6 +472,7 @@ router.get(
         source.tokensToday += tokensTotal;
         source.cachedTokensToday += Number(row.tokensCacheRead);
         source.activeSecondsToday += row.activeSeconds;
+        addToday(source, row.tokensInput, row.tokensOutput, row.tokensCacheWrite);
       }
     }
 
@@ -477,6 +491,7 @@ router.get(
       if (part.startedToday) {
         source.tokensToday += tokensTotal;
         source.cachedTokensToday += Number(session.tokensCacheRead);
+        addToday(source, session.tokensInput, session.tokensOutput, session.tokensCacheWrite);
       }
     }
 
@@ -509,7 +524,16 @@ router.get(
         tools: presence.tools,
         lastSeenAt: presence.lastSeenAt,
       },
-      sources: [...sources.values()].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()),
+      sources: [...sources.values()]
+        .sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime())
+        .map((source) => {
+          const split = splits.get(source) ?? { input: 0, output: 0, cacheWrite: 0 };
+          // null = no verified price (or a tool that reports no tokens): the web shows "≈ $—".
+          const estimatedUsd = isTokenlessTool(source.tool) && source.tokensToday <= 0
+            ? null
+            : estimateUsd(source.model, split.input, split.output, source.cachedTokensToday, split.cacheWrite);
+          return { ...source, estimatedUsd };
+        }),
       devices: tokens.map((t) => ({
         id: t.id, label: t.label, lastUsedAt: t.lastUsedAt, createdAt: t.createdAt,
         ...trackerConnections.snapshot(userId, t.id),

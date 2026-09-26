@@ -2,7 +2,7 @@
 // Evidence, exact aliases and assumptions: meta/resources/vibehub-token-pricing.md.
 // No network requests, provider SDKs, family matching or inferred model identities.
 
-export const TOKEN_PRICING_CHECKED_AT = "2026-09-16";
+export const TOKEN_PRICING_CHECKED_AT = "2026-09-26";
 
 export const TOKEN_PRICING_SOURCES = Object.freeze({
   openai: "https://developers.openai.com/api/docs/pricing",
