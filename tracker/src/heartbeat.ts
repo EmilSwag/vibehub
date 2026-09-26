@@ -1,8 +1,8 @@
 import { attestedToolsFor, configFingerprint, heartbeatIntervalMs, idleThresholdMs, projectConfig, readConfig } from "./config";
-import { Detector } from "./detector";
-import type { SeenSource } from "./detector";
+import { Detector, mergeUsage } from "./detector";
+import type { DetectionUsage, SeenSource } from "./detector";
 import { resolveProjectAlias } from "./projectAlias";
-import { eventTime, isSupportedTool, localTzOffsetMinutes, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
+import { eventTime, isSupportedTool, isTokenlessTool, localTzOffsetMinutes, MAX_RECORD_AGE_MS, objectRecord, projectHeartbeat, safeApiOrigin, safeDeviceToken, safeModel } from "./privacy";
 import type { SendResult } from "./queue";
 import { markAuthRejected, writeOfflineStatus, writeStatus } from "./statusFile";
 import { clearStopRequest, isStopRequested } from "./stopRequest";
@@ -25,8 +25,15 @@ export interface LoopState {
   activeSession: ActiveSession | null;
   lastActivityAt: number | null;
   detector: Detector;
-  /** Compatibility field: never buffers hidden, offline or cross-tick usage. */
+  /**
+   * QA fix (R3): measured usage that has been READ but not yet delivered - a heartbeat
+   * that failed, a tick the watchdog cancelled, or tokens read late with no live
+   * activity to ride on. It goes out with the next heartbeat instead of being lost.
+   * Bounded (MAX_USAGE_ENTRIES keys, MAX_RECORD_AGE_MS old) and bound to the config it
+   * was read under: any config/account change or auth rejection drops it.
+   */
   pendingUsage: Map<string, HeartbeatUsage>;
+  pendingSince: number | null;
   sourcesSeen: Map<string, SeenSource>;
   modelChallenger: { model: string; polls: number } | null;
   activeWindowMs: number;
@@ -45,7 +52,7 @@ export function createLoopState(config?: TrackerConfig): LoopState {
   const attestedTools = valid ? attestedToolsFor(valid) : [];
   return { activeSession: null, lastActivityAt: null,
     detector: new Detector(activeWindowMs, undefined, attestedTools),
-    pendingUsage: new Map(), sourcesSeen: new Map(), modelChallenger: null,
+    pendingUsage: new Map(), pendingSince: null, sourcesSeen: new Map(), modelChallenger: null,
     activeWindowMs, attestedTools, stopping: false, epoch: 0,
     binding: valid ? configFingerprint(valid) : null,
     requestAbort: null, loadConfig: readConfig };
@@ -60,6 +67,7 @@ export function clearCollectedState(state: LoopState, config?: TrackerConfig): v
   state.activeSession = null;
   state.lastActivityAt = null;
   state.pendingUsage.clear();
+  state.pendingSince = null;
   state.sourcesSeen.clear();
   state.modelChallenger = null;
   state.binding = config ? configFingerprint(config) : null;
@@ -75,6 +83,42 @@ export function clearCollectedState(state: LoopState, config?: TrackerConfig): v
     state.attestedTools = [];
     state.detector = new Detector(state.activeWindowMs);
   }
+}
+
+/**
+ * QA fix (R3): a TRANSIENT failure (network, 5xx, a stuck tick) ends the session view
+ * but keeps what was read - the log cursors and the undelivered usage - so the next
+ * successful tick delivers it. Before this every hiccup re-primed every log at EOF and
+ * the tokens written meanwhile were never counted. Credentials, consent and config
+ * changes still go through clearCollectedState, which forgets everything.
+ */
+export function softReset(state: LoopState): void {
+  state.epoch += 1;
+  state.requestAbort?.abort();
+  state.requestAbort = null;
+  state.activeSession = null;
+  state.lastActivityAt = null;
+  state.sourcesSeen.clear();
+  state.modelChallenger = null;
+}
+
+/** Keeps undelivered usage for the next heartbeat, within the bounds on LoopState. */
+export function stashUsage(state: LoopState, usage: readonly DetectionUsage[], now = Date.now()): void {
+  if (state.pendingSince !== null && now - state.pendingSince > MAX_RECORD_AGE_MS) {
+    state.pendingUsage.clear();
+    state.pendingSince = null;
+  }
+  for (const u of usage) {
+    if (mergeUsage(state.pendingUsage as Map<string, DetectionUsage>, u) && state.pendingSince === null) state.pendingSince = now;
+  }
+}
+
+/** Pending usage plus this tick's, as one bounded list; what does not fit stays pending. */
+function withPending(state: LoopState, usage: readonly DetectionUsage[]): { send: DetectionUsage[]; rest: DetectionUsage[] } {
+  const merged = new Map<string, DetectionUsage>();
+  const rest: DetectionUsage[] = [];
+  for (const u of [...usage, ...state.pendingUsage.values()]) if (!mergeUsage(merged, u)) rest.push(u);
+  return { send: [...merged.values()], rest };
 }
 
 function sameConfig(config: TrackerConfig, load: () => TrackerConfig | null): boolean {
@@ -112,7 +156,8 @@ async function requestTracker(
         ...(valid && !retiring && at !== null ? { connectionLastSeenAt: new Date(at).toISOString() } : {}) };
     }
     try { await res.body?.cancel(); } catch {}
-    return { ok: !controller.signal.aborted && res.ok, authRejected };
+    const refused = res.status === 400 || res.status === 413 || res.status === 422;
+    return { ok: !controller.signal.aborted && res.ok, authRejected, ...(refused ? { refused } : {}) };
   } catch { return { ok: false, authRejected: false }; }
   finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
 }
@@ -122,7 +167,8 @@ export async function postHeartbeat(
   apiUrl: string, deviceToken: string, payload: HeartbeatPayload, signal?: AbortSignal
 ): Promise<SendResult> {
   const safe = projectHeartbeat(payload);
-  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: false, authRejected: false };
+  // A body our own boundary refuses is refused on every retry, same as a server 400.
+  return safe ? requestTracker(apiUrl, deviceToken, safe, signal) : { ok: false, authRejected: false, refused: true };
 }
 
 /** Connection-v1 transport receipt, NOT login verification or a fake ACTIVE event. */
@@ -201,15 +247,38 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     writeSnapshot(state, undefined, false);
     return false;
   };
-  const failed = (result: SendResult): void => {
-    clearCollectedState(state, safe);
+  const binding = state.binding;
+  // Usage read this tick and not yet delivered. Whatever way the tick ends short of a
+  // delivered heartbeat, it is stashed rather than dropped - unless the config it was
+  // read under is gone (then it belongs to nobody and is forgotten).
+  let unsent: DetectionUsage[] = [];
+  const keepUnsent = (): void => {
+    if (unsent.length && !state.stopping && state.binding === binding && binding !== null) stashUsage(state, unsent);
+    unsent = [];
+  };
+  const failed = (result: SendResult, carriedUsage = false): void => {
+    if (result.authRejected) {
+      unsent = [];
+      clearCollectedState(state, safe);
+    } else if (result.refused && carriedUsage) {
+      // A refused body is refused again on every retry: stashing its usage would jam
+      // the tracker offline for good. Drop that usage; the log cursors stay put.
+      unsent = [];
+      state.pendingUsage.clear();
+      state.pendingSince = null;
+      console.warn("tracker: server refused a heartbeat; its usage was dropped");
+      softReset(state);
+    } else {
+      keepUnsent();
+      softReset(state);
+    }
     writeSnapshot(state, safe, false, result.authRejected);
   };
   const send = async (payload: HeartbeatPayload): Promise<boolean> => {
     if (!allowed()) return false;
     const result = await postHeartbeat(safe.apiUrl, safe.deviceToken, payload, controller.signal);
     if (!allowed()) return false;
-    if (!result.ok) { failed(result); return false; }
+    if (!result.ok) { failed(result, payload.eventType === "heartbeat"); return false; }
     return true;
   };
   try {
@@ -220,13 +289,15 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
     const current = state.activeSession ? { tool: state.activeSession.tool, cwd: null, projectHint: state.activeSession.projectHint } : undefined;
     const detection = await state.detector.detect(Date.now(), current,
       (o) => resolveProjectAlias(null, safe, o.projectHint) !== null, controller.signal);
+    unsent = [...(detection?.usage ?? []), ...state.detector.takeLateUsage()];
     if (!allowed()) return;
-    state.pendingUsage.clear();
     state.sourcesSeen.clear();
     state.modelChallenger = null;
     const now = new Date().toISOString();
     const alias = detection ? resolveProjectAlias(null, safe, detection.projectHint) : null;
     if (!detection || !detection.active || alias === null || !isSupportedTool(detection.tool)) {
+      // No live activity to ride on: anything read (late usage) waits for the next beat.
+      keepUnsent();
       if (state.activeSession && !await send(sessionEvent("session_end", state.activeSession, now))) return;
       state.activeSession = null;
       state.lastActivityAt = null;
@@ -245,13 +316,30 @@ export async function tick(config: TrackerConfig, state: LoopState): Promise<voi
       if (!await send(sessionEvent("session_start", session, now))) return;
       state.activeSession = session;
     }
+    // Pending usage rides along. Not on a tokenless primary, though: the server refuses
+    // counts on its legacy sums for one, so they wait for a measured primary instead.
+    let usage: DetectionUsage[] = [];
+    if (isTokenlessTool(detection.tool)) keepUnsent();
+    else {
+      const { send: outgoing, rest } = withPending(state, unsent);
+      state.pendingUsage.clear();
+      state.pendingSince = null;
+      if (rest.length) stashUsage(state, rest);
+      // From here `unsent` is everything in flight: a failed or abandoned send stashes it.
+      unsent = usage = outgoing;
+    }
     if (!await send({ eventType: "heartbeat", projectAlias: alias, tool: detection.tool, model,
       tokensInputDelta: detection.tokensInputDelta, tokensOutputDelta: detection.tokensOutputDelta,
-      usage: detection.usage, tools: buildTools(state, safe), tzOffsetMinutes: localTzOffsetMinutes(),
+      usage, tools: buildTools(state, safe), tzOffsetMinutes: localTzOffsetMinutes(),
       occurredAt: now })) return;
+    unsent = [];
     state.lastActivityAt = detection.lastActivityAt;
     if (allowed()) writeSnapshot(state, safe, true, false, connection.connectionLastSeenAt);
-  } finally { if (state.requestAbort === controller) state.requestAbort = null; }
+  } finally {
+    // A tick that ended early (cancelled, config re-checked, stopped) keeps what it read.
+    keepUnsent();
+    if (state.requestAbort === controller) state.requestAbort = null;
+  }
 }
 
 function settleWithin(promise: Promise<unknown>, ms: number): Promise<void> {
@@ -332,7 +420,8 @@ export function runLoop(initialConfig: TrackerConfig, options: RunLoopOptions = 
       const stuckFor = Date.now() - inFlight.startedAt;
       if (stuckFor <= watchdogMs) return;
       console.warn(`tracker: tick #${inFlight.seq} exceeded watchdog ${watchdogMs} ms; cancelling it`);
-      clearCollectedState(state, config);
+      // Transient by definition: keep the log cursors and undelivered usage (QA fix R3).
+      softReset(state);
       inFlight = null;
     }
     const startedAt = Date.now();

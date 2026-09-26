@@ -6,9 +6,18 @@ import type { SupportedTool } from "../privacy";
 
 export const MAX_LOG_FILES = 128;
 export const MAX_DIRECTORY_ENTRIES = 2048;
-export const MAX_CHUNK_BYTES = 1024 * 1024;
+/**
+ * QA fix (R3): the most bytes one poll reads from one file. A bigger append is no
+ * longer a reason to jump to EOF (which silently dropped every token in it - a single
+ * tool result can be megabytes); the reader catches up chunk by chunk over the next
+ * polls instead. Only a backlog beyond MAX_BACKLOG_BYTES (a bulk rewrite, not a live
+ * session) is still skipped.
+ */
+export const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
+export const MAX_BACKLOG_BYTES = 64 * 1024 * 1024;
 export const MAX_LINE_BYTES = 256 * 1024;
-export const MAX_RECORDS_PER_FILE = 256;
+/** Records parsed per file per poll. Past the cap the reader STOPS and resumes next poll. */
+export const MAX_RECORDS_PER_FILE = 4096;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -37,7 +46,8 @@ const regularFile = (s: fs.BigIntStats): boolean => s.isFile() && !s.isSymbolicL
  * files, ancestor/project scans or contents outside these layouts. Missing or
  * unverifiable filesystem identity means unavailable, never a wider fallback.
  *
- * First sight / rotation / oversized append primes EOF and emits nothing.
+ * First sight / rotation / a backlog beyond MAX_BACKLOG_BYTES primes EOF and emits
+ * nothing. Any smaller append is read in bounded chunks until caught up.
  * Complete JSONL strings (which MAY contain prompts/code/tool output) are read
  * and parsed transiently. Only the visitor's explicit metadata projection may
  * survive a call. Cursors contain numbers/booleans, NEVER raw partial lines.
@@ -168,24 +178,24 @@ export class JsonlTailer {
       const size = Number(s.size);
       let cursor = this.states.get(file);
       if (!cursor || cursor.dev !== s.dev || cursor.ino !== s.ino || size < cursor.size ||
-          (size === cursor.size && s.mtimeNs !== cursor.mtime) || size - cursor.offset > MAX_CHUNK_BYTES) {
+          (size === cursor.size && s.mtimeNs !== cursor.mtime) || size - cursor.offset > MAX_BACKLOG_BYTES) {
         this.states.set(file, this.prime(fd, s));
         return;
       }
       if (size <= cursor.offset) return;
       const start = cursor.offset;
-      const buffer = Buffer.alloc(size - start);
+      const buffer = Buffer.alloc(Math.min(size - start, MAX_CHUNK_BYTES));
       const bytes = fs.readSync(fd, buffer, 0, buffer.length, start);
       const current = this.checkedPath(file, false);
       if (signal?.aborted || !current || !sameFile(s, current)) { this.states.delete(file); return; }
-      cursor.size = size;
-      cursor.mtime = s.mtimeNs;
       let lineStart = 0;
       let records = 0;
       while (lineStart < bytes && !signal?.aborted) {
         const end = buffer.indexOf(10, lineStart);
         if (end < 0 || end >= bytes) break;
-        if (!cursor.skipPartial && end - lineStart <= MAX_LINE_BYTES && records++ < MAX_RECORDS_PER_FILE) {
+        if (!cursor.skipPartial && end - lineStart <= MAX_LINE_BYTES) {
+          // Out of budget: stop BEFORE this line and resume from it next poll.
+          if (records++ >= MAX_RECORDS_PER_FILE) break;
           try { visit(JSON.parse(utf8.decode(buffer.subarray(lineStart, end))), cursor.generation); }
           catch { /* No error text: it could contain a raw log line or local path. */ }
         }
@@ -193,9 +203,13 @@ export class JsonlTailer {
         lineStart = end + 1;
       }
       cursor.offset = start + lineStart;
+      // The cursor only counts as caught up once it has consumed everything it saw;
+      // until then `size`/`mtime` stay at their previous values so a rewrite check
+      // (same size, new mtime) cannot mistake an unread tail for a rewritten file.
+      if (start + bytes >= size) { cursor.size = size; cursor.mtime = s.mtimeNs; }
       // No partial string is retained. Re-read a small incomplete line next poll;
       // discard a giant fragment through its next newline without parsing it.
-      if (cursor.skipPartial || bytes - lineStart > MAX_LINE_BYTES) {
+      if (records <= MAX_RECORDS_PER_FILE && (cursor.skipPartial || bytes - lineStart > MAX_LINE_BYTES)) {
         cursor.offset = start + bytes;
         cursor.skipPartial = true;
       }

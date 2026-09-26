@@ -68,24 +68,26 @@ export const MAX_USAGE_ENTRIES = 30;
 /** Widest UTC offset in use is 14 h; anything beyond it is not a zone and is dropped. */
 export const MAX_TZ_OFFSET_MINUTES = 840;
 
-// Exact IDs already documented in the tracker and the project's reviewed model
-// catalog. This is a data allowlist, NOT model discovery, pricing or an alias map.
-// Unknown/custom/new IDs become null; never infer a model from a tool or title.
-const CLAUDE_MODELS = new Set([
-  "claude-fable-5-1", "claude-fable-5", "claude-opus-5", "claude-opus-4-8",
-  "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5-20251101", "claude-opus-4-5",
-  "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5-20250929", "claude-sonnet-4-5",
-  "claude-haiku-4-5-20251001", "claude-haiku-4-5",
-]);
-const CODEX_MODELS = new Set([
-  "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro",
-  "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro", "gpt-5.2", "gpt-5.2-pro",
-  "gpt-5.1", "gpt-5", "gpt-5-2025-08-07", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro",
-  "gpt-4.1", "gpt-4.1-2025-04-14", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o",
-  "gpt-4o-2024-08-06", "gpt-4o-2024-05-13", "gpt-4o-mini", "o1", "o1-pro", "o3-pro",
-  "o3", "o4-mini", "o3-mini", "gpt-5-codex", "gpt-5.1-codex", "gpt-5.1-codex-mini",
-  "gpt-5.1-codex-max", "gpt-5.2-codex", "gpt-5.3-codex",
-]);
+// Model ids are accepted by a SAFE SHAPE, not an allowlist (QA fix, R1): an allowlist
+// went stale the day a new model shipped (`claude-opus-5-5`) and every token it wrote
+// was booked with model null, so no name and no ~$. The shapes below admit a provider's
+// API id in its documented form and nothing else - lowercase, bounded, no spaces, no
+// vendor display ids ("claude-4.5-sonnet", "gpt-5-high"). Pricing stays exact on the
+// server: an id it has no verified price for shows its name and no ~$, never a guess.
+const MAX_MODEL_ID_LENGTH = 60;
+// claude-<family>-<major>[-<minor>[-<patch>]][-<YYYYMMDD>]: claude-opus-5-5, claude-haiku-4-5-20251001.
+const CLAUDE_MODEL = /^claude-[a-z]{3,12}(?:-\d{1,2}){1,3}(?:-\d{8})?$/;
+// gpt-<major>[.<minor>][-<word>|-<YYYY-MM-DD>]*: gpt-6-sol, gpt-5.1-codex-max, gpt-4o-2024-08-06.
+const GPT_MODEL = /^gpt-\d{1,2}(?:\.\d{1,2})?o?(?:-(?:[a-z]{2,12}|\d{4}-\d{2}-\d{2}))*$/;
+// Reasoning-effort suffixes are how vendors DISPLAY a setting, not an API model id.
+const EFFORT_SUFFIX = /-(?:minimal|low|medium|high|xhigh)(?:-|$)/;
+// The o-series is closed: no new ids have shipped in years, so it stays an exact list.
+const O_SERIES = new Set(["o1", "o1-pro", "o3", "o3-pro", "o3-mini", "o4-mini"]);
+
+function claudeModel(value: string): boolean { return CLAUDE_MODEL.test(value); }
+function codexModel(value: string): boolean {
+  return O_SERIES.has(value) || (GPT_MODEL.test(value) && !EFFORT_SUFFIX.test(value));
+}
 
 export function objectRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -121,19 +123,14 @@ export function isTokenlessTool(tool: unknown): tool is TokenlessTool {
 }
 
 export function safeModel(value: unknown, tool?: SupportedTool): string | null {
-  if (typeof value !== "string") return null;
-  const accepted = tool === "claude-code" ? CLAUDE_MODELS.has(value)
-    : tool === "codex" ? CODEX_MODELS.has(value)
+  if (typeof value !== "string" || value.length > MAX_MODEL_ID_LENGTH) return null;
+  const accepted = tool === "claude-code" ? claudeModel(value)
+    : tool === "codex" ? codexModel(value)
     // Multi-model hosts (Quadcode, Cursor, Windsurf, and the receiver in general) can
-    // drive any reviewed model, so the union of the existing allowlists applies.
-    // Deliberately NO id is added on their behalf — an observed-but-unreviewed id stays
-    // null rather than becoming a new entry with no pricing evidence behind it.
-    //
-    // Round 5, worth knowing before someone "fixes" this: a vendor's hook reports the
-    // id that vendor displays, which is not always the provider's API id. Those land on
-    // the `null` branch and the tool is reported with no model, which is the honest
-    // answer — inventing a mapping would attribute work to a model nobody verified.
-    : CLAUDE_MODELS.has(value) || CODEX_MODELS.has(value);
+    // drive either provider, so either shape applies. A vendor's hook reports the id
+    // that vendor DISPLAYS, which is not always the provider's API id; those fail both
+    // shapes and the tool is reported with no model rather than a mapped guess.
+    : claudeModel(value) || codexModel(value);
   return accepted ? value : null;
 }
 
@@ -163,11 +160,25 @@ export function countOrZero(value: unknown): number {
 }
 
 export function eventTime(value: unknown, now: number, maxAgeMs = MAX_EVENT_AGE_MS): number | null {
+  return eventTimeWithin(value, now, Math.min(maxAgeMs, MAX_EVENT_AGE_MS));
+}
+
+/**
+ * QA fix (R3): the timestamp of a record the tailer JUST read (it was appended since the
+ * last poll), for COUNTING its tokens only. A record can be minutes old by the time it
+ * is read - a slow tick, a network outage, a big backlog caught up in chunks - and
+ * dropping it lost real usage. Presence never uses this: activity stays on eventTime's
+ * 5-minute freshness, and nothing older than MAX_RECORD_AGE_MS is ever counted.
+ */
+export function countTime(value: unknown, now: number): number | null {
+  return eventTimeWithin(value, now, MAX_RECORD_AGE_MS);
+}
+
+function eventTimeWithin(value: unknown, now: number, maxAgeMs: number): number | null {
   if (typeof value !== "string" || value.length > 35 ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
   const at = Date.parse(value);
-  return Number.isFinite(at) && at <= now + MAX_FUTURE_SKEW_MS &&
-    at >= now - Math.min(maxAgeMs, MAX_EVENT_AGE_MS) ? Math.min(at, now) : null;
+  return Number.isFinite(at) && at <= now + MAX_FUTURE_SKEW_MS && at >= now - maxAgeMs ? Math.min(at, now) : null;
 }
 
 /** A user-controlled display identifier, never a path, URL, control sequence or free-form body. */
@@ -203,17 +214,33 @@ export function safeDeviceToken(value: unknown): value is string {
     !/[^A-Za-z0-9._~-]/.test(value);
 }
 
+/** Optional cache counters: absent, or a bounded count. Anything else rejects the entry. */
+function optionalCount(value: unknown): value is number | undefined {
+  return value === undefined || isCount(value);
+}
+
 export function projectUsage(value: unknown): HeartbeatUsage | null {
   const u = objectRecord(value);
   // A tokenless tool has no measured counter anywhere, so an entry claiming one is
   // wrong by construction. Rejecting beats zeroing: a zero would read as "measured
   // nothing", which is a different, false claim.
   if (!u || !isSupportedTool(u.tool) || u.estimated === true || isTokenlessTool(u.tool) ||
-      !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta)) return null;
-  return {
+      !isCount(u.tokensInputDelta) || !isCount(u.tokensOutputDelta) ||
+      !optionalCount(u.tokensCacheReadDelta) || !optionalCount(u.tokensCacheWriteDelta)) return null;
+  // Cache writes are billed input: they are a SUBSET of tokensInputDelta, never extra.
+  if ((u.tokensCacheWriteDelta ?? 0) > u.tokensInputDelta) return null;
+  const result: HeartbeatUsage = {
     tool: u.tool, model: safeModel(u.model, u.tool),
     tokensInputDelta: u.tokensInputDelta, tokensOutputDelta: u.tokensOutputDelta,
   };
+  if (u.tokensCacheReadDelta) result.tokensCacheReadDelta = u.tokensCacheReadDelta;
+  if (u.tokensCacheWriteDelta) result.tokensCacheWriteDelta = u.tokensCacheWriteDelta;
+  return result;
+}
+
+/** Any counter at all: fresh input, output or cache reads. */
+export function hasUsage(u: { tokensInputDelta: number; tokensOutputDelta: number; tokensCacheReadDelta?: number }): boolean {
+  return u.tokensInputDelta > 0 || u.tokensOutputDelta > 0 || (u.tokensCacheReadDelta ?? 0) > 0;
 }
 
 /** Final outgoing projection. Callers cannot serialize extra properties or old event kinds. */
@@ -239,11 +266,13 @@ export function projectHeartbeat(value: unknown, now = Date.now()): HeartbeatPay
   for (const entry of p.usage) {
     const u = projectUsage(entry);
     if (!u) return null;
-    if (u.tokensInputDelta || u.tokensOutputDelta) usage.push(u);
+    if (hasUsage(u)) usage.push(u);
   }
   const input = usage.reduce((sum, u) => sum + u.tokensInputDelta, 0);
   const output = usage.reduce((sum, u) => sum + u.tokensOutputDelta, 0);
-  if (!isCount(input) || !isCount(output)) return null;
+  const cacheRead = usage.reduce((sum, u) => sum + (u.tokensCacheReadDelta ?? 0), 0);
+  const cacheWrite = usage.reduce((sum, u) => sum + (u.tokensCacheWriteDelta ?? 0), 0);
+  if (!isCount(input) || !isCount(output) || !isCount(cacheRead) || !isCount(cacheWrite)) return null;
   result.usage = usage;
   // Unknown usage is ABSENT on the wire, not zero. A tokenless primary with nothing
   // measured anywhere omits the legacy sums entirely, so an older server reading only
@@ -253,6 +282,8 @@ export function projectHeartbeat(value: unknown, now = Date.now()): HeartbeatPay
   if (!isTokenlessTool(result.tool) || usage.length) {
     result.tokensInputDelta = input;
     result.tokensOutputDelta = output;
+    if (cacheRead) result.tokensCacheReadDelta = cacheRead;
+    if (cacheWrite) result.tokensCacheWriteDelta = cacheWrite;
   }
   if (p.tools !== undefined) {
     if (!Array.isArray(p.tools) || p.tools.length > SUPPORTED_TOOLS.length) return null;

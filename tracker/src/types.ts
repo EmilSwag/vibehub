@@ -99,6 +99,14 @@ export interface HeartbeatUsage {
   tokensInputDelta: number;
   tokensOutputDelta: number;
   /**
+   * QA fix (R2): cache counters, separate from the fresh `tokensInputDelta`. Cache
+   * READS are re-used context (98% of a Claude Code day) and are never "tokens" in the
+   * UI; cache WRITES are a SUBSET of tokensInputDelta, sent only so the server can
+   * price them at the cache-write rate. Both optional; an older server strips them.
+   */
+  tokensCacheReadDelta?: number;
+  tokensCacheWriteDelta?: number;
+  /**
    * Legacy wire field. It once marked counts derived from chat-body character
    * lengths; that estimator is gone and `projectUsage` now REJECTS any entry
    * carrying `estimated: true` outright, so nothing this tracker sends can set it.
@@ -134,6 +142,9 @@ export interface HeartbeatPayload {
   /** Legacy sums over `usage` — still sent so servers without v2 keep counting. */
   tokensInputDelta?: number;
   tokensOutputDelta?: number;
+  /** Legacy sums of the per-entry cache counters (see HeartbeatUsage). */
+  tokensCacheReadDelta?: number;
+  tokensCacheWriteDelta?: number;
   /**
    * Heartbeat v2: precise per-(tool, model) deltas since the previous heartbeat,
    * nonzero entries only. When present the server books stats from this and

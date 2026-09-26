@@ -1,4 +1,4 @@
-import { eventTime, folderFromCwd, isCount, MAX_EVENT_AGE_MS, objectRecord, safeModel } from "../privacy";
+import { countTime, folderFromCwd, isCount, MAX_EVENT_AGE_MS, MAX_RECORD_AGE_MS, objectRecord, safeModel } from "../privacy";
 import { JsonlTailer } from "./jsonlTail";
 import type { Adapter, Observation } from "./types";
 import { UsageAccumulator } from "./usage";
@@ -13,11 +13,12 @@ interface FileMeta {
   projectHint: string | null;
   input: number | null;
   output: number | null;
+  cached: number;
   counterAt: number;
   lastActivityAt: number;
 }
 const emptyMeta = (generation: number): FileMeta => ({ generation, invalidProject: false, contextModel: null, contextProject: null,
-  contextAt: 0, model: null, projectHint: null, input: null, output: null, counterAt: 0, lastActivityAt: 0 });
+  contextAt: 0, model: null, projectHint: null, input: null, output: null, cached: 0, counterAt: 0, lastActivityAt: 0 });
 
 /**
  * Only documented event_msg/token_count total_token_usage counters qualify.
@@ -44,7 +45,7 @@ export class CodexAdapter implements Adapter {
       this.tailer.readNewLines(file, (raw, generation) => {
         const line = objectRecord(raw);
         const payload = objectRecord(line?.payload);
-        const at = eventTime(line?.timestamp, now, this.recentWindowMs);
+        const at = countTime(line?.timestamp, now);
         if (!line || !payload || at === null) return;
         if (line.type === "turn_context") {
           if (!meta || meta.generation !== generation) meta = emptyMeta(generation);
@@ -62,28 +63,40 @@ export class CodexAdapter implements Adapter {
         if (!total || !isCount(total.input_tokens, 1_000_000_000_000) || !isCount(total.output_tokens, 1_000_000_000_000)) return;
         if (!meta || meta.generation !== generation) meta = emptyMeta(generation);
         if (at < meta.counterAt) return;
+        // QA fix (R2): Codex's input_tokens INCLUDES cached_input_tokens. Fresh input is
+        // the difference; the cached part rides as cache reads. A malformed or oversized
+        // cached count is clamped to input, so it can never make fresh input negative.
         const input = total.input_tokens;
         const output = total.output_tokens;
-        const baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output;
-        const inputDelta = baseline ? 0 : input - meta.input!;
+        const cached = isCount(total.cached_input_tokens, 1_000_000_000_000) ? Math.min(total.cached_input_tokens, input) : 0;
+        const baseline = meta.input === null || meta.output === null || input < meta.input || output < meta.output ||
+          cached < meta.cached;
+        const cacheReadDelta = baseline ? 0 : cached - meta.cached;
+        const inputDelta = baseline ? 0 : Math.max(0, input - meta.input! - cacheReadDelta);
         const outputDelta = baseline ? 0 : output - meta.output!;
-        meta.input = input; meta.output = output; meta.counterAt = at;
-        if (baseline || meta.invalidProject || !(inputDelta || outputDelta)) return;
-        const hasContext = meta.contextProject !== null && now - meta.contextAt <= MAX_EVENT_AGE_MS;
+        meta.input = input; meta.output = output; meta.cached = cached; meta.counterAt = at;
+        if (baseline || meta.invalidProject || !(inputDelta || outputDelta || cacheReadDelta)) return;
+        // The turn context must be from the same stretch of work as the counter it labels;
+        // measured against the counter's own time, so a late-read counter keeps its context.
+        const hasContext = meta.contextProject !== null && at - meta.contextAt <= MAX_RECORD_AGE_MS;
         if (!hasContext) return;
         const model = meta.contextModel;
-        if (!usage.add(model, inputDelta, outputDelta)) return;
+        if (!usage.add(model, inputDelta, outputDelta, false, { cacheRead: cacheReadDelta })) return;
         meta.model = model;
         meta.projectHint = hasContext ? meta.contextProject : null;
         meta.lastActivityAt = Math.max(meta.lastActivityAt, at);
       }, signal);
       if (!meta || meta.generation !== this.tailer.generation(file)) { this.fileMeta.delete(file); continue; }
       this.fileMeta.set(file, meta);
-      if (meta.invalidProject || !meta.lastActivityAt || now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS)) continue;
+      if (meta.invalidProject || !meta.lastActivityAt) continue;
+      // Same rule as Claude Code: stale activity is not presence, its fresh usage counts.
+      const late = now - meta.lastActivityAt > Math.min(this.recentWindowMs, MAX_EVENT_AGE_MS);
+      const list = usage.toList();
+      if (late && !list.length) continue;
       out.push({ tool: this.name, cwd: null, projectHint: meta.projectHint, model: meta.model,
         lastActivityAt: meta.lastActivityAt, observedAt: meta.lastActivityAt,
         tokensInputDelta: usage.totalInput, tokensOutputDelta: usage.totalOutput,
-        usage: usage.toList(), confidence: "activity" });
+        usage: list, confidence: "activity", ...(late ? { late: true } : {}) });
     }
     return signal?.aborted ? [] : out;
   }

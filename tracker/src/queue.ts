@@ -6,6 +6,8 @@ export interface SendResult {
   connectionLastSeenAt?: string;
   /** Rejected authentication must suspend collection, not produce a retry backlog. */
   authRejected: boolean;
+  /** The server refused this body (400/413/422): re-sending the same one cannot succeed. */
+  refused?: boolean;
 }
 
 /**
