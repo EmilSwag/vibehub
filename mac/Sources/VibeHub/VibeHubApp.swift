@@ -36,6 +36,7 @@ struct VibeHubApp: App {
     @StateObject private var tracker: TrackerManager
     private let island: IslandController
     private let onboardingWindow: OnboardingWindowController
+    private let menuBarHint: MenuBarHint
 
     init() {
         let settings = AppSettings()
@@ -45,8 +46,19 @@ struct VibeHubApp: App {
         _settings = StateObject(wrappedValue: settings)
         _store = StateObject(wrappedValue: store)
         _tracker = StateObject(wrappedValue: tracker)
-        island = IslandController(settings: settings, store: store)
-        onboardingWindow = OnboardingWindowController(settings: settings, store: store, tracker: tracker)
+        let island = IslandController(settings: settings, store: store)
+        let menuBarHint = MenuBarHint()
+        self.island = island
+        self.menuBarHint = menuBarHint
+        // After "You're live": the island opens once on a notch Mac, then — one thing at
+        // a time — the one-time pointer shows where VibeHub lives from now on.
+        onboardingWindow = OnboardingWindowController(settings: settings, store: store, tracker: tracker, onLive: {
+            let pulsing = island.demoPulse()
+            let delay = pulsing ? IslandController.pulseSeconds + 0.6 : 0.3
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                MainActor.assumeIsolated { menuBarHint.showOnce(settings: settings) }
+            }
+        })
 
         // Menu-bar apps have no other launch hook: `MenuBarExtra`'s `.window` style
         // only builds its content view (and fires `.onAppear`) once the user first

@@ -326,6 +326,30 @@ final class TrackerManager: ObservableObject {
         isTrackAtLoginEnabled = launchAgent.isInstalled
     }
 
+    /// "Name it" for a Private project: maps a local folder name to the name friends
+    /// see (`vibehub-tracker set <folder> <alias>`), then restarts a running tracker so
+    /// the next heartbeat carries it. Nothing leaves the Mac except the chosen name.
+    func nameProject(folder: String, as alias: String) async -> Result<Void, TrackerManagerError> {
+        #if DEBUG
+        if isFixture { return .failure(.processFailed("QA fixture: disabled.")) }
+        #endif
+        let folder = folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alias = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !folder.isEmpty, !alias.isEmpty else { return .failure(.processFailed("Type a folder name.")) }
+        guard let node = embeddedNodeURL, let cjs = embeddedCjsURL else { return .failure(.bundleMissing) }
+        isBusy = true
+        defer { isBusy = false }
+        let result = await TrackerProcess.run(node: node, arguments: [cjs.path, "set", folder, alias], timeout: 15)
+        guard result.exitCode == 0 else {
+            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(.processFailed(message.isEmpty ? "Couldn\u{2019}t save that name." : message))
+        }
+        if launchAgent.isInstalled && !settings.userDisabledTracking {
+            await restartAgent()
+        }
+        return .success(())
+    }
+
     /// Writes the tracker's own `~/.vibehub/config.json` — a separate store from the
     /// Keychain (ARCHITECTURE.md §4.4), and the one the embedded daemon actually reads.
     ///

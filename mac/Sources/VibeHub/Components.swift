@@ -134,20 +134,22 @@ struct ActionRow: View {
 /// `.borderedProminent` has no press transform on macOS, only a tint shift. Reduced
 /// motion keeps the lightness change and drops the scale.
 struct PrimaryButtonStyle: ButtonStyle {
+    /// The first-run window's single action: taller, bigger label, wider plate.
+    var large = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: large ? 15 : 13, weight: large ? .semibold : .medium))
             .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-            .padding(.horizontal, 18)
-            .frame(minHeight: 32)
+            .padding(.horizontal, large ? 28 : 18)
+            .frame(minWidth: large ? 200 : nil, minHeight: large ? 42 : 32)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: large ? 11 : 8, style: .continuous)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.85 : 1))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: large ? 11 : 8, style: .continuous))
             .opacity(isEnabled ? 1 : 0.45)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .animation(reduceMotion ? nil : Animation.easeOut(duration: 0.12), value: configuration.isPressed)

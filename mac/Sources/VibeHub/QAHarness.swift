@@ -53,22 +53,23 @@ enum QAHarness {
     /// One fixed instant, so every "since" and live timer renders identically per run.
     nonisolated static let now = Date(timeIntervalSince1970: 1_790_000_000)
 
-    static func me(now: Date = now) -> TrackerMe {
+    /// `project: nil` renders the Private project + "Name it" state (R5).
+    static func me(now: Date = now, project: String? = "neon-app") -> TrackerMe {
         let since = now.addingTimeInterval(-(1 * 3600 + 42 * 60))
         return TrackerMe(
             user: .init(id: "u1", username: "mira", displayName: "Mira Chen", avatarUrl: nil, level: 7),
             presence: .init(
                 status: .active,
-                activity: .init(project: "neon-app", tool: "claude-code", model: "claude-opus-4-1", since: since),
+                activity: .init(project: project, tool: "claude-code", model: "claude-opus-5-5", since: since),
                 lastSeenAt: now
             ),
-            today: .init(activeSeconds: 2 * 3600 + 14 * 60, tokens: 1_284_000, sessionStartedAt: since, estimatedUsd: 3.2, byModel: nil),
+            today: .init(activeSeconds: 2 * 3600 + 14 * 60, tokens: 1_284_000, sessionStartedAt: since, estimatedUsd: 3.2, byModel: nil, cachedTokens: 54_000_000),
             tracker: .init(connected: true, lastSeenAt: now, devices: [.init(name: "Mira's MacBook Air", lastSeenAt: now)]),
             friendsOnline: .init(count: 5, sample: [
                 .init(username: "jonas", displayName: "Jonas Berg", avatarUrl: nil, status: .active,
                       activity: .init(project: "atlas", tool: "cursor", model: nil, since: now.addingTimeInterval(-1800)), lastSeenAt: now),
                 .init(username: "ada", displayName: "Ada Okafor", avatarUrl: nil, status: .active,
-                      activity: .init(project: "ledger", tool: "claude-code", model: "claude-sonnet-4-5", since: now.addingTimeInterval(-600)), lastSeenAt: now),
+                      activity: .init(project: "ledger", tool: "claude-code", model: "gpt-6-sol", since: now.addingTimeInterval(-600)), lastSeenAt: now),
                 .init(username: "sol", displayName: "Sol Park", avatarUrl: nil, status: .idle,
                       activity: .init(project: "notes", tool: "codex", model: nil, since: now.addingTimeInterval(-3000)), lastSeenAt: now),
             ])
@@ -174,13 +175,70 @@ enum QAHarness {
 
         for (index, step) in OnboardingStep.allCases.enumerated() {
             for dark in [false, true] {
-                // Welcome and Token are pre-sign-in; Start and Done happen after it.
-                let rig = rig(step.rawValue < OnboardingStep.startTracking.rawValue ? .needsToken : .loaded)
-                let wizard = OnboardingWizard(store: rig.store, settings: rig.settings, tracker: rig.tracker, initialStep: step, onFinished: {})
+                let rig = rig(step == .connect ? .needsToken : .loaded)
+                let wizard = OnboardingWizard(store: rig.store, settings: rig.settings, tracker: rig.tracker,
+                                              initialStep: step, autoStart: false, onFinished: { _ in })
                 save("onboarding-\(index + 1)-\(step)-\(dark ? "dark" : "light")",
                      wizard.background(Color(nsColor: .windowBackgroundColor)), dark: dark)
             }
         }
+
+        // Private project (null alias) → "Private project" + "Name it".
+        do {
+            let rig = rig(.loaded)
+            let store = StatusStore(settings: rig.settings, fixture: .loaded(me(project: nil)), now: now)
+            let popover = PopoverView(store: store, settings: rig.settings, tracker: rig.tracker)
+            save("popover-private-project-light", PopoverChrome(content: popover), dark: false)
+            let island = IslandController(settings: rig.settings, store: store)
+            let snap = island.debugSnapshot(expanded: true)
+            save("island-expanded-private-project", snap.view.frame(width: snap.size.width, height: snap.size.height), size: snap.size, dark: true)
+        }
+
+        for dark in [false, true] {
+            // On a mid-grey "desktop" so the bubble's edge and arrow are judged honestly.
+            save("menubar-hint-\(dark ? "dark" : "light")", MenuBarHintView(arrowX: 150).padding(16).background(Color(white: 0.45)), dark: dark)
+        }
+
+        // Model/format table, for eyeballing alongside the PNGs.
+        let samples = ["claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5",
+                       "claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022", "claude-opus-4-1[1m]",
+                       "gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra", "gpt-4o-2024-08-06", "o3", "gemini-2.5-pro",
+                       "unknown", "null", "", "<synthetic>"]
+        var table = samples.map { "\($0.isEmpty ? "(empty)" : $0) -> \(Format.modelLabel($0) ?? "nil")" }
+        table += ["project nil -> \(Format.projectLabel(nil))", "project unknown -> \(Format.projectLabel("unknown"))",
+                  "project neon-app -> \(Format.projectLabel("neon-app"))",
+                  "cached 540000000 -> \(Format.cachedLine(540_000_000) ?? "nil")", "cached nil -> \(Format.cachedLine(nil) ?? "nil")"]
+        // Island default: notch Mac + implicit `off` → on; an explicit choice sticks.
+        func islandCase(_ label: String, stored: String?, explicit: Bool, notch: Bool) {
+            wipeSuite()
+            let d = UserDefaults(suiteName: suiteName)!
+            if let stored { d.set(stored, forKey: "IslandMode") }
+            if explicit { d.set(true, forKey: "IslandModeExplicit") }
+            table.append("island \(label) -> \(AppSettings(defaults: d, hasNotch: notch).islandMode.rawValue)")
+        }
+        islandCase("notch, fresh", stored: nil, explicit: false, notch: true)
+        islandCase("notch, old implicit off", stored: "off", explicit: false, notch: true)
+        islandCase("notch, explicit off", stored: "off", explicit: true, notch: true)
+        islandCase("notchless, implicit off", stored: "off", explicit: false, notch: false)
+        do {
+            wipeSuite()
+            let settings = AppSettings(defaults: UserDefaults(suiteName: suiteName)!, hasNotch: true)
+            settings.chooseIslandMode(.off)
+            let reread = AppSettings(defaults: UserDefaults(suiteName: suiteName)!, hasNotch: true)
+            table.append("island chooseIslandMode(off) then relaunch -> \(reread.islandMode.rawValue) explicit=\(reread.islandModeIsExplicit)")
+            wipeSuite()
+        }
+        // Decode must not fail when cachedTokens/project are absent or null.
+        let json = #"{"user":{"id":"u","username":"a","displayName":null,"avatarUrl":null,"level":1},"presence":{"status":"active","activity":{"project":null,"tool":"claude-code","model":"claude-opus-5-5","since":"2026-09-26T00:00:00Z"},"lastSeenAt":null},"today":{"activeSeconds":60,"tokens":10,"sessionStartedAt":null},"tracker":{"connected":true,"lastSeenAt":null,"devices":[]},"friendsOnline":{"count":0,"sample":[]}}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            let me = try decoder.decode(TrackerMe.self, from: Data(json.utf8))
+            table.append("decode without cachedTokens/estimatedUsd, null project -> ok (cached=\(String(describing: me.today.cachedTokens)), line=\(Format.activityLine(me.presence.activity!)))")
+        } catch {
+            table.append("decode FAILED: \(error)")
+        }
+        try? table.joined(separator: "\n").appending("\n").write(to: dir.appendingPathComponent("format-check.txt"), atomically: true, encoding: .utf8)
         return count
     }
 

@@ -39,6 +39,8 @@ final class IslandController: NSObject, ObservableObject {
     private var isHovering = false
     private var hoverWorkItem: DispatchWorkItem?
     private var screenObserver: NSObjectProtocol?
+    /// A first-connect demo pulse requested before the panel had anything to show.
+    private var pendingPulse = false
 
     /// A panel that can take key focus, but only once someone clicks it. `NSPanel`'s
     /// default for `.nonactivatingPanel` is never to become key, which is right while
@@ -115,6 +117,41 @@ final class IslandController: NSObject, ObservableObject {
         applyFrame(animated: false)
         installMonitorsIfNeeded()
         installScreenObserverIfNeeded()
+        if pendingPulse {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.runPulse() }
+        }
+    }
+
+    // MARK: - First-connect demo
+
+    /// How long the demo keeps the island open.
+    static let pulseSeconds: TimeInterval = 2.8
+
+    /// Right after "You're live": open the island once so people see where it lives,
+    /// then fold it back. Notch Macs only — on a notchless screen it would be a card
+    /// dropping over the menu bar out of nowhere. Returns true when a pulse will play.
+    @discardableResult
+    func demoPulse() -> Bool {
+        guard settings.islandMode != .off, metrics(for: targetScreen()).notchWidth > 0 else { return false }
+        if panel?.isVisible == true {
+            runPulse()
+        } else {
+            // `.auto` shows the panel on the first loaded snapshot — pulse then. Give up
+            // quietly if that never comes; a late surprise pulse is worse than none.
+            pendingPulse = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.pendingPulse = false }
+        }
+        return true
+    }
+
+    private func runPulse() {
+        guard pendingPulse || panel?.isVisible == true else { return }
+        pendingPulse = false
+        expand()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pulseSeconds) { [weak self] in
+            guard let self, !self.isHovering else { return }
+            self.collapse()
+        }
     }
 
     private func hidePanel() {

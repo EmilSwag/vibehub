@@ -23,7 +23,9 @@ struct TrackerMe: Codable, Equatable {
     }
 
     struct Activity: Codable, Equatable {
-        let project: String
+        /// Null (or the tracker's "unknown" sentinel) when the folder has no alias —
+        /// privacy default. Rendered as "Private project", never as "unknown".
+        let project: String?
         let tool: String
         let model: String?
         let since: Date
@@ -58,6 +60,9 @@ struct TrackerMe: Codable, Equatable {
         /// them, with no version gate.
         let estimatedUsd: Double?
         let byModel: [String: Double]?
+        /// Cache reads (lane contract, `vibehub-qa-fix.md`): a secondary number beside
+        /// the fresh `tokens`, never added to it. Absent on older servers → nil.
+        var cachedTokens: Int? = nil
     }
 
     struct Device: Codable, Equatable {

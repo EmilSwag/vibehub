@@ -1,3 +1,11 @@
+# L3 QA-fix (2026-09-26) — first 30 seconds, island default, numbers
+
+- Onboarding is one screen (mark + Connect) → browser pairing → "You're live ✓" (drawn check) → closes itself; notch Macs get a one-time island demo pulse, then a one-time "VibeHub lives up here" pointer (`MenuBarHint.swift`).
+- Island defaults ON on notch Macs until the user picks a mode in Settings (`IslandModeExplicit`); old implicit `IslandMode=off` is migrated. Pill = live timer + fresh tokens + ≈$ (no ≈$ without a verified price).
+- Model ids humanized (`claude-opus-5-5` → Opus 5.5, `gpt-6-sol` → GPT-6 Sol, unknown → raw, never "null"); null/"unknown" project → "Private project" + "Name it" (runs the tracker's `set <folder> <alias>`).
+- `today.cachedTokens` decoded optionally and shown as a secondary "+540M cached"; `activity.project` is nullable. Token entry lives behind "Trouble?" in onboarding, popover and Settings; no jargon on the main path.
+- Verified: debug + `bundle.sh` green; QAHarness snapshots + `format-check.txt` in `.temp/qa/mac/qafix`. Not verified on a real first install (live pairing, pulse timing, status-item anchor of the pointer).
+
 # Lane A (Archy) — VibeHub for Mac: changed files, deviations, verification
 
 Session: 2026-09-19. Windows workstation, no Swift toolchain — everything below is

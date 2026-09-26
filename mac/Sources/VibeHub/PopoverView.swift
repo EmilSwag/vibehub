@@ -9,6 +9,10 @@ struct PopoverView: View {
     @ObservedObject var tracker: TrackerManager
 
     @State private var showingSettings = false
+    @State private var naming = false
+    @State private var folderName = ""
+    @State private var projectName = ""
+    @State private var nameNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -115,23 +119,23 @@ struct PopoverView: View {
     private var trackerStatusLabel: String {
         switch tracker.connectionState {
         case .authRejected:
-            return "Tracker signed out"
+            return "Signed out on this Mac"
         case .connected:
-            return "Tracker connected \u{00B7} \(lastUpdatedSuffix)"
+            return "Counting \u{00B7} \(lastUpdatedSuffix)"
         case .disconnected:
-            return "Tracker can\u{2019}t reach VibeHub"
+            return "Can\u{2019}t reach VibeHub"
         case .unknown:
-            return tracker.isRunning ? "Tracker running \u{00B7} no recent status" : "Tracker off"
+            return tracker.isRunning ? "Running" : "Not counting"
         }
     }
 
     private var trackerStatusNote: String? {
         switch tracker.connectionState {
         case .authRejected:
-            return "Token rejected. Reconnect this Mac in Settings."
+            return "Reconnect this Mac in Settings."
         case .connected:
             // The one sentence that stops a transport tick reading as AI usage.
-            return "VibeHub heard from this Mac recently. It doesn\u{2019}t mean an AI tool is in use."
+            return "This Mac checked in recently. Not the same as an AI tool in use."
         case .disconnected, .unknown:
             return nil
         }
@@ -190,31 +194,81 @@ struct PopoverView: View {
                     .font(.system(size: 13))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(Format.elapsedShort(since: activity.since, now: store.now))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                HStack(spacing: 8) {
+                    Text(Format.elapsedShort(since: activity.since, now: store.now))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    // R5: an unaliased folder reads "Private project" — offer the fix
+                    // right there instead of letting it look broken.
+                    if Format.isPrivateProject(activity.project), !naming {
+                        Button("Name it") { naming = true; nameNote = nil }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11))
+                    }
+                }
+                if naming { nameEditor }
+                if let nameNote {
+                    Text(nameNote).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
             } else {
                 // Empty state: one sentence. The action that resolves it (Start) is
                 // already in the tracker row below — no second button here.
-                Text(me.tracker.connected ? "Nothing open right now." : "Tracker offline.")
+                Text(me.tracker.connected ? "Nothing open right now." : "Not counting on this Mac.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
         }
     }
 
+    /// Folder name (stays on this Mac) → the name friends see.
+    private var nameEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Folder, e.g. my-app", text: $folderName)
+            TextField("Show as (optional)", text: $projectName)
+                .onSubmit { Task { await saveProjectName() } }
+            HStack(spacing: 10) {
+                Button(tracker.isBusy ? "Saving\u{2026}" : "Save") { Task { await saveProjectName() } }
+                    .disabled(tracker.isBusy || folderName.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Cancel") { naming = false }
+                    .buttonStyle(.link)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11))
+        }
+        .textFieldStyle(.roundedBorder)
+        .font(.system(size: 12))
+        .padding(.top, 2)
+    }
+
+    private func saveProjectName() async {
+        let folder = folderName.trimmingCharacters(in: .whitespaces)
+        let shown = projectName.trimmingCharacters(in: .whitespaces)
+        switch await tracker.nameProject(folder: folder, as: shown.isEmpty ? folder : shown) {
+        case .success:
+            naming = false
+            folderName = ""
+            projectName = ""
+            nameNote = "Saved. Shows up in a minute."
+            store.wake()
+        case .failure(let error):
+            nameNote = error.errorDescription
+        }
+    }
+
     private func todayBlock(_ me: TrackerMe) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             SectionLabel(text: "Today")
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 stat(Format.compactDuration(seconds: store.liveActiveSeconds ?? me.today.activeSeconds), "active")
                 Spacer(minLength: 8)
                 // `tokens` is nullable on the wire (checkpoint §M.1): null means the
                 // day's activity came only from tools that report no counts. B7: render
                 // "tokens not reported" — never 0, never an estimate. Same em-dash rule as
                 // ≈$ below, with the words in the label so the dash cannot read as a glitch.
-                stat(Format.optionalCount(me.today.tokens), Format.tokensLabel(me.today.tokens))
+                stat(Format.optionalCount(me.today.tokens), Format.tokensLabel(me.today.tokens),
+                     // Cache reads: real, but secondary — never folded into "tokens".
+                     secondary: Format.cachedLine(me.today.cachedTokens))
                 Spacer(minLength: 8)
                 // `estimatedUsd` now ships (`server/src/lib/token-pricing.ts`), so the
                 // slot is always ≈$ — and always present. `null` means "no verified
@@ -226,7 +280,7 @@ struct PopoverView: View {
         }
     }
 
-    private func stat(_ value: String, _ label: String) -> some View {
+    private func stat(_ value: String, _ label: String, secondary: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value)
                 .font(.system(size: 15, weight: .medium))
@@ -234,6 +288,12 @@ struct PopoverView: View {
             Text(label)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
+            if let secondary {
+                Text(secondary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

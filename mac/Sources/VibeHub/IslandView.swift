@@ -20,7 +20,7 @@ struct IslandMetrics: Equatable {
     var bandHeight: CGFloat
 
     /// Content room either side of the camera housing.
-    static let wing: CGFloat = 90
+    static let wing: CGFloat = 100
     /// Concave top-corner flare. Kept constant through the animation so the content
     /// inset never shifts while the window springs.
     static let shoulder: CGFloat = 6
@@ -207,14 +207,16 @@ struct IslandBand: View {
     private var trailing: some View {
         switch store.phase {
         case .loaded(let me):
-            HStack(spacing: 6) {
-                // Nullable (checkpoint §M.1): an em-dash, never 0; the accessibility
-                // label carries B7's words, which the pill has no room to print.
+            // Live timer on the left wing; fresh tokens + ≈$ here. No verified price →
+            // no ≈$ at all in the pill (never guess, never "$0.00").
+            HStack(spacing: 5) {
                 Text(Format.optionalCount(me.today.tokens))
                     .accessibilityLabel(me.today.tokens.map { "\(Format.compactCount($0)) tokens" } ?? Format.tokensLabel(nil))
-                // An em-dash when today's models have no verified price, never $0.00.
-                Text(Format.optionalUsd(me.today.estimatedUsd))
-                    .foregroundStyle(Color.white.opacity(0.55))
+                if let usd = me.today.estimatedUsd {
+                    Text("\u{2248}" + Format.compactUsd(usd))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                        .accessibilityLabel("about \(Format.compactUsd(usd))")
+                }
             }
             .font(.system(size: 12, weight: .medium))
             .monospacedDigit()
@@ -255,7 +257,7 @@ struct IslandBody: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             case .needsToken:
-                message(symbol: "person.crop.circle.badge.plus", title: "Not signed in", detail: "Open VibeHub from the menu bar to connect this Mac.")
+                message(symbol: "person.crop.circle.badge.plus", title: "Not connected", detail: "Click VibeHub in the menu bar.")
             case .failed:
                 message(symbol: "wifi.slash", title: "Can\u{2019}t reach VibeHub", detail: "Retrying on its own.")
             }
@@ -292,7 +294,7 @@ struct IslandBody: View {
                         .fixedSize()
                 }
             } else {
-                Text(me.tracker.connected ? "Nothing open right now." : "Tracker offline.")
+                Text(me.tracker.connected ? "Nothing open right now." : "Not counting on this Mac.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
@@ -302,9 +304,9 @@ struct IslandBody: View {
     /// The ≈$ slot is always present — an em-dash when there is no verified price,
     /// never $0.00 and never a missing column that changes the row's shape.
     private func today(_ me: TrackerMe) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             stat(Format.compactDuration(seconds: store.liveActiveSeconds ?? me.today.activeSeconds), "active today")
-            stat(Format.optionalCount(me.today.tokens), Format.tokensLabel(me.today.tokens))
+            stat(Format.optionalCount(me.today.tokens), Format.cachedLine(me.today.cachedTokens).map { "tokens \u{00B7} \($0)" } ?? Format.tokensLabel(me.today.tokens))
             stat(Format.optionalUsd(me.today.estimatedUsd), "\u{2248} spend")
         }
     }
@@ -398,22 +400,5 @@ private struct IslandButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(Color.white.opacity(0.9))
         .onHover { hovering = $0 }
-    }
-}
-
-/// A still of the collapsed island around a drawn notch, for onboarding's last step.
-/// The notch is narrower than a real one so the preview fits the window's measure.
-struct IslandPreview: View {
-    @ObservedObject var store: StatusStore
-
-    private let metrics = IslandMetrics(notchWidth: 96, bandHeight: 32)
-
-    var body: some View {
-        IslandBand(store: store, metrics: metrics)
-            .padding(.horizontal, IslandMetrics.shoulder)
-            .frame(width: metrics.collapsedSize.width, height: metrics.bandHeight)
-            .background(IslandShape(shoulder: IslandMetrics.shoulder, bottomRadius: IslandMetrics.collapsedBottomRadius).fill(Color.black))
-            .environment(\.colorScheme, .dark)
-            .accessibilityElement(children: .combine)
     }
 }
